@@ -1,0 +1,4 @@
+D:\WORKSPACES\PRACTICE\github\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Application\obj\Debug\net8.0\DiliBeneficiary.Application.GeneratedMSBuildEditorConfig.editorconfig
+D:\WORKSPACES\PRACTICE\github\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Application\obj\Debug\net8.0\DiliBeneficiary.Application.AssemblyInfoInputs.cache
+D:\WORKSPACES\PRACTICE\github\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Application\obj\Debug\net8.0\DiliBeneficiary.Application.AssemblyInfo.cs
+D:\WORKSPACES\PRACTICE\github\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Application\obj\Debug\net8.0\DiliBeneficiary.Application.csproj.CoreCompileInputs.cache

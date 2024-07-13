@@ -1,0 +1,54 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34330.188
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Services", "Services", "{7BEE7020-3F3E-4F94-91D5-16B6A1F8C3E1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "DiliBeneficiary", "DiliBeneficiary", "{FDA84486-DEAB-4C0F-BC6A-CE9B071613FB}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DiliBeneficiary.Application", "Services\DiliBeneficiary\DiliBeneficiary.Application\DiliBeneficiary.Application.csproj", "{47795B96-1220-4FFA-9755-AB7C20C1BC6A}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DiliBeneficiary.Core", "Services\DiliBeneficiary\DiliBeneficiary.Core\DiliBeneficiary.Core.csproj", "{D7F1E0DD-F3EF-4529-965B-E3FD6EACA222}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DiliBeneficiary.Infrastructure", "Services\DiliBeneficiary\DiliBeneficiary.Infrastructure\DiliBeneficiary.Infrastructure.csproj", "{96E10627-5D87-4301-A690-9D02318BEB9A}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DiliBeneficiary.API", "Services\DiliBeneficiary\DiliBeneficiary.API\DiliBeneficiary.API.csproj", "{B0C08D99-10D8-4BFE-9AC8-4ECB97A39497}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{47795B96-1220-4FFA-9755-AB7C20C1BC6A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{47795B96-1220-4FFA-9755-AB7C20C1BC6A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{47795B96-1220-4FFA-9755-AB7C20C1BC6A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{47795B96-1220-4FFA-9755-AB7C20C1BC6A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D7F1E0DD-F3EF-4529-965B-E3FD6EACA222}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D7F1E0DD-F3EF-4529-965B-E3FD6EACA222}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D7F1E0DD-F3EF-4529-965B-E3FD6EACA222}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D7F1E0DD-F3EF-4529-965B-E3FD6EACA222}.Release|Any CPU.Build.0 = Release|Any CPU
+		{96E10627-5D87-4301-A690-9D02318BEB9A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{96E10627-5D87-4301-A690-9D02318BEB9A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{96E10627-5D87-4301-A690-9D02318BEB9A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{96E10627-5D87-4301-A690-9D02318BEB9A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B0C08D99-10D8-4BFE-9AC8-4ECB97A39497}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B0C08D99-10D8-4BFE-9AC8-4ECB97A39497}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B0C08D99-10D8-4BFE-9AC8-4ECB97A39497}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B0C08D99-10D8-4BFE-9AC8-4ECB97A39497}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{FDA84486-DEAB-4C0F-BC6A-CE9B071613FB} = {7BEE7020-3F3E-4F94-91D5-16B6A1F8C3E1}
+		{47795B96-1220-4FFA-9755-AB7C20C1BC6A} = {FDA84486-DEAB-4C0F-BC6A-CE9B071613FB}
+		{D7F1E0DD-F3EF-4529-965B-E3FD6EACA222} = {FDA84486-DEAB-4C0F-BC6A-CE9B071613FB}
+		{96E10627-5D87-4301-A690-9D02318BEB9A} = {FDA84486-DEAB-4C0F-BC6A-CE9B071613FB}
+		{B0C08D99-10D8-4BFE-9AC8-4ECB97A39497} = {FDA84486-DEAB-4C0F-BC6A-CE9B071613FB}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A09D4BD9-B9A6-45F5-BE40-F2EE8E7C6B39}
+	EndGlobalSection
+EndGlobal
