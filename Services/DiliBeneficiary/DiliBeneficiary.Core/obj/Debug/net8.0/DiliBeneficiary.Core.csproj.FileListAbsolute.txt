@@ -2,3 +2,15 @@ D:\WORKSPACES\PRACTICE\github\diliPathFinder-web-api\Services\DiliBeneficiary\Di
 D:\WORKSPACES\PRACTICE\github\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.AssemblyInfoInputs.cache
 D:\WORKSPACES\PRACTICE\github\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.AssemblyInfo.cs
 D:\WORKSPACES\PRACTICE\github\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.csproj.CoreCompileInputs.cache
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\bin\Debug\net8.0\DiliBeneficiary.Core.deps.json
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\bin\Debug\net8.0\DiliBeneficiary.Core.dll
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\bin\Debug\net8.0\DiliBeneficiary.Core.pdb
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.GeneratedMSBuildEditorConfig.editorconfig
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.AssemblyInfoInputs.cache
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.AssemblyInfo.cs
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.csproj.CoreCompileInputs.cache
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.sourcelink.json
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.dll
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\refint\DiliBeneficiary.Core.dll
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\DiliBeneficiary.Core.pdb
+D:\Workspace\Repos\WebApis\diliPathFinder-web-api\Services\DiliBeneficiary\DiliBeneficiary.Core\obj\Debug\net8.0\ref\DiliBeneficiary.Core.dll

@@ -1,13 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Cpas.Isp.Domain.QuarterlyMonitoring.Entities;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Cpas.Isp.Infrastructure.Persistence.Configurations
+namespace DiliBeneficiary.Infrastructure.Persistence.Configurations
 {
     public class MonitoringActionConfiguration : IEntityTypeConfiguration<MonitoringAction>
     {

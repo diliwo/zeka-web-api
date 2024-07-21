@@ -1,4 +1,4 @@
-﻿namespace Cpas.Isp.Infrastructure.Persistence.Configurations
+﻿namespace DiliBeneficiary.Infrastructure.Persistence.Configurations
 {
     internal static class ConfigurationKeys
     {

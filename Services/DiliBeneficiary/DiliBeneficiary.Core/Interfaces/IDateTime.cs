@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace Cpas.Isp.Domain.Interfaces
+﻿namespace DiliBeneficiary.Core.Interfaces
 {
     public interface IDateTime
     {

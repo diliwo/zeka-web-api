@@ -1,15 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "uyPvOcaB436K4crMFYFowXCq95blh6JpY6+luZtkFAd8apg8W6Re0p2lWfwpw6+LIHOh4luMN+L0p+NuqkrA2Q==",
+  "dgSpecHash": "o1H6kZFNJKA=",
   "success": true,
-  "projectFilePath": "D:\\WORKSPACES\\PRACTICE\\github\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj",
+  "projectFilePath": "D:\\Workspace\\Repos\\WebApis\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj",
   "expectedPackageFiles": [],
-  "logs": [
-    {
-      "code": "NU1803",
-      "level": "Warning",
-      "warningLevel": 1,
-      "message": "You are running the 'restore' operation with an 'HTTP' source, 'http://srv-tfs:8624/nuget/CPAS_Nuget_Feed/'. Non-HTTPS access will be removed in a future version. Consider migrating to an 'HTTPS' source."
-    }
-  ]
+  "logs": []
 }

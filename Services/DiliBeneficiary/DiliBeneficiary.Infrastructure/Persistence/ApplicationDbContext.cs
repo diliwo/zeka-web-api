@@ -1,15 +1,10 @@
-﻿using System;
-using Microsoft.EntityFrameworkCore;
-using System.Linq;
-using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
-using Cpas.Isp.Domain.Interfaces;
+﻿using System.Reflection;
 using DiliBeneficiary.Core.Common;
 using DiliBeneficiary.Core.Entities;
 using DiliBeneficiary.Core.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
-namespace Cpas.Isp.Infrastructure.Persistence
+namespace DiliBeneficiary.Infrastructure.Persistence
 {
     public class ApplicationDbContext :  DbContext
     {

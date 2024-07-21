@@ -1,35 +1,29 @@
 {
   "format": 1,
   "restore": {
-    "D:\\WORKSPACES\\PRACTICE\\github\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj": {}
+    "D:\\Workspace\\Repos\\WebApis\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj": {}
   },
   "projects": {
-    "D:\\WORKSPACES\\PRACTICE\\github\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj": {
+    "D:\\Workspace\\Repos\\WebApis\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\WORKSPACES\\PRACTICE\\github\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj",
+        "projectUniqueName": "D:\\Workspace\\Repos\\WebApis\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj",
         "projectName": "DiliBeneficiary.Core",
-        "projectPath": "D:\\WORKSPACES\\PRACTICE\\github\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj",
-        "packagesPath": "C:\\Users\\hmbilo\\.nuget\\packages\\",
-        "outputPath": "D:\\WORKSPACES\\PRACTICE\\github\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\obj\\",
+        "projectPath": "D:\\Workspace\\Repos\\WebApis\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\DiliBeneficiary.Core.csproj",
+        "packagesPath": "C:\\Users\\herve\\.nuget\\packages\\",
+        "outputPath": "D:\\Workspace\\Repos\\WebApis\\diliPathFinder-web-api\\Services\\DiliBeneficiary\\DiliBeneficiary.Core\\obj\\",
         "projectStyle": "PackageReference",
-        "fallbackFolders": [
-          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages",
-          "C:\\Program Files\\dotnet\\sdk\\NuGetFallbackFolder"
-        ],
         "configFilePaths": [
-          "C:\\Users\\hmbilo\\AppData\\Roaming\\NuGet\\NuGet.Config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Users\\herve\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
         ],
         "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
           "C:\\Program Files\\dotnet\\library-packs": {},
-          "http://srv-tfs:8624/nuget/CPAS_Nuget_Feed/": {},
-          "https://api.nuget.org/v3/index.json": {},
-          "https://pkgs.dev.azure.com/cpas-1030/_packaging/main/nuget/v3/index.json": {}
+          "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
           "net8.0": {
@@ -41,6 +35,11 @@
           "warnAsError": [
             "NU1605"
           ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
         }
       },
       "frameworks": {
@@ -62,7 +61,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.100/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.300/PortableRuntimeIdentifierGraph.json"
         }
       }
     }

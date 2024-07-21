@@ -1,4 +1,5 @@
 ﻿using DiliBeneficiary.Core.Common;
+using DiliBeneficiary.Core.Exceptions;
 
 namespace DiliBeneficiary.Core.Entities
 {

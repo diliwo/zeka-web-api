@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DiliBeneficiary.Core")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e4701a02f59938bf73da3e69a97dfe0800a025f0")]
 [assembly: System.Reflection.AssemblyProductAttribute("DiliBeneficiary.Core")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DiliBeneficiary.Core")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

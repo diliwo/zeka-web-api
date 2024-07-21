@@ -1,9 +1,8 @@
-﻿using Cpas.Isp.Domain.SchoolRegistrations.Entities;
-using DiliBeneficiary.Core.Entities;
+﻿using DiliBeneficiary.Core.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Cpas.Isp.Infrastructure.Persistence.Configurations
+namespace DiliBeneficiary.Infrastructure.Persistence.Configurations
 {
     public class NatureOfContractConfiguration : IEntityTypeConfiguration<NatureOfContract>
     {
