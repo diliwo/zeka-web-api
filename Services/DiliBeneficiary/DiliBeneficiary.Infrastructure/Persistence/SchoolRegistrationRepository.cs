@@ -1,6 +1,7 @@
 ﻿using DiliBeneficiary.Core.Entities;
 using DiliBeneficiary.Core.Interfaces;
 using LinqKit;
+using Microsoft.EntityFrameworkCore;
 
 namespace DiliBeneficiary.Infrastructure.Persistence
 {

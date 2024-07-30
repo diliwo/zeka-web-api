@@ -1,5 +1,6 @@
 ﻿using DiliBeneficiary.Application.Bilans.Common;
 using DiliBeneficiary.Application.Common.Exceptions;
+using DiliBeneficiary.Core.Entities;
 using DiliBeneficiary.Core.Enums;
 using DiliBeneficiary.Core.Interfaces;
 using MediatR;

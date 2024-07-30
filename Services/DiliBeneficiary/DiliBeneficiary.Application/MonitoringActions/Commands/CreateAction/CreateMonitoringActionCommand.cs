@@ -21,7 +21,7 @@ namespace DiliBeneficiary.Application.MonitoringActions.Commands.CreateAction
             _monitoringActionRepository = monitoringActionRepository;
         }
 
-        public Task<Unit> Handle(CreateMonitoringActionCommand request, CancellationToken cancellationToken)
+        public Task Handle(CreateMonitoringActionCommand request, CancellationToken cancellationToken)
         {
             _monitoringActionRepository.Persist(new MonitoringAction(request.ActionLabel));
             return Unit.Task;

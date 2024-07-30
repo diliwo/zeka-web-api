@@ -50,8 +50,8 @@ namespace DiliBeneficiary.Application.Beneficiaries.Queries.GetBeneficiaryDetail
         public void Mapping(Profile profile)
         {
             profile.CreateMap<Beneficiary, BeneficiaryVm>()
-                .ForMember(b => b.CivilStatus, opt => opt.MapFrom(s => (int) s.CivilStatus))
-                .ForMember(b => b.Gender, opt => opt.MapFrom(e => (int) e.Gender))
+                .ForMember(b => b.CivilStatus, opt => opt.MapFrom(s => (int)s.CivilStatus))
+                .ForMember(b => b.Gender, opt => opt.MapFrom(e => (int)e.Gender))
                 .ForMember(b => b.BeneficiaryId, opt => opt.MapFrom(e => e.Id))
                 .ForMember(b => b.Address,
                     opt =>
@@ -66,12 +66,14 @@ namespace DiliBeneficiary.Application.Beneficiaries.Queries.GetBeneficiaryDetail
                 .ForMember(b => b.SupportReferentName,
                     opt => opt.MapFrom(e =>
                         e.Supports.Where(b => b.Softdelete != true).Count() > 0
-                            ? e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().Referent.FullName
+                            ? e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().Referent
+                                .FullName
                             : string.Empty))
                 .ForMember(b => b.SupportReferentService,
                     opt => opt.MapFrom(e =>
                         e.Supports.Where(b => b.Softdelete != true).Count() > 0
-                            ? ("(" + e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().Referent.Service.Acronym + ")")
+                            ? ("(" + e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().Referent
+                                .Service.Acronym + ")")
                             : string.Empty))
                 .ForMember(b => b.SupportStartDate,
                     opt => opt.MapFrom(
@@ -86,33 +88,50 @@ namespace DiliBeneficiary.Application.Beneficiaries.Queries.GetBeneficiaryDetail
                 .ForMember(b => b.MobilePhone,
                     opt => opt.MapFrom(e => e.MobilePhone.PhoneNumber))
                 .ForMember(b => b.Email, opt => opt.MapFrom(e => e.Email.EmailAddress))
-            .ForMember(b => b.LastFormationName,
-                opt =>
-                    opt.MapFrom(e => e.SchoolRegistrations.Where(s => s.Softdelete != true).Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last().Formation.Name))
-            .ForMember(b => b.LastFormationNote,
-                opt =>
-                    opt.MapFrom(e => e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last().Note))
-            .ForMember(b => b.LastFormationResult,
-                opt =>
-                    opt.MapFrom(e => (int)e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last().Result))
-            .ForMember(b => b.LastFormationStartDate,
-                opt =>
-                    opt.MapFrom(e => e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last().StartDate))
-            .ForMember(b => b.LastFormationEndDate,
-                opt =>
-                    opt.MapFrom(e => e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last().EnDate))
+                .ForMember(b => b.LastFormationName,
+                    opt =>
+                        opt.MapFrom(e =>
+                            e.SchoolRegistrations.Where(s => s.Softdelete != true).Where(s => s.Softdelete != true)
+                                .OrderBy(e => e.Created).Last().Formation.Name))
+                .ForMember(b => b.LastFormationNote,
+                    opt =>
+                        opt.MapFrom(e =>
+                            e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last().Note))
+                .ForMember(b => b.LastFormationResult,
+                    opt =>
+                        opt.MapFrom(e =>
+                            (int)e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last()
+                                .Result))
+                .ForMember(b => b.LastFormationStartDate,
+                    opt =>
+                        opt.MapFrom(e =>
+                            e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last()
+                                .StartDate))
+                .ForMember(b => b.LastFormationEndDate,
+                    opt =>
+                        opt.MapFrom(e =>
+                            e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last()
+                                .EnDate))
                 .ForMember(b => b.LastJobExperienceCompanyName,
-                    opt => opt.MapFrom(e => e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e =>e.StartDate).Last().CompanyName))
+                    opt => opt.MapFrom(e =>
+                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
+                            .CompanyName))
                 .ForMember(b => b.LastJobExperienceContractTypeName,
-                    opt => opt.MapFrom(e => e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last().TypeOfContract))
+                    opt => opt.MapFrom(e =>
+                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
+                            .TypeOfContract))
                 .ForMember(b => b.LastJobExperienceFunction,
-                    opt => opt.MapFrom(e => e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last().Function))
+                    opt => opt.MapFrom(e =>
+                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
+                            .Function))
                 .ForMember(b => b.LastJobExperienceStartDate,
-                    opt => opt.MapFrom(e => e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last().StartDate))
+                    opt => opt.MapFrom(e =>
+                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
+                            .StartDate))
                 .ForMember(b => b.LastJobExperienceEndDate,
-                    opt => opt.MapFrom(e => e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last().EndDate))
-                .ForMember(b => b.ContratPiis,
-                    opt => opt.MapFrom(c => c.Piis));
+                    opt => opt.MapFrom(e =>
+                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
+                            .EndDate));
         }
     }
 }

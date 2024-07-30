@@ -1,7 +1,6 @@
 ﻿using System.Reflection;
 using DiliBeneficiary.Application.Beneficiaries.Commands.SociabiliDBChangeBeneficiaryMessage.Config;
 using DiliBeneficiary.Application.Common.Behaviours;
-using DiliBeneficiary.Application.Common.Helpers;
 using DiliBeneficiary.Application.Common.Interfaces;
 using DiliBeneficiary.Application.Common.Services;
 using DiliBeneficiary.Application.Configuration;
@@ -13,7 +12,6 @@ using DinkToPdf;
 using DinkToPdf.Contracts;
 using FluentValidation;
 using MediatR;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DiliBeneficiary.Application
@@ -24,28 +22,31 @@ namespace DiliBeneficiary.Application
         {
             services.AddAutoMapper(Assembly.GetExecutingAssembly());
             services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
-            services.AddMediatR(Assembly.GetExecutingAssembly());
-            services.AddTransient(typeof(IPipelineBehavior<,>), typeof(UnhandledExceptionBehaviour<,>));
-            services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehaviour<,>));
-            services.AddTransient(typeof(IPipelineBehavior<,>), typeof(PerformanceBehaviour<,>));
+            services.AddMediatR(cfg => {
+                cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
+                cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(UnhandledExceptionBehaviour<,>));
+                //cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(AuthorizationBehaviour<,>));
+                cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehaviour<,>));
+                cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(PerformanceBehaviour<,>));
+            });
             services.AddScoped<IDomainEventService, DomainEventService>();
             services.AddTransient<IDocumentGeneratorService, DocumentGeneratorService>();
-            services.AddScoped<ISortHelper<MyConsultantSupportDto>, SortHelper<MyConsultantSupportDto>>();
-            services.AddScoped<ISortHelper<SchoolRegistrationDto>, SortHelper<SchoolRegistrationDto>>();
+            //services.AddScoped<ISortHelper<MyConsultantSupportDto>, SortHelper<MyConsultantSupportDto>>();
+            //services.AddScoped<ISortHelper<SchoolRegistrationDto>, SortHelper<SchoolRegistrationDto>>();
 
             return services;
         }
 
-        public static IServiceCollection RegisterFluidProvider(this IServiceCollection services, IConfigurationSection configurationSection)
-        {
-            services.Configure<FluidServiceConfiguration>(configurationSection.Bind);
-            services.AddSingleton<IConverter>(sp => new SynchronizedConverter(new PdfTools()));
-            return services;
-        }
+        //public static IServiceCollection RegisterFluidProvider(this IServiceCollection services, IConfigurationSection configurationSection)
+        //{
+        //    services.Configure<FluidServiceConfiguration>(configurationSection.Bind);
+        //    services.AddSingleton<IConverter>(sp => new SynchronizedConverter(new PdfTools()));
+        //    return services;
+        //}
 
-        public static IServiceCollection AddRabbitMqService(this IServiceCollection services, IConfiguration configuration)
-        {
-            return services;
-        }
+        //public static IServiceCollection AddRabbitMqService(this IServiceCollection services, IConfiguration configuration)
+        //{
+        //    return services;
+        //}
     }
 }

@@ -23,7 +23,7 @@ namespace DiliBeneficiary.Application.QuarterlyMonitorings.Commands.DeleteQuarte
         {
             _repository = repository;
         }
-        public async Task<Unit> Handle(DeleteQuarterlyMonitoringCommand request, CancellationToken cancellationToken)
+        public async Task Handle(DeleteQuarterlyMonitoringCommand request, CancellationToken cancellationToken)
         {
             var quarterlyMonitoring = await _repository.QuarterlyMonitoring.GetQuarterlyMonitoringById(request.QMonitoringId)
                 .SingleOrDefaultAsync(cancellationToken);
@@ -32,7 +32,6 @@ namespace DiliBeneficiary.Application.QuarterlyMonitorings.Commands.DeleteQuarte
                 throw new NotFoundException(nameof(QuarterlyMonitoring), request.QMonitoringId);
             }
             _repository.QuarterlyMonitoring.SoftDelete(request.QMonitoringId);
-            return Unit.Value;
         }
     }
 }

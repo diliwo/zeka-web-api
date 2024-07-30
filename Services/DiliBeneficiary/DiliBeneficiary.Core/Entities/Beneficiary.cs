@@ -28,9 +28,6 @@ namespace DiliBeneficiary.Core.Entities
         public ValueObjects.Language ContactLanguage { get; set; }
         public Address Address { get; set; }
         public string SocialWorkerName { get; set; }
-        public DateTime? LastApppointmentDate { get; set; }
-        public DateTime? LastEvaluationDate { get; set; }
-        public ContratPiis? Piis { get; set; }
         public string IbisNumber { get; set; }
         public virtual IList<Support> Supports { get; set; } = new List<Support>();
         public virtual IList<Candidacy> Candidacies { get; set; } = new List<Candidacy>();
@@ -127,23 +124,6 @@ namespace DiliBeneficiary.Core.Entities
             NativeLanguage.SpokenLanguage = nativeLanguage;
         }
 
-        public void AddPiis(ContratPiis piis)
-        {
-            if (Piis is null)
-            {
-                Piis = piis;
-            }
-            else if(Piis is not null && piis is not null)
-            {
-                Piis.StartDate = piis.StartDate;
-                Piis.EndDate = piis.EndDate;
-                Piis.CommentaireStatut = piis.CommentaireStatut;
-                Piis.Libelle = piis.Libelle;
-                Piis.AsTraitant = piis.AsTraitant;
-                Piis.DateOfSigning = piis.DateOfSigning;
-                Piis.IdSource = piis.IdSource;
-            }
-        }
 
         public bool IsCurrentlyHired
         {

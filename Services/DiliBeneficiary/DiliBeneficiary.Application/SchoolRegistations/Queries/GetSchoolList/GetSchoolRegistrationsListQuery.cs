@@ -1,4 +1,5 @@
 ﻿using AutoMapper;
+using AutoMapper.QueryableExtensions;
 using DiliBeneficiary.Application.Common.Exceptions;
 using DiliBeneficiary.Application.Common.Mappings;
 using DiliBeneficiary.Application.Common.Models;

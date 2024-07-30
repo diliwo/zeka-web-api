@@ -1,4 +1,8 @@
 ﻿using AutoMapper;
+using AutoMapper.QueryableExtensions;
+using DiliBeneficiary.Application.Common.Mappings;
+using DiliBeneficiary.Application.Common.Models;
+using DiliBeneficiary.Core.Interfaces;
 using MediatR;
 
 namespace DiliBeneficiary.Application.Supports.Queries
@@ -25,10 +29,10 @@ namespace DiliBeneficiary.Application.Supports.Queries
 
             public async Task<PaginatedList<SupportDto>> Handle(GetSupportsListByBeneficiaryQuery request, CancellationToken cancellationToken)
             {
-                if (request.BeneficiaryId == null)
-                {
-                    throw new BadHttpRequestException("Beneficiary",request.BeneficiaryId);
-                }
+                //if (request.BeneficiaryId == null)
+                //{
+                //    throw new BadHttpRequestException("Beneficiary",request.BeneficiaryId);
+                //}
 
                 var supports = await _repository.Support.GetSupportsByBeneficiaryId(request.BeneficiaryId)
                     .ProjectTo<SupportDto>(_mapper.ConfigurationProvider)

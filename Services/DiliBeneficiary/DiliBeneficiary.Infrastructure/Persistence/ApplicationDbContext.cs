@@ -35,9 +35,9 @@ namespace DiliBeneficiary.Infrastructure.Persistence
         //public DbSet<JobOffer> JobOffers { get; set; }
         //public DbSet<Candidacy> Candidacies { get; set; }
         //public DbSet<DocumentPartner> DocumentPartners { get; set; }
-        //public DbSet<SchoolRegistration> SchoolRegistrations { get; set; }
+        public DbSet<SchoolRegistration> SchoolRegistrations { get; set; }
         //public DbSet<School> Schools { get; set; }
-        //public DbSet<Formation> Formations { get; set; }
+        public DbSet<Formation> Formations { get; set; }
         //public DbSet<ProfessionnalExperience> ProfessionnalExperiences { get; set; }
         public DbSet<Bilan> Bilans { get; set; }
         public DbSet<QuarterlyMonitoring> QuarterlyMonitorings { get; set; }

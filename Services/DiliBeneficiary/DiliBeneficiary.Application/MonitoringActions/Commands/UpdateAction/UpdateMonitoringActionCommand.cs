@@ -25,7 +25,7 @@ namespace DiliBeneficiary.Application.MonitoringActions.Commands.UpdateAction
             _monitoringActionRepository = monitoringActionRepository;
         }
 
-        public async Task<Unit> Handle(UpdateMonitoringActionCommand request, CancellationToken cancellationToken)
+        public async Task Handle(UpdateMonitoringActionCommand request, CancellationToken cancellationToken)
         {
             var action = await _monitoringActionRepository.GetMonitoringActionById(request.ActionId).SingleOrDefaultAsync(cancellationToken);
             if (action == null)
@@ -34,7 +34,6 @@ namespace DiliBeneficiary.Application.MonitoringActions.Commands.UpdateAction
             }
             action.Action = request.ActionLabel;
             _monitoringActionRepository.Persist(action);
-            return Unit.Value;
         }
     }
 }

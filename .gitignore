@@ -257,3 +257,4 @@ paket-files/
 Services/DiliBeneficiary/DiliBeneficiary.API/obj
 Services/DiliBeneficiary/DiliBeneficiary.Infrastructure/obj
 Services/DiliBeneficiary/DiliBeneficiary.Application/obj
+Services/DiliBeneficiary/DiliBeneficiary.Core/obj

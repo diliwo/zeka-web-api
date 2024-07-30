@@ -1,11 +1,12 @@
 ﻿using System.Diagnostics;
+using DiliBeneficiary.Core.Common;
 using DiliBeneficiary.Core.Interfaces;
 using MediatR;
 using Microsoft.Extensions.Logging;
 
 namespace DiliBeneficiary.Application.Common.Behaviours
 {
-    public class PerformanceBehaviour<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+    public class PerformanceBehaviour<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> where TRequest : notnull
     {
         private readonly Stopwatch _timer;
         private readonly ILogger<TRequest> _logger;
@@ -25,7 +26,7 @@ namespace DiliBeneficiary.Application.Common.Behaviours
             //_identityService = identityService;
         }
 
-        public async Task<TResponse> Handle(TRequest request, CancellationToken cancellationToken, RequestHandlerDelegate<TResponse> next)
+        public async Task<TResponse> Handle(TRequest request, RequestHandlerDelegate<TResponse> next, CancellationToken cancellationToken)
         {
             _timer.Start();
 
@@ -38,15 +39,15 @@ namespace DiliBeneficiary.Application.Common.Behaviours
             if (elapsedMilliseconds > 500)
             {
                 var requestName = typeof(TRequest).Name;
-                var userId = _currentUserService.UserId ?? string.Empty;
+                var userId = /*_user.Id ??*/ string.Empty;
                 var userName = string.Empty;
 
-                if (!string.IsNullOrEmpty(userId))
-                {
-                    userName =  _currentUserService.Username;
-                }
+                //if (!string.IsNullOrEmpty(userId))
+                //{
+                //    userName = await _identityService.GetUserNameAsync(userId);
+                //}
 
-                _logger.LogWarning("Isp Long Running Request: {FirstName} ({ElapsedMilliseconds} milliseconds) {@UserId} {@UserName} {@Request}",
+                _logger.LogWarning("CleanArchitecture Long Running Request: {Name} ({ElapsedMilliseconds} milliseconds) {@UserId} {@UserName} {@Request}",
                     requestName, elapsedMilliseconds, userId, userName, request);
             }
 

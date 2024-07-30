@@ -21,7 +21,7 @@ namespace DiliBeneficiary.Application.Supports.Commands.DeleteSupport
                 _mediator = mediator;
             }
 
-            public async Task<Unit> Handle(DeleteSupportCommand request, CancellationToken cancellationToken)
+            public async Task Handle(DeleteSupportCommand request, CancellationToken cancellationToken)
             {
                 var foundedSupport = _repository.Support.Get(request.Id);
 
@@ -45,8 +45,6 @@ namespace DiliBeneficiary.Application.Supports.Commands.DeleteSupport
                 {
                     throw new NotFoundException(nameof(Support), request.Id);
                 }
-
-                return Unit.Value;
             }
         }
     }

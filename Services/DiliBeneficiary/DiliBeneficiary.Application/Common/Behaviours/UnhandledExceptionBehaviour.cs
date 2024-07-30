@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DiliBeneficiary.Application.Common.Behaviours
 {
-    public class UnhandledExceptionBehaviour<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+    public class UnhandledExceptionBehaviour<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> where TRequest : notnull
     {
         private readonly ILogger<TRequest> _logger;
 
@@ -12,16 +12,17 @@ namespace DiliBeneficiary.Application.Common.Behaviours
             _logger = logger;
         }
 
-        public async Task<TResponse> Handle(TRequest request, CancellationToken cancellationToken, RequestHandlerDelegate<TResponse> next)
+        public async Task<TResponse> Handle(TRequest request, RequestHandlerDelegate<TResponse> next, CancellationToken cancellationToken)
         {
             try
             {
                 return await next();
             }
             catch (Exception ex)
-            {var requestName = typeof(TRequest).Name;
+            {
+                var requestName = typeof(TRequest).Name;
 
-                _logger.LogError(ex, "Isp Request: Unhandled Exception for Request {FirstName} {@Request}", requestName, request);
+                _logger.LogError(ex.Message, "CleanArchitecture Request: Unhandled Exception for Request {Name} {@Request}", requestName, request);
 
                 throw;
             }

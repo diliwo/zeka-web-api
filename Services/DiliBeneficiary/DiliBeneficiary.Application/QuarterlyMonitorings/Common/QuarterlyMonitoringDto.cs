@@ -1,4 +1,6 @@
 ﻿using AutoMapper;
+using DiliBeneficiary.Application.Common.Mappings;
+using DiliBeneficiary.Core.Entities;
 
 namespace DiliBeneficiary.Application.QuarterlyMonitorings.Common
 {

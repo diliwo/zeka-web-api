@@ -57,14 +57,12 @@ namespace DiliBeneficiary.Infrastructure.Persistence
         public Beneficiary GetBeneficiaryByNiss(string niss, bool trackChanges = false)
         {
             return FindByCondition(beneficiary => beneficiary.Niss.Equals(niss), trackChanges)
-                .Include(p => p.Piis)
                 .SingleOrDefault();
         }
 
         public Task<Beneficiary> GetBeneficiaryByNissAsync(string niss, bool trackChanges = false)
         {
             return FindByCondition(beneficiary => beneficiary.Niss.Equals(niss), trackChanges)
-                .Include(p => p.Piis)
                 .SingleOrDefaultAsync();
         }
 

@@ -4,7 +4,6 @@ using DiliBeneficiary.Core.Entities;
 using DiliBeneficiary.Core.Enums;
 using DiliBeneficiary.Core.Interfaces;
 using MediatR;
-using Microsoft.AspNetCore.Http;
 
 namespace DiliBeneficiary.Application.Bilans.Commands.CreateBilan
 {
@@ -49,15 +48,15 @@ namespace DiliBeneficiary.Application.Bilans.Commands.CreateBilan
         public class CreateBilanCommandHandler : IRequestHandler<CreateBilanCommand, int>
         {
             private readonly IRepositoryManager _repository;
-            private readonly IHttpContextAccessor _httpContextAccessor;
+            //private readonly IHttpContextAccessor _httpContextAccessor;
 
             public CreateBilanCommandHandler(
-                IRepositoryManager repository,
-                IHttpContextAccessor httpContextAccessor
+                IRepositoryManager repository
+               // IHttpContextAccessor httpContextAccessor
             )
             {
                 _repository = repository;
-                _httpContextAccessor = httpContextAccessor;
+               // _httpContextAccessor = httpContextAccessor;
             }
 
             public async Task<int> Handle(CreateBilanCommand request, CancellationToken cancellationToken)
@@ -72,7 +71,7 @@ namespace DiliBeneficiary.Application.Bilans.Commands.CreateBilan
                 Bilan bilan = new Bilan(
                     request.IsFinalized,
                     beneficiary,
-                    _httpContextAccessor.HttpContext.User.Identity.Name,
+                   "System",
                     request.PersonalSituationFamily?.Trim(),
                     request.PersonalSituationHousing?.Trim(),
                     request.PersonalSituationHealth?.Trim(),

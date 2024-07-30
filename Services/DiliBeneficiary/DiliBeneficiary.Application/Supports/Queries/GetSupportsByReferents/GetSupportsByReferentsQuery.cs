@@ -1,4 +1,9 @@
 ﻿using AutoMapper;
+using DiliBeneficiary.Application.Common.Exceptions;
+using DiliBeneficiary.Application.Common.Mappings;
+using DiliBeneficiary.Application.Common.Models;
+using DiliBeneficiary.Core.Common.Dto;
+using DiliBeneficiary.Core.Interfaces;
 using MediatR;
 
 namespace DiliBeneficiary.Application.Supports.Queries.GetSupportsByReferents
@@ -16,31 +21,31 @@ namespace DiliBeneficiary.Application.Supports.Queries.GetSupportsByReferents
         {
             private readonly IRepositoryManager _repository;
             private ISortHelper<MyConsultantSupportDto> _sortMyConsultantSupports;
-            private readonly IHttpContextAccessor _httpContextAccessor;
+            //private readonly IHttpContextAccessor _httpContextAccessor;
             private readonly IMapper _mapper;
 
             public GetBeneficiariesByReferentsQueryHandler(
                 IRepositoryManager repository, 
-                IHttpContextAccessor httpContextAccessor,
+                //IHttpContextAccessor httpContextAccessor,
                 ISortHelper<MyConsultantSupportDto> sortMyConsultantSupports,
                 IMapper mapper)
             {
                 _repository = repository;
                 _sortMyConsultantSupports = sortMyConsultantSupports;
-                _httpContextAccessor = httpContextAccessor;
+                //_httpContextAccessor = httpContextAccessor;
                 _mapper = mapper;
             }
 
             public async Task<PaginatedList<MyConsultantSupportDto>> Handle(GetSupportsByReferentsQuery request, CancellationToken cancellationToken)
             {
-                var referentUserName = _httpContextAccessor.HttpContext.User.Identity.Name;
-
+                //var referentUserName = _httpContextAccessor.HttpContext.User.Identity.Name;
+                var referentUserName = "System";
                 if (referentUserName == null)
                 {
                     throw new NotFoundException(nameof(referentUserName), referentUserName);
                 }
 
-                var supports = _sortMyConsultantSupports.ApplySort(_repository.Support.GetConsultantSupportsByUserName(referentUserName,request.Filter, request.IsActive),request.OrderBy);
+                    var supports = _sortMyConsultantSupports.ApplySort(_repository.Support.GetConsultantSupportsByUserName(referentUserName,request.Filter, request.IsActive),request.OrderBy);
 
                 return await supports.PaginatedListAsync(request.PageNumber, request.PageSize);
             }

@@ -5,8 +5,12 @@ using DiliBeneficiary.Core.Interfaces;
 using DiliBeneficiary.Infrastructure;
 using DiliBeneficiary.Infrastructure.Persistence;
 using FluentValidation.AspNetCore;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Internal;
 using Microsoft.OpenApi.Models;
 
@@ -41,11 +45,6 @@ public class Startup
         fluidConfigSection["EmailNl"] = $"{fluidConfigSection["EmailNl"]}";
 
         //services.RegisterFluidProvider(fluidConfigSection);
-        services.AddDatabaseDeveloperPageExceptionFilter();
-
-        services.AddSingleton<ICurrentUserService, CurrentUserService>();
-
-        services.AddHttpContextAccessor();
 
         services.AddHealthChecks()
             .AddDbContextCheck<ApplicationDbContext>();

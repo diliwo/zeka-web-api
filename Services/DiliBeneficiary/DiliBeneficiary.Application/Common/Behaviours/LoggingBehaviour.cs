@@ -1,4 +1,5 @@
-﻿using MediatR.Pipeline;
+﻿using DiliBeneficiary.Core.Interfaces;
+using MediatR.Pipeline;
 using Microsoft.Extensions.Logging;
 
 namespace DiliBeneficiary.Application.Common.Behaviours

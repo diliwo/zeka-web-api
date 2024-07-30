@@ -25,7 +25,7 @@ namespace DiliBeneficiary.Application.MonitoringActions.Commands.DeleteAction
             _monitoringActionRepository = monitoringActionRepository;
         }
 
-        public async Task<Unit> Handle(DeleteMonitoringActionCommand request, CancellationToken cancellationToken)
+        public async Task Handle(DeleteMonitoringActionCommand request, CancellationToken cancellationToken)
         {
             var action = await _monitoringActionRepository.GetMonitoringActionById(request.ActionId).SingleOrDefaultAsync(cancellationToken);
             if (action == null)
@@ -33,7 +33,6 @@ namespace DiliBeneficiary.Application.MonitoringActions.Commands.DeleteAction
                 throw new NotFoundException(nameof(MonitoringAction), request.ActionId);
             }
             _monitoringActionRepository.SoftDelete(request.ActionId);
-            return Unit.Value;
         }
     }
 }
