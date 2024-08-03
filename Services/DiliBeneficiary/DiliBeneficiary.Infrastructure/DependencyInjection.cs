@@ -29,7 +29,7 @@ public static class DependencyInjection
 
         services.AddTransient<IMonitoringActionRepository, MonitoringActionRepository>(); ;
         services.AddTransient<ILanguageRepository, LanguageRepository>();
-        services.AddTransient<IFileService, FileService>();
+        //services.AddTransient<IFileService, FileService>();
         services.AddTransient<IDateTime, DateTimeService>();
         services.AddScoped<ISortHelper<TrainingType>, SortHelper<TrainingType>>();
         services.AddScoped<ISortHelper<TrainingField>, SortHelper<TrainingField>>();

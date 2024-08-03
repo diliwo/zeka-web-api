@@ -14,18 +14,6 @@ namespace DiliBeneficiary.Infrastructure.Persistence
 
         public ApplicationDbContext(DbContextOptions options) : base(options) { }
 
-        public ApplicationDbContext(
-            DbContextOptions options,
-            ICurrentUserService currentUserService,
-            //IDomainEventService domainEventService,
-            IDateTime dateTime
-            ) : base(options)
-        {
-            _currentUserService = currentUserService;
-            //_domainEventService = domainEventService;
-            _dateTime = dateTime;
-        }
-
         public DbSet<Beneficiary> Beneficiaries { get; set; }
         public DbSet<Support> Supports { get; set; }
         public DbSet<Referent> Referents { get; set; }

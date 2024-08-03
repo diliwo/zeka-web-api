@@ -1,6 +1,11 @@
 ﻿using System.Reflection;
 using DiliBeneficiary.API.Infrastructure;
+using DiliBeneficiary.Application.SchoolRegistations.Common;
+using DiliBeneficiary.Core.Common.Dto;
+using DiliBeneficiary.Core.Interfaces;
 using DiliBeneficiary.Infrastructure.Persistence;
+using DiliBeneficiary.Infrastructure.Persistence.Helpers;
+using DiliBeneficiary.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 #if (UseApiOnly)
 using NSwag;
@@ -23,7 +28,10 @@ public static class DependencyInjection
             .AddDbContextCheck<ApplicationDbContext>();
 
         services.AddExceptionHandler<CustomExceptionHandler>();
-
+        services.AddTransient<ISortHelper<MyConsultantSupportDto>, SortHelper<MyConsultantSupportDto>>();
+        services.AddTransient<ISortHelper<SchoolRegistrationDto>, SortHelper<SchoolRegistrationDto>>();
+        services.AddScoped<ISortHelper<MyJobCoachSupportDto>, SortHelper<MyJobCoachSupportDto>>();
+        services.AddScoped<IBeneficiaryService, BeneficiaryService>();
 
         // Customise default API behaviour
         services.Configure<ApiBehaviorOptions>(options =>

@@ -30,9 +30,8 @@ namespace DiliBeneficiary.Application
                 cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(PerformanceBehaviour<,>));
             });
             services.AddScoped<IDomainEventService, DomainEventService>();
-            services.AddTransient<IDocumentGeneratorService, DocumentGeneratorService>();
-            //services.AddScoped<ISortHelper<MyConsultantSupportDto>, SortHelper<MyConsultantSupportDto>>();
-            //services.AddScoped<ISortHelper<SchoolRegistrationDto>, SortHelper<SchoolRegistrationDto>>();
+            //services.AddTransient<IDocumentGeneratorService, DocumentGeneratorService>();
+    
 
             return services;
         }

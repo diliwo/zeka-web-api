@@ -23,7 +23,7 @@ public sealed class RepositoryManager : IRepositoryManager
     private readonly Lazy<IProfessionnalExperienceRepository> _professionnalExperienceRepository;
     private readonly Lazy<IProfessionRepository> _professionRepository;
 
-    public RepositoryManager(ApplicationDbContext applicationDbContext, IFileService fileService)
+    public RepositoryManager(ApplicationDbContext applicationDbContext)
     {
         _applicationDbContext = applicationDbContext;
         _beneficiaryRepository = new Lazy<IBeneficiaryRepository>(() => new BeneficiaryRepository(applicationDbContext));
