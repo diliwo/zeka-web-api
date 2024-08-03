@@ -16,8 +16,6 @@ namespace DiliBeneficiary.Infrastructure.Persistence
 
         public DbSet<Beneficiary> Beneficiaries { get; set; }
         public DbSet<Support> Supports { get; set; }
-        public DbSet<Referent> Referents { get; set; }
-        public DbSet<Service> Services { get; set; }
         public DbSet<SchoolRegistration> SchoolRegistrations { get; set; }
         public DbSet<Bilan> Bilans { get; set; }
         public DbSet<QuarterlyMonitoring> QuarterlyMonitorings { get; set; }

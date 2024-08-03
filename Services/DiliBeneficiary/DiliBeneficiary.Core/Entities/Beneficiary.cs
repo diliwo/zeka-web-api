@@ -38,11 +38,6 @@ namespace DiliBeneficiary.Core.Entities
             get => SchoolRegistrations;
         }
 
-        //public IEnumerable<Candidacy> Candidates
-        //{
-        //    get => Candidacies;
-        //}
-
         public Beneficiary()
         {
         }
