@@ -24,7 +24,7 @@ namespace DiliBeneficiary.Application.Beneficiaries.Queries.GetBeneficiaryDetail
             public async Task<BeneficiaryVm> Handle(GetBeneficiaryDetailQuery request, CancellationToken cancellationToken)
             {
                 var vm = await _repository.Beneficiary.GetBeneficiaries()
-                    .Include(b =>b.Candidacies)
+                    //.Include(b =>b.Candidacies)
                     .Include(b => b.SchoolRegistrations)
                     .Where(b => b.Niss == request.Niss)
                     .AsNoTracking()

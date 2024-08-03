@@ -111,27 +111,8 @@ namespace DiliBeneficiary.Application.Beneficiaries.Queries.GetBeneficiaryDetail
                     opt =>
                         opt.MapFrom(e =>
                             e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last()
-                                .EnDate))
-                .ForMember(b => b.LastJobExperienceCompanyName,
-                    opt => opt.MapFrom(e =>
-                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
-                            .CompanyName))
-                .ForMember(b => b.LastJobExperienceContractTypeName,
-                    opt => opt.MapFrom(e =>
-                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
-                            .TypeOfContract))
-                .ForMember(b => b.LastJobExperienceFunction,
-                    opt => opt.MapFrom(e =>
-                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
-                            .Function))
-                .ForMember(b => b.LastJobExperienceStartDate,
-                    opt => opt.MapFrom(e =>
-                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
-                            .StartDate))
-                .ForMember(b => b.LastJobExperienceEndDate,
-                    opt => opt.MapFrom(e =>
-                        e.ProfessionnalExpectations.Where(p => p.Softdelete != null).OrderBy(e => e.StartDate).Last()
-                            .EndDate));
+                                .EnDate));
+
         }
     }
 }

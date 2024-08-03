@@ -36,7 +36,6 @@ namespace DiliBeneficiary.Application.Common.Services
             Context.Options.MemberAccessStrategy.Register<Formation>();
             Context.Options.MemberAccessStrategy.Register<School>();
             Context.Options.MemberAccessStrategy.Register<SchoolRegistration>();
-            Context.Options.MemberAccessStrategy.Register<ProfessionnalExperience>();
             Context.Options.MemberAccessStrategy.Register<Profession>();
             Context.Options.MemberAccessStrategy.Register<BilanProfession>();
         }

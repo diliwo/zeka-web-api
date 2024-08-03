@@ -42,8 +42,8 @@ namespace DiliBeneficiary.Infrastructure.Persistence.Configurations
                 .Property(e => e.StartDateInCpas).HasColumnType("date");
             builder
                 .Property(e => e.EndDateInCpas).HasColumnType("date");
-            builder
-                .Ignore(b => b.Candidates);
+            //builder
+            //    .Ignore(b => b.Candidates);
             builder
                 .Ignore(b => b.Registrations);
         }

@@ -10,7 +10,6 @@ public sealed class RepositoryManager : IRepositoryManager
     private readonly Lazy<IBeneficiaryRepository> _beneficiaryRepository;
     private readonly Lazy<ISupportRepository> _supportRepository;
     private readonly Lazy<IReferentRepository> _referentRepository;
-    private readonly Lazy<IDocumentPartnerRepository> _documentPartnerRepository;
     private readonly Lazy<ITrainingTypeRepository> _trainingTypeRepository;
     private readonly Lazy<IFormationRepository> _formationRepository;
     private readonly Lazy<IBilanRepository> _bianRepository;
@@ -19,8 +18,6 @@ public sealed class RepositoryManager : IRepositoryManager
     private readonly Lazy<IMonitoringActionRepository> _monitoringAction;
     private readonly Lazy<ISchoolRegistrationRepository> _schoolRegistrationRepository;
     private readonly Lazy<IProfessionBilanRepository> _professionBilanRepository;
-    private readonly Lazy<INatureOfContractRepository> _natureOfContractRepository;
-    private readonly Lazy<IProfessionnalExperienceRepository> _professionnalExperienceRepository;
     private readonly Lazy<IProfessionRepository> _professionRepository;
 
     public RepositoryManager(ApplicationDbContext applicationDbContext)
@@ -29,15 +26,9 @@ public sealed class RepositoryManager : IRepositoryManager
         _beneficiaryRepository = new Lazy<IBeneficiaryRepository>(() => new BeneficiaryRepository(applicationDbContext));
         _schoolRegistrationRepository =
             new Lazy<ISchoolRegistrationRepository>(() => new SchoolRegistrationRepository(applicationDbContext));
-        _trainingTypeRepository =
-            new Lazy<ITrainingTypeRepository>(() => new TrainingTypeRepository(applicationDbContext));
         _professionBilanRepository =
             new Lazy<IProfessionBilanRepository>(() => new ProfessionBilanRepository(applicationDbContext));
         _bianRepository = new Lazy<IBilanRepository>(() => new BilanRepository(applicationDbContext));
-        _trainingTypeRepository =
-            new Lazy<ITrainingTypeRepository>(() => new TrainingTypeRepository(applicationDbContext));
-        _trainingFieldRepository =
-            new Lazy<ITrainingFieldRepository>(() => new TrainingFieldRepository(applicationDbContext));
         _quarterlyMonitoring =
             new Lazy<IQuarterlyMonitoringRepository>(() => new QuarterlyMonitoringRepository(applicationDbContext));
         _monitoringAction = new Lazy<IMonitoringActionRepository>(() => new MonitoringActionRepository(applicationDbContext));
@@ -45,10 +36,7 @@ public sealed class RepositoryManager : IRepositoryManager
 
     public IBeneficiaryRepository Beneficiary => _beneficiaryRepository.Value;
     public ISupportRepository Support => _supportRepository.Value;
-    public INatureOfContractRepository NatureOfContract => _natureOfContractRepository.Value;
-    public IProfessionnalExperienceRepository ProfessionnalExperience => _professionnalExperienceRepository.Value;
     public IReferentRepository Referent => _referentRepository.Value;
-    public IDocumentPartnerRepository DocumentPartner => _documentPartnerRepository.Value;
     public ISchoolRegistrationRepository SchoolRegistration => _schoolRegistrationRepository.Value;
     public ITrainingTypeRepository TrainingType => _trainingTypeRepository.Value;
     public IProfessionRepository Profession => _professionRepository.Value;

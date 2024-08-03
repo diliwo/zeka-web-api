@@ -18,31 +18,12 @@ namespace DiliBeneficiary.Infrastructure.Persistence
         public DbSet<Support> Supports { get; set; }
         public DbSet<Referent> Referents { get; set; }
         public DbSet<Service> Services { get; set; }
-        //public DbSet<Partner> Partners { get; set; }
-        //public DbSet<Job> Jobs { get; set; }
-        //public DbSet<JobOffer> JobOffers { get; set; }
-        //public DbSet<Candidacy> Candidacies { get; set; }
-        //public DbSet<DocumentPartner> DocumentPartners { get; set; }
         public DbSet<SchoolRegistration> SchoolRegistrations { get; set; }
-        //public DbSet<School> Schools { get; set; }
-        public DbSet<Formation> Formations { get; set; }
-        //public DbSet<ProfessionnalExperience> ProfessionnalExperiences { get; set; }
         public DbSet<Bilan> Bilans { get; set; }
         public DbSet<QuarterlyMonitoring> QuarterlyMonitorings { get; set; }
         public DbSet<MonitoringAction> MonitoringActions { get; set; }
         public DbSet<BilanProfession> ProfessionBilans { get; set; }
-        public DbSet<Profession> Professions { get; set; }
         public DbSet<Language> Languages { get; set; }
-        public DbSet<TrainingType> TrainingTypes { get; set; }
-        public DbSet<TrainingField> TrainingFields { get; set; }
-        public DbSet<NatureOfContract> NatureOfContract { get; set; }
-        public DbSet<AnnualClosure> AnnualClosures { get; set; }
-        public DbSet<ContratPiis> ContratPiis { get; set; }
-        //public DbSet<EmploymentStatusHistory> EmploymentStatusHistories { get; set; }
-        //public DbSet<EmploymentTerminationType> EmploymentTerminationTypes { get; set; }
-        //public DbSet<EmploymentTerminationReason> EmploymentTerminationReasons { get; set; }
-        //public DbSet<TerminationReasonForEmployment> TerminationReasonForEmployments { get; set; }
-        public DbSet<AnnualClosureHandlingHistory> AnnualClosuresHandlingHistories { get; set; }
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
         {

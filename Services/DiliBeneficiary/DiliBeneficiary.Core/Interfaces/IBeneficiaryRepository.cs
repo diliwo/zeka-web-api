@@ -10,8 +10,6 @@ namespace DiliBeneficiary.Core.Interfaces
 
         Task<Beneficiary> GetSourceIdAsync(int id, bool trackChanges = false);
         Task<Beneficiary> GetAsync(int id,bool trackChanges = false);
-        Task<Beneficiary> GetWithApplicationsAsync(int id, bool trackChanges = false);
-        Task<Beneficiary> GetWithApplicationsByNameAsync(string name, bool trackChanges = false);
         Beneficiary GetBeneficiaryByNiss(string niss, bool trackChanges = false);
         Task<Beneficiary> GetBeneficiaryByNissAsync(string niss, bool trackChanges = false);
         Task<List<string>> GetBeneficiaryNissesAsync(bool trackChanges = false);

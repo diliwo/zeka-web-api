@@ -46,8 +46,6 @@ public static class DependencyInjection
         services.AddSingleton<IGenericReadRepository<ReasonOfClosure>, GenericReadRepository<ReasonOfClosure>>(sp =>
             sp.GetRequiredService<IOptions<GenericReadRepository<ReasonOfClosure>>>().Value); // TODO : move into RepositoryManager
 
-        services.AddTransient<IAnnualClosureHandlingHistoryRepository, AnnualClosureHandlingHistoryRepository>(); // TODO : move into RepositoryManager
-
         //services.AddAuthorization(options =>
         //{
         //    options.AddPolicy("CanPurge", policy => policy.RequireRole("Administrator"));

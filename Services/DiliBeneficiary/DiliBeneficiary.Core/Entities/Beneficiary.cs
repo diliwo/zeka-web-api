@@ -30,9 +30,7 @@ namespace DiliBeneficiary.Core.Entities
         public string SocialWorkerName { get; set; }
         public string IbisNumber { get; set; }
         public virtual IList<Support> Supports { get; set; } = new List<Support>();
-        public virtual IList<Candidacy> Candidacies { get; set; } = new List<Candidacy>();
         public virtual IList<SchoolRegistration> SchoolRegistrations { get; set; } = new List<SchoolRegistration>();
-        public virtual IList<ProfessionnalExperience> ProfessionnalExpectations { get; set; } = new List<ProfessionnalExperience>();
         public virtual IList<Bilan> Bilans { get; set; } = new List<Bilan>();
         public virtual IList<QuarterlyMonitoring> QuarterlyMonitorings { get; set; } = new List<QuarterlyMonitoring>();
         public IEnumerable<SchoolRegistration> Registrations
@@ -40,10 +38,10 @@ namespace DiliBeneficiary.Core.Entities
             get => SchoolRegistrations;
         }
 
-        public IEnumerable<Candidacy> Candidates
-        {
-            get => Candidacies;
-        }
+        //public IEnumerable<Candidacy> Candidates
+        //{
+        //    get => Candidacies;
+        //}
 
         public Beneficiary()
         {
@@ -125,44 +123,44 @@ namespace DiliBeneficiary.Core.Entities
         }
 
 
-        public bool IsCurrentlyHired
-        {
-            get
-            {
-                var today = DateTime.Today;
-                if (Candidacies.Any(c => c.IsHired 
-                                         && ((c.JobOffer.StartOccupationDate <= today && c.JobOffer.EndOccupationDate >= today) 
-                                             || c.JobOffer.StartOccupationDate <= today && c.JobOffer.EndOccupationDate == null)))
-                {
-                    return true;
-                }
-                return false;
-            }
-        }
+        //public bool IsCurrentlyHired
+        //{
+        //    get
+        //    {
+        //        var today = DateTime.Today;
+        //        if (Candidacies.Any(c => c.IsHired 
+        //                                 && ((c.JobOffer.StartOccupationDate <= today && c.JobOffer.EndOccupationDate >= today) 
+        //                                     || c.JobOffer.StartOccupationDate <= today && c.JobOffer.EndOccupationDate == null)))
+        //        {
+        //            return true;
+        //        }
+        //        return false;
+        //    }
+        //}
 
-        public bool IsAlreadyHiredDuringThisPeriod(DateTime date)
-        {
-            if (Candidacies.Any(c => c.Softdelete != true && c.IsHired
-                                                          && ((c.JobOffer.StartOccupationDate <= date && c.JobOffer.EndOccupationDate >= date)
-                                                              || c.JobOffer.StartOccupationDate <= date && c.JobOffer.EndOccupationDate == null)))
-            {
-                return true;
-            }
-            return false;
-        }
-        public bool IsAlreadyHiredDuringThisPeriod(DateTime date, int jobOfferId)
-        {
-            var application = Candidacies.SingleOrDefault(c => c.Softdelete != true && c.IsHired
-                && ((c.JobOffer.StartOccupationDate <= date && c.JobOffer.EndOccupationDate >= date)
-                    || c.JobOffer.StartOccupationDate <= date && c.JobOffer.EndOccupationDate == null));
+        //public bool IsAlreadyHiredDuringThisPeriod(DateTime date)
+        //{
+        //    if (Candidacies.Any(c => c.Softdelete != true && c.IsHired
+        //                                                  && ((c.JobOffer.StartOccupationDate <= date && c.JobOffer.EndOccupationDate >= date)
+        //                                                      || c.JobOffer.StartOccupationDate <= date && c.JobOffer.EndOccupationDate == null)))
+        //    {
+        //        return true;
+        //    }
+        //    return false;
+        //}
+        //public bool IsAlreadyHiredDuringThisPeriod(DateTime date, int jobOfferId)
+        //{
+        //    var application = Candidacies.SingleOrDefault(c => c.Softdelete != true && c.IsHired
+        //        && ((c.JobOffer.StartOccupationDate <= date && c.JobOffer.EndOccupationDate >= date)
+        //            || c.JobOffer.StartOccupationDate <= date && c.JobOffer.EndOccupationDate == null));
 
-            if (application is not null && application.JobOfferId != jobOfferId)
-            {
-                return true;
-            }
+        //    if (application is not null && application.JobOfferId != jobOfferId)
+        //    {
+        //        return true;
+        //    }
 
-            return false;
-        }
+        //    return false;
+        //}
 
         public string UpsertIbis(string ibis)
         {

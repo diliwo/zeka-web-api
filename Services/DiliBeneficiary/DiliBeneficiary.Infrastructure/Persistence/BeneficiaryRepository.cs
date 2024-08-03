@@ -40,20 +40,6 @@ namespace DiliBeneficiary.Infrastructure.Persistence
             return FindByCondition(b => b.Id.Equals(id), trackChanges).FirstOrDefaultAsync();
         }
 
-        public Task<Beneficiary> GetWithApplicationsAsync(int id, bool trackChanges = false)
-        {
-            return FindByCondition(b => b.Id.Equals(id), trackChanges)
-                .Include(c => c.Candidacies)
-                .ThenInclude(j => j.JobOffer).FirstOrDefaultAsync();
-        }
-
-        public Task<Beneficiary> GetWithApplicationsByNameAsync(string name, bool trackChanges = false)
-        {
-            return FindByCondition(b => name.ToLower().Contains(b.FirstName.ToLower()) && name.ToLower().Contains(b.LastName.ToLower()), trackChanges)
-                .Include(c => c.Candidacies)
-                .ThenInclude(j => j.JobOffer).FirstOrDefaultAsync();
-        }
-
         public Beneficiary GetBeneficiaryByNiss(string niss, bool trackChanges = false)
         {
             return FindByCondition(beneficiary => beneficiary.Niss.Equals(niss), trackChanges)
