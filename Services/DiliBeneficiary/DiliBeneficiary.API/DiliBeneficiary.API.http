@@ -1,6 +1,0 @@
-@DiliBeneficiary.API_HostAddress = http://localhost:5091
-
-GET {{DiliBeneficiary.API_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
