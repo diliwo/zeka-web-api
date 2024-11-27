@@ -23,21 +23,8 @@ namespace Client.Application
             });
             services.AddScoped<IDomainEventService, DomainEventService>();
             //services.AddTransient<IDocumentGeneratorService, DocumentGeneratorService>();
-    
-
+            
             return services;
         }
-
-        //public static IServiceCollection RegisterFluidProvider(this IServiceCollection services, IConfigurationSection configurationSection)
-        //{
-        //    services.Configure<FluidServiceConfiguration>(configurationSection.Bind);
-        //    services.AddSingleton<IConverter>(sp => new SynchronizedConverter(new PdfTools()));
-        //    return services;
-        //}
-
-        //public static IServiceCollection AddRabbitMqService(this IServiceCollection services, IConfiguration configuration)
-        //{
-        //    return services;
-        //}
     }
 }

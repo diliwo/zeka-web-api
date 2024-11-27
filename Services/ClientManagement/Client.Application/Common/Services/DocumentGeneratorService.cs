@@ -32,10 +32,10 @@ namespace Client.Application.Common.Services
             Context.Options.MemberAccessStrategy.Register<Assessment>();
             Context.Options.MemberAccessStrategy.Register<Track>();
             Context.Options.MemberAccessStrategy.Register<Staff>();
-            Context.Options.MemberAccessStrategy.Register<Service>();
+            Context.Options.MemberAccessStrategy.Register<Team>();
             Context.Options.MemberAccessStrategy.Register<Training>();
             Context.Options.MemberAccessStrategy.Register<School>();
-            Context.Options.MemberAccessStrategy.Register<SchoolEnrollment>();
+            Context.Options.MemberAccessStrategy.Register<SchoolRegistration>();
             Context.Options.MemberAccessStrategy.Register<Profession>();
             Context.Options.MemberAccessStrategy.Register<ProfessionalAssessment>();
         }

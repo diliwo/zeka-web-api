@@ -1,9 +1,9 @@
-﻿using Client.Application.Bilans.Common;
+﻿using Client.Application.Assessments.Common;
 
-namespace Client.Application.Bilans.Queries.GetBilansList
+namespace Client.Application.Assessments.Queries.GetBilansList
 {
     public class BilansListVm
     {
-        public IList<BilanDto> Bilans { get; set; }
+        public IList<AssessmentDto> Bilans { get; set; }
     }
 }

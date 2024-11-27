@@ -1,4 +1,4 @@
-﻿namespace Client.Application.Clients.Commands.SociabiliDBChangeClientMessage.Message
+﻿namespace Client.Application.Clients.Commands.SociabiliDBChangeBeneficiaryMessage.Message
 {
 
     public class SociabiliDBChangeClientMessage

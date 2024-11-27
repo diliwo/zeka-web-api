@@ -1,11 +1,11 @@
 ﻿using System.Reflection;
 using Client.API.Infrastructure;
 using Client.Application.SchoolRegistations.Common;
+using Client.Core.Common.Dto;
+using Client.Core.Interfaces;
 using Client.Infrastructure.Persistence;
 using Client.Infrastructure.Persistence.Helpers;
 using Client.Infrastructure.Services;
-using Client.Core.Common.Dto;
-using Client.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 #if (UseApiOnly)
 using NSwag;
@@ -24,9 +24,6 @@ public static class DependencyInjection
 
         services.AddHttpContextAccessor();
 
-        services.AddHealthChecks()
-            .AddDbContextCheck<ApplicationDbContext>();
-
         services.AddExceptionHandler<CustomExceptionHandler>();
         services.AddTransient<ISortHelper<MyConsultantSupportDto>, SortHelper<MyConsultantSupportDto>>();
         services.AddTransient<ISortHelper<SchoolRegistrationDto>, SortHelper<SchoolRegistrationDto>>();
@@ -39,7 +36,7 @@ public static class DependencyInjection
 
         services.AddEndpointsApiExplorer();
 
-        services.AddSwaggerGen(c => { c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "Catalog.API", Version = "v1" }); });
+        services.AddSwaggerGen(c => { c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "Client.API", Version = "v1" }); });
 
         //Register AutoMapper
         services.AddAutoMapper(typeof(Program).Assembly);
@@ -55,6 +52,8 @@ public static class DependencyInjection
 
 
         services.AddControllers();
+        services.AddControllers().AddNewtonsoftJson(options =>
+            options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore);
 
         //Register AutoMapper
         services.AddAutoMapper(typeof(Program).Assembly);

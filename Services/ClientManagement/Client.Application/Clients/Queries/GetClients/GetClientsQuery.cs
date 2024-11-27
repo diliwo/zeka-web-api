@@ -6,9 +6,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Client.Application.Clients.Queries.GetClients
 {
-    public class GetClientsQuery : IRequest<ClientsVm>
+    public class GetClientsQuery : IRequest<ClientsDto>
     {
-        public class GetClientsQueryHandler : IRequestHandler<GetClientsQuery, ClientsVm>
+        public class GetClientsQueryHandler : IRequestHandler<GetClientsQuery, ClientsDto>
         {
             private readonly IRepositoryManager _repository;
             private readonly IMapper _mapper;
@@ -19,14 +19,14 @@ namespace Client.Application.Clients.Queries.GetClients
                 _mapper = mapper;
             }
 
-            public async Task<ClientsVm> Handle(GetClientsQuery query, CancellationToken cancellationToken)
+            public async Task<ClientsDto> Handle(GetClientsQuery query, CancellationToken cancellationToken)
             {
                 var Clients = await _repository.Client.GetClients()
                     .ProjectTo<ClientLookUpDto>(_mapper.ConfigurationProvider)
                     .OrderBy(b => b.Name)
                     .ToListAsync(cancellationToken);
 
-                var vm = new ClientsVm
+                var vm = new ClientsDto
                 {
                     Clients = Clients
                 };

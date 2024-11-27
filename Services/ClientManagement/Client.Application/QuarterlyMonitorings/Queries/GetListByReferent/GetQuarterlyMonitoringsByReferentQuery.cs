@@ -7,7 +7,7 @@ using Client.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Application.QuarterlyMonitorings.Queries.GetListByStaff
+namespace Client.Application.QuarterlyMonitorings.Queries.GetListByReferent
 {
     public class GetQuarterlyMonitoringsByStaffQuery : IRequest<PaginatedList<QuarterlyMonitoringDto>>
     {

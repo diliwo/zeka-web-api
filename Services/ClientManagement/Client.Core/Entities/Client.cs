@@ -30,10 +30,10 @@ namespace Client.Core.Entities
         public string SocialWorkerName { get; set; }
         public string IbisNumber { get; set; }
         public virtual IList<Track> Supports { get; set; } = new List<Track>();
-        public virtual IList<SchoolEnrollment> SchoolRegistrations { get; set; } = new List<SchoolEnrollment>();
+        public virtual IList<SchoolRegistration> SchoolRegistrations { get; set; } = new List<SchoolRegistration>();
         public virtual IList<Assessment> Bilans { get; set; } = new List<Assessment>();
         public virtual IList<QuarterlyMonitoring> QuarterlyMonitorings { get; set; } = new List<QuarterlyMonitoring>();
-        public IEnumerable<SchoolEnrollment> Registrations
+        public IEnumerable<SchoolRegistration> Registrations
         {
             get => SchoolRegistrations;
         }

@@ -6,11 +6,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Client.Application.Clients.Queries.GetClientDetail
 {
-    public class GetClientDetailQuery : IRequest<ClientVm>
+    public class GetClientDetailQuery : IRequest<ClientDto>
     {
         public string Niss { get; set; }
 
-        public class GetClientDetailQueryHandler : IRequestHandler<GetClientDetailQuery, ClientVm>
+        public class GetClientDetailQueryHandler : IRequestHandler<GetClientDetailQuery, ClientDto>
         {
             private readonly IRepositoryManager _repository;
             private readonly IMapper _mapper;
@@ -21,14 +21,14 @@ namespace Client.Application.Clients.Queries.GetClientDetail
                 _mapper = mapper;
             }
 
-            public async Task<ClientVm> Handle(GetClientDetailQuery request, CancellationToken cancellationToken)
+            public async Task<ClientDto> Handle(GetClientDetailQuery request, CancellationToken cancellationToken)
             {
                 var vm = await _repository.Client.GetClients()
                     //.Include(b =>b.Candidacies)
                     .Include(b => b.SchoolRegistrations)
                     .Where(b => b.Niss == request.Niss)
                     .AsNoTracking()
-                    .ProjectTo<ClientVm>(_mapper.ConfigurationProvider)
+                    .ProjectTo<ClientDto>(_mapper.ConfigurationProvider)
                     .SingleOrDefaultAsync(cancellationToken);
                 return vm;
             }

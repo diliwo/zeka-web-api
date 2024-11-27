@@ -1,4 +1,7 @@
-﻿using Client.Core.Enums;
+﻿using Client.Application.Common.Exceptions;
+using Client.Core.Entities;
+using Client.Core.Enums;
+using Client.Core.Interfaces;
 using MediatR;
 
 namespace Client.Application.SchoolRegistations.Commands.CreateSchoolRegistration
@@ -15,53 +18,53 @@ namespace Client.Application.SchoolRegistations.Commands.CreateSchoolRegistratio
         public SchoolResult Result { get; set; }
         public string? Note { get; set; }
 
-        //public class CreateSchoolRegistrationCommandHandler : IRequestHandler<CreateSchoolRegistrationCommand, int>
-        //{
-        //    private readonly IRepositoryManager _repository;
+        public class CreateSchoolRegistrationCommandHandler : IRequestHandler<CreateSchoolRegistrationCommand, int>
+        {
+            private readonly IRepositoryManager _repository;
 
-        //    public CreateSchoolRegistrationCommandHandler(
-        //        IRepositoryManager repository
-        //    )
-        //    {
-        //        _repository = repository;
+            public CreateSchoolRegistrationCommandHandler(
+                IRepositoryManager repository
+            )
+            {
+                _repository = repository;
 
-        //    }
-        //    public async Task<int> Handle(CreateSchoolRegistrationCommand request, CancellationToken cancellationToken)
-        //    {
-        //        var training = _repository.Training.GetTrainingById(request.TrainingId);
+            }
+            public async Task<int> Handle(CreateSchoolRegistrationCommand request, CancellationToken cancellationToken)
+            {
+                var training = _repository.Training.GetTrainingById(request.TrainingId);
 
-        //        if (training == null)
-        //        {
-        //            throw new NotFoundException(nameof(Training), request.TrainingId);
-        //        }
+                if (training == null)
+                {
+                    throw new NotFoundException(nameof(Training), request.TrainingId);
+                }
+                //TODO: implement the Grpc request here 
+                //var school = _repository.School.GetSchoolById(request.SchoolId);
+                var school = new School("temp", "tp");
+                if (school == null)
+                {
+                    throw new NotFoundException(nameof(School), request.SchoolId);
+                }
 
-        //        var school = _repository.School.GetSchoolById(request.SchoolId);
+                var trainingType = _repository.TrainingType.GetById(request.TrainingTypeId);
+                if (trainingType == null)
+                {
+                    throw new NotFoundException(nameof(TrainingType), request.TrainingTypeId);
+                }
 
-        //        if (school == null)
-        //        {
-        //            throw new NotFoundException(nameof(School), request.SchoolId);
-        //        }
+                var client = _repository.Client.Get(request.ClientId, true);
 
-        //        var trainingType = _repository.TrainingType.GetById(request.TrainingTypeId);
-        //        if (trainingType == null)
-        //        {
-        //            throw new NotFoundException(nameof(TrainingType), request.TrainingTypeId);
-        //        }
+                if (client == null)
+                {
+                    throw new NotFoundException(nameof(Client), request.ClientId);
+                }
 
-        //        var client = _repository.Client.Get(request.ClientId, true);
+                SchoolRegistration entity = new SchoolRegistration(training, school, trainingType, client, request.CourseLevel, request.Result, request.StartDate.ToLocalTime(), request.EnDate.ToLocalTime(), request.Note);
 
-        //        if (client == null)
-        //        {
-        //            throw new NotFoundException(nameof(Client), request.ClientId);
-        //        }
+                _repository.SchoolRegistration.Persist(entity);
 
-        //        SchoolEnrollment entity = new SchoolEnrollment(training, school, trainingType, client,request.CourseLevel, request.Result, request.StartDate.ToLocalTime(), request.EnDate.ToLocalTime(), request.Note);
-
-        //        _repository.SchoolEnrollment.Persist(entity);
-
-        //        return entity.Id;
-        //    }
-        //}
+                return entity.Id;
+            }
+        }
 
     }
 }

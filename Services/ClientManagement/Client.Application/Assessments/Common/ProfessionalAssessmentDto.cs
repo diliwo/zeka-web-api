@@ -2,7 +2,7 @@
 using Client.Application.Common.Mappings;
 using Client.Core.Entities;
 
-namespace Client.Application.Bilans.Common
+namespace Client.Application.Assessments.Common
 {
     public class ProfessionalAssessmentDto : IMapFrom<ProfessionalAssessmentDto>
     {

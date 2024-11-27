@@ -1,4 +1,7 @@
-﻿using Client.Core.Enums;
+﻿using Client.Application.Common.Exceptions;
+using Client.Core.Entities;
+using Client.Core.Enums;
+using Client.Core.Interfaces;
 using MediatR;
 
 namespace Client.Application.SchoolRegistations.Commands.UpdateSchoolRegistration
@@ -16,69 +19,72 @@ namespace Client.Application.SchoolRegistations.Commands.UpdateSchoolRegistratio
         public SchoolResult Result { get; set; }
         public string? Note { get; set; }
 
-        //public class UpdateSchoolRegistrationCommandHandler : IRequestHandler<UpdateSchoolRegistrationCommand, int>
-        //{
-        //    private readonly IRepositoryManager _repository;
+        public class UpdateSchoolRegistrationCommandHandler : IRequestHandler<UpdateSchoolRegistrationCommand, int>
+        {
+            private readonly IRepositoryManager _repository;
 
-        //    public UpdateSchoolRegistrationCommandHandler(
-        //        IRepositoryManager repository
-        //    )
-        //    {
-        //        _repository = repository;
-        //    }
+            public UpdateSchoolRegistrationCommandHandler(
+                IRepositoryManager repository
+            )
+            {
+                _repository = repository;
+            }
 
-        //    public async Task<int> Handle(UpdateSchoolRegistrationCommand request, CancellationToken cancellationToken)
-        //    {
-        //        var training = _repository.Training.GetTrainingById(request.TrainingId);
+            public async Task<int> Handle(UpdateSchoolRegistrationCommand request, CancellationToken cancellationToken)
+            {
+                var training = _repository.Training.GetTrainingById(request.TrainingId);
 
-        //        if (training == null)
-        //        {
-        //            throw new NotFoundException(nameof(Training), request.TrainingId);
-        //        }
+                if (training == null)
+                {
+                    throw new NotFoundException(nameof(Training), request.TrainingId);
+                }
 
-        //        var school = _repository.School.GetSchoolById(request.SchoolId);
 
-        //        if (school == null)
-        //        {
-        //            throw new NotFoundException(nameof(School), request.SchoolId);
-        //        }
+                //TODO: implement the Grpc request here 
+                //var school = _repository.School.GetSchoolById(request.SchoolId);
+                var school = new School("temp", "tp");
 
-        //        var trainingType = _repository.TrainingType.GetById(request.TrainingTypeId);
+                if (school == null)
+                {
+                    throw new NotFoundException(nameof(School), request.SchoolId);
+                }
 
-        //        if (trainingType == null)
-        //        {
-        //            throw new NotFoundException(nameof(TrainingType), request.TrainingTypeId);
-        //        }
+                var trainingType = _repository.TrainingType.GetById(request.TrainingTypeId);
 
-        //        var client = _repository.Client.Get(request.ClientId);
+                if (trainingType == null)
+                {
+                    throw new NotFoundException(nameof(TrainingType), request.TrainingTypeId);
+                }
 
-        //        if (client == null)
-        //        {
-        //            throw new NotFoundException(nameof(client), request.ClientId);
-        //        }
+                var client = _repository.Client.Get(request.ClientId);
 
-        //        var registration = _repository.SchoolEnrollment.GetRegistrationById((int)request.SchoolRegistrationId);
+                if (client == null)
+                {
+                    throw new NotFoundException(nameof(client), request.ClientId);
+                }
 
-        //        if (registration == null)
-        //        {
-        //            throw new NotFoundException(nameof(registration), request.SchoolRegistrationId);
-        //        }
+                var registration = _repository.SchoolRegistration.GetRegistrationById((int)request.SchoolRegistrationId);
 
-        //        registration.Client = client;
-        //        registration.Training = training;
-        //        registration.TrainingType = trainingType;
-        //        registration.School = school;
-        //        registration.StartDate = request.StartDate.ToLocalTime();
-        //        registration.EnDate = request.EnDate.ToLocalTime();
-        //        registration.CourseLevel = request.CourseLevel;
-        //        registration.Result = request.Result;
-        //        registration.Note = request.Note;
-                
-        //        _repository.SchoolEnrollment.Persist(registration);
+                if (registration == null)
+                {
+                    throw new NotFoundException(nameof(registration), request.SchoolRegistrationId);
+                }
 
-        //        return registration.Id;
-        //    }
-        //}
+                registration.Client = client;
+                registration.Training = training;
+                registration.TrainingType = trainingType;
+                registration.School = school;
+                registration.StartDate = request.StartDate.ToLocalTime();
+                registration.EnDate = request.EnDate.ToLocalTime();
+                registration.CourseLevel = request.CourseLevel;
+                registration.Result = request.Result;
+                registration.Note = request.Note;
+
+                _repository.SchoolRegistration.Persist(registration);
+
+                return registration.Id;
+            }
+        }
 
     }
 }

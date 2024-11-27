@@ -3,14 +3,14 @@
 public interface IRepositoryManager
 {
     IClientRepository Client { get; }
-    ISupportRepository Support { get; }
+    ITrackRepository Track { get; }
     IStaffRepository Staff { get; }
     ISchoolRegistrationRepository SchoolRegistration { get; }
     ITrainingTypeRepository TrainingType { get; }
     IProfessionRepository Profession { get; }
     ITrainingRepository Training { get; }
-    IProfessionBilanRepository ProfessionBilan { get; }
-    IBilanRepository Bilan { get; }
+    IProfessionalAssessmentRepository ProfessionalAssessment { get; }
+    IAssessmentRepository Assessment { get; }
     ITrainingFieldRepository TrainingField { get; }
     IQuarterlyMonitoringRepository QuarterlyMonitoring { get; }
     IMonitoringActionRepository MonitoringAction { get; }

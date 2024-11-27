@@ -1,6 +1,6 @@
 ﻿using FluentValidation;
 
-namespace Client.Application.QuarterlyMonitorings.Queries.GetListByStaff
+namespace Client.Application.QuarterlyMonitorings.Queries.GetListByReferent
 {
     public class GetQuarterlyMonitoringsByStaffQueryValidator :AbstractValidator<GetQuarterlyMonitoringsByStaffQuery>
     {

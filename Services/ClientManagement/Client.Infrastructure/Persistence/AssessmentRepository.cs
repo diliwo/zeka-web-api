@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Client.Infrastructure.Persistence
 {
-    public class AssessmentRepository : IBilanRepository
+    public class AssessmentRepository : IAssessmentRepository
     {
         private readonly ApplicationDbContext _context;
 
@@ -18,41 +18,41 @@ namespace Client.Infrastructure.Persistence
         {
             if (assessment.Id == default(int))
             {
-                _context.Bilans.Add(assessment);
+                _context.Assessments.Add(assessment);
             }
             else
             {
-                _context.Bilans.Update(assessment);
+                _context.Assessments.Update(assessment);
             }
             _context.SaveChanges();
 
             return assessment.Id;
         }
 
-        public IQueryable<Assessment> GetBilans()
+        public IQueryable<Assessment> GetAssessments()
         {
-            return from bilans in _context.Bilans where bilans.Softdelete != true select bilans;
+            return from bilans in _context.Assessments where bilans.Softdelete != true select bilans;
         }
 
-        public IQueryable<Assessment> GetBilans(int ClientId)
+        public IQueryable<Assessment> GetAssessments(int ClientId)
         {
-            return from bilans in _context.Bilans 
+            return from bilans in _context.Assessments 
                 where (bilans.ClientId == ClientId && bilans.Softdelete != true) select bilans;
         }
 
         public Assessment GetBilanById(int id)
         {
-            return _context.Bilans.Include(b => b.BilanProfessions).ThenInclude(bp => bp.Profession).FirstOrDefault(s => s.Id == id);
+            return _context.Assessments.Include(b => b.BilanProfessions).ThenInclude(bp => bp.Profession).FirstOrDefault(s => s.Id == id);
         }
 
         public Assessment GetCurrentBilan()
         {
-            return _context.Bilans.FirstOrDefault(b => b.IsFinalized != true);
+            return _context.Assessments.FirstOrDefault(b => b.IsFinalized != true);
         }
 
         public IQueryable<Assessment> GetArchivedBilans()
         {
-            return from bilans in _context.Bilans where bilans.IsFinalized != false select bilans;
+            return from bilans in _context.Assessments where bilans.IsFinalized != false select bilans;
         }
 
         public void SoftDelete(Assessment assessment)
@@ -71,13 +71,13 @@ namespace Client.Infrastructure.Persistence
                 bilanProfession.AssessmentId = bilanProfession.AssessmentId - 1;
             }
 
-            _context.Bilans.Update(assessment);
+            _context.Assessments.Update(assessment);
             _context.SaveChanges();     
         }
 
         public async Task<bool> IsBilanNotFinalizd(int bilanId)
         {
-            var bilan = _context.Bilans.SingleOrDefaultAsync(b => b.Id == bilanId);
+            var bilan = _context.Assessments.SingleOrDefaultAsync(b => b.Id == bilanId);
 
             if (bilan.Result == null)
             {
@@ -89,7 +89,7 @@ namespace Client.Infrastructure.Persistence
 
         public async Task<bool> AreAllBilansNotFinalized(int ClientId)
         {
-            var bilans = _context.Bilans.Where(b => b.ClientId == ClientId && b.Softdelete != true);
+            var bilans = _context.Assessments.Where(b => b.ClientId == ClientId && b.Softdelete != true);
 
             if (bilans == null)
             {

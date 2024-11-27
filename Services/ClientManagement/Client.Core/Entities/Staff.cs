@@ -9,7 +9,7 @@ namespace Client.Core.Entities
         public string FullName => $"{LastName} {FirstName}";
         public string UserName { get; set; }
         public int ServiceId { get; set; }
-        public Service? Service { get; set; }
+        public Team? Service { get; set; }
         public IList<Track> Supports { get; set; } = new List<Track>();
         public virtual IList<QuarterlyMonitoring> QuarterlyMonitorings { get; private set; } = new List<QuarterlyMonitoring>();
 
@@ -18,7 +18,7 @@ namespace Client.Core.Entities
         {
         }
 
-        public Staff(string firstName, string lastName,  Service service, string userName = "") : this()
+        public Staff(string firstName, string lastName,  Team team, string userName = "") : this()
         {
             //Check if null
             if (string.IsNullOrEmpty(firstName))
@@ -34,7 +34,7 @@ namespace Client.Core.Entities
             FirstName = firstName ;
             LastName = lastName;
             UserName = userName ;
-            Service = service ?? throw new ArgumentNullException(nameof(service));
+            Service = team ?? throw new ArgumentNullException(nameof(team));
         }
 
         public void AddSupport(Client client, DateTime startDate, string? note = "")

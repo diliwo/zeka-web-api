@@ -24,7 +24,7 @@ namespace Client.Application.SchoolRegistations.Common
 
         public void Mapping(Profile profile)
         {
-            profile.CreateMap<SchoolEnrollment, SchoolRegistrationDto>()
+            profile.CreateMap<SchoolRegistration, SchoolRegistrationDto>()
                 .ForMember(s => s.SchoolRegistrationId,
                     opt => opt.MapFrom(e => e.Id))
                 .ForMember(s => s.TrainingName,

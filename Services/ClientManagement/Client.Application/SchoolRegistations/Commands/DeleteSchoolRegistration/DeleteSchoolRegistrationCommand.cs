@@ -36,7 +36,7 @@ namespace Client.Application.SchoolRegistations.Commands.DeleteSchoolRegistratio
                 }
                 else
                 {
-                    throw new NotFoundException(nameof(SchoolEnrollment), request.SchoolRegistrationId);
+                    throw new NotFoundException(nameof(SchoolRegistration), request.SchoolRegistrationId);
                 }
 
                 return Unit.Value;

@@ -15,6 +15,6 @@ namespace Client.Application.Models
         public Assessment Assessment { get; set; }
         public Core.Entities.Client Client { get; set; }
         public List<Track> Supports { get; set; }
-        public List<SchoolEnrollment> SchoolRegistrations { get; set; } = new List<SchoolEnrollment>();
+        public List<SchoolRegistration> SchoolRegistrations { get; set; } = new List<SchoolRegistration>();
     }
 }

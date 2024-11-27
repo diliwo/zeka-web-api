@@ -4,11 +4,11 @@ namespace Client.Core.Interfaces
 {
     public interface ISchoolRegistrationRepository
     {
-        void Persist(SchoolEnrollment schoolEnrollment);
-        SchoolEnrollment GetRegistrationById(int registrationId);
-        IEnumerable<SchoolEnrollment> GetResgistrationsByClient(int id);
-        IQueryable<SchoolEnrollment> GetRegistrations();
+        void Persist(SchoolRegistration schoolRegistration);
+        SchoolRegistration GetRegistrationById(int registrationId);
+        IEnumerable<SchoolRegistration> GetResgistrationsByClient(int id);
+        IQueryable<SchoolRegistration> GetRegistrations();
         IQueryable GetResgistrationsByClientId(int id, string filter = "");
-        void SoftDelete(SchoolEnrollment schoolEnrollment);
+        void SoftDelete(SchoolRegistration schoolRegistration);
     }
 }
