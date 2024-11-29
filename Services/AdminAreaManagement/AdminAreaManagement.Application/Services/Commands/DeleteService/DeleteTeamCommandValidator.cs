@@ -17,7 +17,7 @@ namespace AdminAreaManagement.Application.Services.Commands.DeleteService
                 //.MustAsync(HasReferent).WithMessage("Cette action n'est pas permise !");
                 .MustAsync(async (int id, CancellationToken cancellationToken) =>
                 {
-                    bool exist = await _repository.Team.TeamHasStaffMember(id);
+                    bool exist = await _repository.Team.TeamHasStaffMembers(id);
                     return !exist;
                 }).OverridePropertyName("Property").WithMessage("Action impossible, des référents sont attachés à ce service !");
         }

@@ -46,7 +46,7 @@ namespace AdminAreaManagement.Application.Referents.Commands.UpsertReferent
                         throw new NotFoundException(nameof(foundedService), request.TeamId);
                     }
 
-                    entity = new Referent(request.FirstName, request.LastName, foundedService, request.UserName);
+                    entity = new StaffMember(request.FirstName, request.LastName, foundedService, request.UserName);
                 }
 
                 _repository.StaffMember.Persist(entity);

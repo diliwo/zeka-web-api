@@ -37,13 +37,13 @@ namespace AdminAreaManagement.Application.DocumentPartners.Queries.GetDocument
                     return new FileDto()
                     {
                         Name = document.Description,
-                        Data = _fileService.GetContentFile(query.PartnerId, query.JobId, query.DocumentId,document.ContentType)
+                        Data = _fileService.GetContentFile(query.PartnerId, query.DocumentId,document.ContentType)
                     };
                 }
                 catch (Exception ex)
                 {
                     var filePath = _fileService.GetFolderPath(query.PartnerId);
-                    Log.Error(ex,$"GetSelectedDocumentQueryHandler {query.DocumentId}");
+                    //Log.Error(ex,$"GetSelectedDocumentQueryHandler {query.DocumentId}");
                     if (ex.GetType() == typeof(FileNotFoundException) || ex.GetType() == typeof(DirectoryNotFoundException))
                         throw new NotFoundException("Fichier", filePath);
                     throw new FileAccessException(filePath);

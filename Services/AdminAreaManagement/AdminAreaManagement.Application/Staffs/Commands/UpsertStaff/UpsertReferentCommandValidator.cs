@@ -14,7 +14,7 @@ namespace AdminAreaManagement.Application.Referents.Commands.UpsertReferent
             RuleFor(v => v.UserName)
                 .MustAsync(async (obj, username, cancellationToken) =>
                 {
-                    bool result = _repository.StaffMember.UserAlreadyExists(username, obj.TeamId);
+                    bool result = _repository.StaffMember.StaffMemberBelongsToTeam(username, obj.TeamId);
 
                     return !result;
 

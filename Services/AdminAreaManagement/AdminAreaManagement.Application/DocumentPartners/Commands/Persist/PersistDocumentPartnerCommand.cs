@@ -49,7 +49,6 @@ namespace AdminAreaManagement.Application.DocumentPartners.Commands.Persist
                 }
                 catch (Exception e)
                 {
-                    Log.Error(e, $"PersistDocumentPartnerCommand");
                     throw;
                 }
 

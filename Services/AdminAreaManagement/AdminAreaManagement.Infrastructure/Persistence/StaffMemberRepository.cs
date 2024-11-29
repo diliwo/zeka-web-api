@@ -35,7 +35,7 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             return _context.StaffMembers.FirstOrDefault(s => s.Id == id);
         }
 
-        public bool UserAlreadyExists(string username, int idService)
+        public bool StaffMemberBelongsToTeam(string username, int idService)
         {
             bool result = false;
             var referent = _context.StaffMembers.FirstOrDefault(s => s.UserName == username && s.TeamId == idService && s.Softdelete != true);
@@ -64,12 +64,6 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             }
 
             return referents;
-        }
-
-        public async Task<bool> ServiceHasReferents(int serviceId)
-        {
-            var result = _context.StaffMembers.Any(r => r.TeamId == serviceId && r.Softdelete == false);
-            return result;
         }
 
         public void SoftDelete(StaffMember Referent)

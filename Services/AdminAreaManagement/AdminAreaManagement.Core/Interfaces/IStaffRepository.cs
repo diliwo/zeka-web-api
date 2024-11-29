@@ -8,5 +8,6 @@ namespace AdminAreaManagement.Core.Interfaces
         StaffMember Get(int id);
         IQueryable<StaffMember> GetStaffMembers(string filter = null, string orderBy = "");
         void SoftDelete(StaffMember StaffMember);
+        bool StaffMemberBelongsToTeam(string username, int idService);
     }
 }

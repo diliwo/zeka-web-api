@@ -10,5 +10,6 @@ namespace AdminAreaManagement.Core.Interfaces
         IQueryable<Team> GetTeams(string filter);
         void SoftDelete(Team team);
         public Task<bool> ContainsStaffMembers(int teamId);
+        Task<bool> TeamHasStaffMembers(int serviceId);
     }
 }

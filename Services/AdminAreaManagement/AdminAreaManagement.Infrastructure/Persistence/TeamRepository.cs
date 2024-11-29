@@ -77,6 +77,12 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             throw new NotImplementedException();
         }
 
+        public async Task<bool> TeamHasStaffMembers(int serviceId)
+        {
+            var result = _context.StaffMembers.Any(r => r.TeamId == serviceId && r.Softdelete == false);
+            return result;
+        }
+
         public void Dispose()
         {
             if (_context !=null)
