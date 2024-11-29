@@ -1,6 +1,6 @@
-﻿using Client.Core.Common;
+﻿using ClientManagement.Core.Common;
 
-namespace Client.Core.ValueObjects
+namespace ClientManagement.Core.ValueObjects
 {
     public class Email : ValueObject
     {

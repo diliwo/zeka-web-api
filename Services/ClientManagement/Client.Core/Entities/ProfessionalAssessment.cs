@@ -1,6 +1,6 @@
-﻿using Client.Core.Common;
+﻿using ClientManagement.Core.Common;
 
-namespace Client.Core.Entities
+namespace ClientManagement.Core.Entities
 {
     public class ProfessionalAssessment : Entity
     {

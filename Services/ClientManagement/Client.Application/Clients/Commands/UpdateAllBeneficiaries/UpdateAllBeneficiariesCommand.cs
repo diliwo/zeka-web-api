@@ -1,7 +1,7 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Clients.Commands.UpdateAllBeneficiaries
+namespace ClientManagement.Application.Clients.Commands.UpdateAllBeneficiaries
 {
     public class UpdateAllClientsCommand : IRequest<int>
     {

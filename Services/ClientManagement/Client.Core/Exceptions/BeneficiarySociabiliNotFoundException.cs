@@ -1,4 +1,4 @@
-﻿namespace Client.Core.Exceptions
+﻿namespace ClientManagement.Core.Exceptions
 {
     public class ClientSociabiliNotFoundException : Exception
     {

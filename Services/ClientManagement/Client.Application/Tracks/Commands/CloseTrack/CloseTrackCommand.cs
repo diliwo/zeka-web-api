@@ -1,8 +1,8 @@
-﻿using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Tracks.Commands.CloseTrack
+namespace ClientManagement.Application.Tracks.Commands.CloseTrack
 {
     public class CloseTrackCommand : IRequest<int>
     {

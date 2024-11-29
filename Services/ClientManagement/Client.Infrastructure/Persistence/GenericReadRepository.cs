@@ -1,6 +1,6 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 
-namespace Client.Infrastructure.Persistence
+namespace ClientManagement.Infrastructure.Persistence
 {
     public class GenericReadRepository<T> : List<T>, IGenericReadRepository<T>
     {

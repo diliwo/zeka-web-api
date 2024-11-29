@@ -1,14 +1,14 @@
 ﻿using AutoMapper;
-using Client.Application.Common.Exceptions;
-using Client.Application.Common.Mappings;
-using Client.Application.Common.Models;
-using Client.Core.Common.Dto;
-using Client.Core.Interfaces;
+using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Application.Common.Models;
+using ClientManagement.Core.Common.Dto;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Tracks.Queries.GetSupportsByReferents
+namespace ClientManagement.Application.Tracks.Queries.GetSupportsByReferents
 {
-    public class GetSupportsByStaffsQuery : IRequest<PaginatedList<MyConsultantSupportDto>>
+    public class GetSupportsByStaffMembersQuery : IRequest<PaginatedList<MyConsultantSupportDto>>
     {
         public string Filter { get; set; }
         public int PageNumber { get; set; }
@@ -17,14 +17,14 @@ namespace Client.Application.Tracks.Queries.GetSupportsByReferents
         public string OrderBy { get; set; }
 
 
-        public class GetClientsByStaffsQueryHandler : IRequestHandler<GetSupportsByStaffsQuery, PaginatedList<MyConsultantSupportDto>>
+        public class GetClientsByStaffMembersQueryHandler : IRequestHandler<GetSupportsByStaffMembersQuery, PaginatedList<MyConsultantSupportDto>>
         {
             private readonly IRepositoryManager _repository;
             private ISortHelper<MyConsultantSupportDto> _sortMyConsultantSupports;
             //private readonly IHttpContextAccessor _httpContextAccessor;
             private readonly IMapper _mapper;
 
-            public GetClientsByStaffsQueryHandler(
+            public GetClientsByStaffMembersQueryHandler(
                 IRepositoryManager repository, 
                 //IHttpContextAccessor httpContextAccessor,
                 ISortHelper<MyConsultantSupportDto> sortMyConsultantSupports,
@@ -36,16 +36,16 @@ namespace Client.Application.Tracks.Queries.GetSupportsByReferents
                 _mapper = mapper;
             }
 
-            public async Task<PaginatedList<MyConsultantSupportDto>> Handle(GetSupportsByStaffsQuery request, CancellationToken cancellationToken)
+            public async Task<PaginatedList<MyConsultantSupportDto>> Handle(GetSupportsByStaffMembersQuery request, CancellationToken cancellationToken)
             {
-                //var StaffUserName = _httpContextAccessor.HttpContext.User.Identity.Name;
-                var StaffUserName = "System";
-                if (StaffUserName == null)
+                //var StaffMemberUserName = _httpContextAccessor.HttpContext.User.Identity.Name;
+                var StaffMemberUserName = "System";
+                if (StaffMemberUserName == null)
                 {
-                    throw new NotFoundException(nameof(StaffUserName), StaffUserName);
+                    throw new NotFoundException(nameof(StaffMemberUserName), StaffMemberUserName);
                 }
 
-                    var supports = _sortMyConsultantSupports.ApplySort(_repository.Track.GetConsultantSupportsByUserName(StaffUserName,request.Filter, request.IsActive),request.OrderBy);
+                    var supports = _sortMyConsultantSupports.ApplySort(_repository.Track.GetConsultantSupportsByUserName(StaffMemberUserName,request.Filter, request.IsActive),request.OrderBy);
 
                 return await supports.PaginatedListAsync(request.PageNumber, request.PageSize);
             }

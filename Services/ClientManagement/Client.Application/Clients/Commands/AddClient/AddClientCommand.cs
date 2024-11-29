@@ -1,7 +1,7 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Clients.Commands.AddClient
+namespace ClientManagement.Application.Clients.Commands.AddClient
 {
     public class AddClientCommand : IRequest<long>
     {

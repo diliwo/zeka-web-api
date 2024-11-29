@@ -1,11 +1,11 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Client.Application.MonitoringActions.Common;
-using Client.Core.Interfaces;
+using ClientManagement.Application.MonitoringActions.Common;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Application.MonitoringActions.Queries.GetAll
+namespace ClientManagement.Application.MonitoringActions.Queries.GetAll
 {
     public class GetMonitoringActionsQuery : IRequest<List<MonitoringActionDto>>
     {

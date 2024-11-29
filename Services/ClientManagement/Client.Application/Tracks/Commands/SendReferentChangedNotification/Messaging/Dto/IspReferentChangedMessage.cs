@@ -1,6 +1,6 @@
-﻿namespace Client.Application.Tracks.Commands.SendReferentChangedNotification.Messaging.Dto
+﻿namespace ClientManagement.Application.Tracks.Commands.SendReferentChangedNotification.Messaging.Dto
 {
-    public class IspStaffChangedMessage
+    public class IspStaffMemberChangedMessage
     {
         public string WorkerFirstName { get; set; }
         public string WorkerLastName { get; set; }

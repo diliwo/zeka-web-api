@@ -1,8 +1,8 @@
-﻿using Client.Application.Common.Exceptions;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Clients.Commands.UpdateNativeLanguage
+namespace ClientManagement.Application.Clients.Commands.UpdateNativeLanguage
 {
     public class UpdateNativeLanguageCommand : IRequest<int>
     {

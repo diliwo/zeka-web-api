@@ -1,10 +1,10 @@
-﻿using Client.Application.Common.Models;
-using Client.Core.Common;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Models;
+using ClientManagement.Core.Common;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.Extensions.Logging;
 
-namespace Client.Application.Common.Services
+namespace ClientManagement.Application.Common.Services
 {
     public class DomainEventService : IDomainEventService
     {

@@ -1,12 +1,11 @@
-﻿using Client.Core.Entities;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Client.Infrastructure.Persistence.Configurations
+namespace ClientManagement.Infrastructure.Persistence.Configurations
 {
-    public class ClientConfiguration : IEntityTypeConfiguration<Core.Entities.Client>
+    public class ClientConfiguration : IEntityTypeConfiguration<ClientManagement.Core.Entities.Client>
     {
-        public void Configure(EntityTypeBuilder<Core.Entities.Client> builder)
+        public void Configure(EntityTypeBuilder<ClientManagement.Core.Entities.Client> builder)
         {
             builder
                 .HasKey(r => new { r.Id });

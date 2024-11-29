@@ -1,17 +1,17 @@
-﻿using Client.Application.Common.Exceptions;
-using Client.Application.Tracks.Commands.SendReferentChangedNotification;
-using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Tracks.Commands.SendReferentChangedNotification;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Tracks.Commands.UpsertSupport
+namespace ClientManagement.Application.Tracks.Commands.UpsertSupport
 {
     public class UpsertSupportCommand : IRequest<int>
     {
         public int? SupportId { get; set; }
         public DateTime StartDate { get; set; }
         public DateTime? EndDate { get; set; }
-        public int StaffId { get; set; }
+        public int StaffMemberId { get; set; }
         public int ClientId { get; set; }
         public string Note { get; set; }
 
@@ -39,7 +39,7 @@ namespace Client.Application.Tracks.Commands.UpsertSupport
                     entity = _repository.Track.Get(request.SupportId.Value);
                     entity.StartDate = start;
                     entity.EndDate = request.EndDate;
-                    entity.StaffId = request.StaffId;
+                    entity.StaffMemberId = request.StaffMemberId;
                     entity.Note = request.Note;
                 }
                 else
@@ -50,19 +50,19 @@ namespace Client.Application.Tracks.Commands.UpsertSupport
                         throw new NotFoundException(nameof(Client), request.ClientId);
                     }
 
-                    var Staff = _repository.Staff.Get(request.StaffId);
-                    if (Staff == null)
+                    var StaffMember = _repository.StaffMember.Get(request.StaffMemberId);
+                    if (StaffMember == null)
                     {
                         throw new NotFoundException(nameof(entity), request.SupportId);
                     }
 
-                    entity = new Track(Client,request.StartDate, Staff, request.Note);
+                    entity = new Track(Client,request.StartDate, StaffMember, request.Note);
                 }
 
                 _repository.Track.Persist(entity);
                 _repository.SaveAsync();
 
-                await _mediator.Publish(new SendStaffChangedNotificationCommand(entity.Id),
+                await _mediator.Publish(new SendStaffMemberChangedNotificationCommand(entity.Id),
                     cancellationToken);
 
                 return entity.Id;

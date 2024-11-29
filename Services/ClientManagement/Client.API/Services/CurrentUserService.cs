@@ -1,8 +1,7 @@
-﻿using Client.Core.Interfaces;
-using System.Security.Claims;
-using Microsoft.AspNetCore.Http;
+﻿using System.Security.Claims;
+using ClientManagement.Core.Interfaces;
 
-namespace Client.API.Services
+namespace ClientManagement.API.Services
 {
     public class CurrentUserService : ICurrentUserService
     {
@@ -12,7 +11,7 @@ namespace Client.API.Services
         {
             _httpContextAccessor = httpContextAccessor;
         }
-        //var StaffUserName = _httpContextAccessor.HttpContext.User.Identity.Name;
+        //var StaffMemberUserName = _httpContextAccessor.HttpContext.User.Identity.Name;
         public string UserId => _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
         public string Username => _httpContextAccessor.HttpContext?.User?.Identity.Name;
     }

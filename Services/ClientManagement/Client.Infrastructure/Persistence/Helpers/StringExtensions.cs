@@ -1,4 +1,4 @@
-﻿namespace Client.Infrastructure.Persistence.Helpers
+﻿namespace ClientManagement.Infrastructure.Persistence.Helpers
 {
     public static class StringExtensions
     {

@@ -1,6 +1,6 @@
 ﻿using FluentValidation;
 
-namespace Client.Application.MonitoringActions.Commands.CreateAction
+namespace ClientManagement.Application.MonitoringActions.Commands.CreateAction
 {
     public class CreateMonitoringActionCommandValidator : AbstractValidator<CreateMonitoringActionCommand>
     {

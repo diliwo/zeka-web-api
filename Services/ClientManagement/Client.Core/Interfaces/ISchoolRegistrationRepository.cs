@@ -1,6 +1,6 @@
-﻿using Client.Core.Entities;
+﻿using ClientManagement.Core.Entities;
 
-namespace Client.Core.Interfaces
+namespace ClientManagement.Core.Interfaces
 {
     public interface ISchoolRegistrationRepository
     {

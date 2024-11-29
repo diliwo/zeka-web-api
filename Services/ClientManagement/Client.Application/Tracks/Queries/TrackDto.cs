@@ -1,18 +1,18 @@
 ﻿using AutoMapper;
-using Client.Application.Clients.Queries.GetClients;
-using Client.Application.Common.Mappings;
-using Client.Core.Entities;
+using ClientManagement.Application.Clients.Queries.GetClients;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Core.Entities;
 
-namespace Client.Application.Tracks.Queries
+namespace ClientManagement.Application.Tracks.Queries
 {
     public class TrackDto : IMapFrom<Track>
     {
         public int SupportId { get; set; }
         public DateTime StartDate { get; set; }
         public DateTime? EndDate { get; set; } = DateTime.Now;
-        public int StaffId { get; set; }
+        public int StaffMemberId { get; set; }
         public int ClientId { get; set; }
-        public string StaffInfo { get; set; }
+        public string StaffMemberInfo { get; set; }
         public ClientLookUpDto Client { get; set; }
         public bool IsActif { get; set; }
         public string Note { get; set; }
@@ -24,11 +24,11 @@ namespace Client.Application.Tracks.Queries
             profile.CreateMap<Track, TrackDto>()
                 .ForMember(b => b.SupportId,
                     opt => opt.MapFrom(e => e.Id))
-                .ForMember(b => b.StaffInfo,
+                .ForMember(b => b.StaffMemberInfo,
                     opt =>
                         opt.MapFrom(e =>
-                            e.StaffId != null
-                                ? e.Staff.FullName + ' ' + '(' + e.Staff.Service.Acronym + ')'
+                            e.StaffMemberId != null
+                                ? e.StaffMember.FullName + ' ' + '(' + e.StaffMember.Service.Acronym + ')'
                                 : string.Empty))
                 .ForMember(s => s.HasNote, 
                     opt => 

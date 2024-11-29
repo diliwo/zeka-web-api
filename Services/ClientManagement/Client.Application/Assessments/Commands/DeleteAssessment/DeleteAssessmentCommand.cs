@@ -1,9 +1,8 @@
-﻿using Client.Application.Common.Exceptions;
-using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Assessments.Commands.DeleteAssessment
+namespace ClientManagement.Application.Assessments.Commands.DeleteAssessment
 {
     public class DeleteAssessmentCommand : IRequest<Unit>
     {

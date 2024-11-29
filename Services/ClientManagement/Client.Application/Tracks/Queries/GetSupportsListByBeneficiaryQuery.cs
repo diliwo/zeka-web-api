@@ -1,11 +1,11 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Client.Application.Common.Mappings;
-using Client.Application.Common.Models;
-using Client.Core.Interfaces;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Application.Common.Models;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Tracks.Queries
+namespace ClientManagement.Application.Tracks.Queries
 {
     public class GetTracksListByClientQuery : IRequest<PaginatedList<TrackDto>>
     {

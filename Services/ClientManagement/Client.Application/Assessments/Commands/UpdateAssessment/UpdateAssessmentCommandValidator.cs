@@ -1,7 +1,7 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using FluentValidation;
 
-namespace Client.Application.Assessments.Commands.UpdateAssessment
+namespace ClientManagement.Application.Assessments.Commands.UpdateAssessment
 {
     public class UpdateAssessmentCommandValidator : AbstractValidator<UpdateAssessmentCommand>
     {

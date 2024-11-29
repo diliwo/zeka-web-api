@@ -1,6 +1,6 @@
-﻿using Client.Application.Common.Exceptions;
+﻿using ClientManagement.Application.Common.Exceptions;
 
-namespace Client.Application.Clients.Commands.Exceptions
+namespace ClientManagement.Application.Clients.Commands.Exceptions
 {
     public class PatchDocBadRequestException : BadRequestException
     {

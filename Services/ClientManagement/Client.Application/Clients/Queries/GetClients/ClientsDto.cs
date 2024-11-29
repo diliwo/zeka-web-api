@@ -1,4 +1,4 @@
-﻿namespace Client.Application.Clients.Queries.GetClients
+﻿namespace ClientManagement.Application.Clients.Queries.GetClients
 {
     public class ClientsDto
     {

@@ -1,8 +1,8 @@
-﻿using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Assessments.Commands.FinalizeAssessment
+namespace ClientManagement.Application.Assessments.Commands.FinalizeAssessment
 {
     public class FinalizeAssessmentCommand : IRequest<int>
     {

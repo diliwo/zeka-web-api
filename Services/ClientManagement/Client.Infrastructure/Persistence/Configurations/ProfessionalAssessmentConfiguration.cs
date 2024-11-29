@@ -1,8 +1,8 @@
-﻿using Client.Core.Entities;
+﻿using ClientManagement.Core.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Client.Infrastructure.Persistence.Configurations
+namespace ClientManagement.Infrastructure.Persistence.Configurations
 {
     public class ProfessionalAssessmentConfiguration : IEntityTypeConfiguration<ProfessionalAssessment>
     {

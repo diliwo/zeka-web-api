@@ -1,10 +1,9 @@
-﻿using Client.Application.Common.Exceptions;
-using Client.Core.Entities;
-using Client.Core.Enums;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Enums;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.SchoolRegistations.Commands.UpdateSchoolRegistration
+namespace ClientManagement.Application.SchoolRegistations.Commands.UpdateSchoolRegistration
 {
     public class UpdateSchoolRegistrationCommand : IRequest<int>
     {

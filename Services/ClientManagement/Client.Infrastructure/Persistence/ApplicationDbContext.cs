@@ -1,10 +1,10 @@
 ﻿using System.Reflection;
-using Client.Core.Common;
-using Client.Core.Entities;
-using Client.Core.Interfaces;
+using ClientManagement.Core.Common;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Infrastructure.Persistence
+namespace ClientManagement.Infrastructure.Persistence
 {
     public class ApplicationDbContext :  DbContext
     {
@@ -14,7 +14,7 @@ namespace Client.Infrastructure.Persistence
 
         public ApplicationDbContext(DbContextOptions options) : base(options) { }
 
-        public DbSet<Core.Entities.Client> Clients { get; set; }
+        public DbSet<ClientManagement.Core.Entities.Client> Clients { get; set; }
         public DbSet<Track> tracks { get; set; }
         public DbSet<SchoolRegistration> SchoolRegistrations { get; set; }
         public DbSet<Assessment> Assessments { get; set; }

@@ -1,12 +1,12 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Client.Application.Assessments.Common;
-using Client.Application.Common.Mappings;
-using Client.Application.Common.Models;
-using Client.Core.Interfaces;
+using ClientManagement.Application.Assessments.Common;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Application.Common.Models;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Assessments.Queries.GetBilansList
+namespace ClientManagement.Application.Assessments.Queries.GetBilansList
 {
     public class GetArchivedBilansListQuery : IRequest<PaginatedList<AssessmentDto>>
     {

@@ -1,15 +1,16 @@
 ﻿using AutoMapper;
-using Client.Application.Common.Mappings;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Core.Entities;
 
-namespace Client.Application.Clients.Model;
+namespace ClientManagement.Application.Clients.Model;
 
-public class UpdateClientDto : IMapFrom<Core.Entities.Client>
+public class UpdateClientDto : IMapFrom<Client>
 {
     public string IbisNumber { get; set; }
 
     public void Mapping(Profile profile)
     {
-        profile.CreateMap<UpdateClientDto, Core.Entities.Client>()
+        profile.CreateMap<UpdateClientDto, Client>()
             .ReverseMap();
     }
 }

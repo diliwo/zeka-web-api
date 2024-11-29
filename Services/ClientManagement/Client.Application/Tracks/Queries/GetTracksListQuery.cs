@@ -1,10 +1,10 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Client.Core.Interfaces;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Application.Tracks.Queries
+namespace ClientManagement.Application.Tracks.Queries
 {
     public class GetTracksListQuery : IRequest<TracksListVm>
     {

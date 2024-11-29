@@ -1,11 +1,11 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Client.Application.Assessments.Common;
-using Client.Core.Interfaces;
+using ClientManagement.Application.Assessments.Common;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Application.Assessments.Queries.GetLastBilan
+namespace ClientManagement.Application.Assessments.Queries.GetLastBilan
 {
     public class GetLastAssessmentQuery : IRequest<AssessmentDto>
     {

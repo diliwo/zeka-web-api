@@ -1,13 +1,13 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Client.Application.Common.Mappings;
-using Client.Application.Common.Models;
-using Client.Application.QuarterlyMonitorings.Common;
-using Client.Core.Interfaces;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Application.Common.Models;
+using ClientManagement.Application.QuarterlyMonitorings.Common;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Application.QuarterlyMonitorings.Queries.GetListByBeneficiary
+namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetListByBeneficiary
 {
     public class GetQuarterlyMonitoringsByClientQuery : IRequest<PaginatedList<QuarterlyMonitoringDto>>
     {
@@ -31,10 +31,10 @@ namespace Client.Application.QuarterlyMonitorings.Queries.GetListByBeneficiary
         {
             var qMonitorings = await _repository.QuarterlyMonitoring.getQuarterlyMonitoringsByClientId(query.ClientId, query.Filter, query.WithDeleted)
                 .Include(q => q.Client)
-                .Include(q => q.Staff)
+                .Include(q => q.StaffMember)
                 .Include(q => q.MonitoringAction)
                 .OrderByDescending(x => x.ActionDate)
-                //.ThenBy(q => q.Staff.FullName)
+                //.ThenBy(q => q.StaffMember.FullName)
                 .ProjectTo<QuarterlyMonitoringDto>(_mapper.ConfigurationProvider)
                 .PaginatedListAsync(query.PageNumber, query.PageSize);
             return qMonitorings;

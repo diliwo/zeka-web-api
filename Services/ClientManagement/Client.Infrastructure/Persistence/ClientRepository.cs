@@ -1,16 +1,15 @@
-﻿using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using LinqKit;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Infrastructure.Persistence
+namespace ClientManagement.Infrastructure.Persistence
 {
-    public class ClientRepository : RepositoryBase<Core.Entities.Client>,IClientRepository
+    public class ClientRepository : RepositoryBase<ClientManagement.Core.Entities.Client>,IClientRepository
     {
 
         public ClientRepository(ApplicationDbContext context) : base(context){}
 
-        public void Persist(Core.Entities.Client client)
+        public void Persist(ClientManagement.Core.Entities.Client client)
         {
             if (client.Id == default(int))
             {
@@ -25,49 +24,49 @@ namespace Client.Infrastructure.Persistence
 
         }
 
-        public Core.Entities.Client Get(int id, bool trackChanges = false)
+        public ClientManagement.Core.Entities.Client Get(int id, bool trackChanges = false)
         {
             return FindByCondition(b => b.Id.Equals(id), trackChanges).FirstOrDefault();
         }
 
-        public Task<Core.Entities.Client> GetSourceIdAsync(int sourceId, bool trackChanges = false)
+        public Task<ClientManagement.Core.Entities.Client> GetSourceIdAsync(int sourceId, bool trackChanges = false)
         {
             return FindByCondition(b => b.SourceId.Equals(sourceId), trackChanges).FirstOrDefaultAsync();
         }
 
-        public Task<Core.Entities.Client> GetAsync(int id, bool trackChanges = false)
+        public Task<ClientManagement.Core.Entities.Client> GetAsync(int id, bool trackChanges = false)
         {
             return FindByCondition(b => b.Id.Equals(id), trackChanges).FirstOrDefaultAsync();
         }
 
-        public Core.Entities.Client GetClientByNiss(string niss, bool trackChanges = false)
+        public ClientManagement.Core.Entities.Client GetClientByNiss(string niss, bool trackChanges = false)
         {
             return FindByCondition(Client => Client.Niss.Equals(niss), trackChanges)
                 .SingleOrDefault();
         }
 
-        public Task<Core.Entities.Client> GetClientByNissAsync(string niss, bool trackChanges = false)
+        public Task<ClientManagement.Core.Entities.Client> GetClientByNissAsync(string niss, bool trackChanges = false)
         {
             return FindByCondition(Client => Client.Niss.Equals(niss), trackChanges)
                 .SingleOrDefaultAsync();
         }
 
-        public IQueryable<Core.Entities.Client> GetClients()
+        public IQueryable<ClientManagement.Core.Entities.Client> GetClients()
         {
             return FindAll(false);
         }
 
-        public async Task<IEnumerable<Core.Entities.Client>> GetClientsAsync(bool trackChanges) => await FindAll(trackChanges).ToListAsync();
+        public async Task<IEnumerable<ClientManagement.Core.Entities.Client>> GetClientsAsync(bool trackChanges) => await FindAll(trackChanges).ToListAsync();
 
         public async Task<List<string>> GetClientNissesAsync(bool trackChanges) => await FindAll(trackChanges).Select(n => n.Niss).ToListAsync();
 
-        public IQueryable<Core.Entities.Client> GetClientsBySearchText(string text)
+        public IQueryable<ClientManagement.Core.Entities.Client> GetClientsBySearchText(string text)
         {
             var benficiaries = FindByCondition(p => p.Softdelete != true, false).AsExpandable();
 
             if (!string.IsNullOrEmpty(text))
             {
-                var predicate = PredicateBuilder.New<Core.Entities.Client>();
+                var predicate = PredicateBuilder.New<ClientManagement.Core.Entities.Client>();
 
                 predicate = predicate.Or(p => p.FirstName.ToLower().Contains(text.ToLower().Trim()));
                 predicate = predicate.Or(p => p.LastName.ToLower().Contains(text.ToLower().Trim()));

@@ -1,18 +1,16 @@
-﻿using System.Reflection;
-using Client.API.Infrastructure;
-using Client.Application.SchoolRegistations.Common;
-using Client.Core.Common.Dto;
-using Client.Core.Interfaces;
-using Client.Infrastructure.Persistence;
-using Client.Infrastructure.Persistence.Helpers;
-using Client.Infrastructure.Services;
+﻿using ClientManagement.API.Infrastructure;
+using ClientManagement.Application.SchoolRegistations.Common;
+using ClientManagement.Core.Common.Dto;
+using ClientManagement.Core.Interfaces;
+using ClientManagement.Infrastructure.Persistence.Helpers;
+using ClientManagement.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 #if (UseApiOnly)
 using NSwag;
 using NSwag.Generation.Processors.Security;
 #endif
 
-namespace Client.API;
+namespace ClientManagement.API;
 
 public static class DependencyInjection
 {

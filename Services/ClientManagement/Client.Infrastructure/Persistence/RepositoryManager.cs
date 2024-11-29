@@ -1,6 +1,6 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 
-namespace Client.Infrastructure.Persistence;
+namespace ClientManagement.Infrastructure.Persistence;
 /**
  * Repository Manager will instantiate and register (inside dependency injection container) a repository class only if needed.
  */
@@ -9,7 +9,7 @@ public sealed class RepositoryManager : IRepositoryManager
     private readonly ApplicationDbContext _applicationDbContext;
     private readonly Lazy<IClientRepository> _ClientRepository;
     private readonly Lazy<ITrackRepository> _supportRepository;
-    private readonly Lazy<IStaffRepository> _StaffRepository;
+    private readonly Lazy<IStaffMemberRepository> _StaffMemberRepository;
     private readonly Lazy<ITrainingTypeRepository> _trainingTypeRepository;
     private readonly Lazy<ITrainingRepository> _TrainingRepository;
     private readonly Lazy<IAssessmentRepository> _bianRepository;
@@ -36,7 +36,7 @@ public sealed class RepositoryManager : IRepositoryManager
 
     public IClientRepository Client => _ClientRepository.Value;
     public ITrackRepository Track => _supportRepository.Value;
-    public IStaffRepository Staff => _StaffRepository.Value;
+    public IStaffMemberRepository StaffMember => _StaffMemberRepository.Value;
     public ISchoolRegistrationRepository SchoolRegistration => _schoolRegistrationRepository.Value;
     public ITrainingTypeRepository TrainingType => _trainingTypeRepository.Value;
     public IProfessionRepository Profession => _professionRepository.Value;

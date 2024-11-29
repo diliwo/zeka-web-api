@@ -1,10 +1,8 @@
-﻿using Client.Core.Entities;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Newtonsoft.Json;
 
-namespace Client.Infrastructure.Persistence.DbContextExtensions
+namespace ClientManagement.Infrastructure.Persistence.DbContextExtensions
 {
     public static class DbContextExtension
     {

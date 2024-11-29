@@ -1,9 +1,9 @@
 ﻿using AutoMapper;
-using Client.Application.Common.Mappings;
-using Client.Core.Entities;
-using Client.Core.Enums;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Enums;
 
-namespace Client.Application.Assessments.Common
+namespace ClientManagement.Application.Assessments.Common
 {
     public class AssessmentDto : IMapFrom<Assessment>
     {

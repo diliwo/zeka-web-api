@@ -1,8 +1,8 @@
 ﻿using System.Linq.Expressions;
-using Client.Core.Interfaces;
+using ClientManagement.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Infrastructure.Persistence;
+namespace ClientManagement.Infrastructure.Persistence;
 
 public class RepositoryBase<T> : IRepositoryBase<T> where T : class
 {

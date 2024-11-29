@@ -1,4 +1,4 @@
-﻿namespace Client.Application.Common.Models
+﻿namespace ClientManagement.Application.Common.Models
 {
     public class Result
     {

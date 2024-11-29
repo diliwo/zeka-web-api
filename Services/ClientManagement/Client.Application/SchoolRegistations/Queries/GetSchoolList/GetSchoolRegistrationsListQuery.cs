@@ -1,13 +1,13 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Client.Application.Common.Exceptions;
-using Client.Application.Common.Mappings;
-using Client.Application.Common.Models;
-using Client.Application.SchoolRegistations.Common;
-using Client.Core.Interfaces;
+using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Application.Common.Models;
+using ClientManagement.Application.SchoolRegistations.Common;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.SchoolRegistations.Queries.GetSchoolList
+namespace ClientManagement.Application.SchoolRegistations.Queries.GetSchoolList
 {
     public class GetSchoolRegistrationsListQuery : IRequest<PaginatedList<SchoolRegistrationDto>>
     {

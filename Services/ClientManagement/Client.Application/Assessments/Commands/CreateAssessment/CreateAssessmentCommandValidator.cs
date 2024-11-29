@@ -1,7 +1,7 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using FluentValidation;
 
-namespace Client.Application.Assessments.Commands.CreateAssessment
+namespace ClientManagement.Application.Assessments.Commands.CreateAssessment
 {
     public class CreateAssessmentCommandValidator : AbstractValidator<CreateAssessmentCommand>
     {

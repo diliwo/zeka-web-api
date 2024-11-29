@@ -1,4 +1,4 @@
-﻿namespace Client.Infrastructure.Persistence.Configurations
+﻿namespace ClientManagement.Infrastructure.Persistence.Configurations
 {
     internal static class ConfigurationKeys
     {

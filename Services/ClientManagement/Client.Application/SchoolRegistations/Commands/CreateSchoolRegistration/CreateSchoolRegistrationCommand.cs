@@ -1,10 +1,10 @@
-﻿using Client.Application.Common.Exceptions;
-using Client.Core.Entities;
-using Client.Core.Enums;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Enums;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.SchoolRegistations.Commands.CreateSchoolRegistration
+namespace ClientManagement.Application.SchoolRegistations.Commands.CreateSchoolRegistration
 {
     public class CreateSchoolRegistrationCommand : IRequest<int>
     {

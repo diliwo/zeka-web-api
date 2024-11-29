@@ -1,6 +1,6 @@
 ﻿using FluentValidation;
 
-namespace Client.Application.QuarterlyMonitorings.Queries.GetList
+namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetList
 {
     public class GetQuarterlyMonitoringsQueryValidator : AbstractValidator<GetQuarterlyMonitoringsQuery>
     {

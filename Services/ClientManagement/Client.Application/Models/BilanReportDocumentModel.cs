@@ -1,6 +1,6 @@
-﻿using Client.Core.Entities;
+﻿using ClientManagement.Core.Entities;
 
-namespace Client.Application.Models
+namespace ClientManagement.Application.Models
 {
     public class BilanReportDocumentModel
     {
@@ -13,7 +13,7 @@ namespace Client.Application.Models
         public string EmailFr { get; set; }
         public string EmailNl { get; set; }
         public Assessment Assessment { get; set; }
-        public Core.Entities.Client Client { get; set; }
+        public Client Client { get; set; }
         public List<Track> Supports { get; set; }
         public List<SchoolRegistration> SchoolRegistrations { get; set; } = new List<SchoolRegistration>();
     }
