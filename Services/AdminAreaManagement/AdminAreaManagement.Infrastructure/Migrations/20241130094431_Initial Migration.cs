@@ -13,24 +13,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
-                name: "NatureOfContract",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    Name = table.Column<string>(type: "text", nullable: false),
-                    CreatedBy = table.Column<string>(type: "text", nullable: false),
-                    Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    LastModifiedBy = table.Column<string>(type: "text", nullable: false),
-                    LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_NatureOfContract", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "Professions",
                 columns: table => new
                 {
@@ -309,9 +291,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "Emails");
-
-            migrationBuilder.DropTable(
-                name: "NatureOfContract");
 
             migrationBuilder.DropTable(
                 name: "Phones");

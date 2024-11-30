@@ -69,40 +69,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.ToTable("DocumentPartners");
                 });
 
-            modelBuilder.Entity("AdminAreaManagement.Core.Entities.NatureOfContract", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("Created")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("LastModified")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("LastModifiedBy")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<bool>("Softdelete")
-                        .HasColumnType("boolean");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("NatureOfContract");
-                });
-
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.Partner", b =>
                 {
                     b.Property<int>("Id")
