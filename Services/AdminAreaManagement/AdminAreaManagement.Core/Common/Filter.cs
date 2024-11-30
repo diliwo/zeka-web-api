@@ -1,4 +1,4 @@
-﻿namespace AdminAreaManagement.Core.Commun
+﻿namespace AdminAreaManagement.Core.Common
 {
     public class Filter
     {

@@ -3,7 +3,7 @@ using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Formations.Commands.DeleteFormation
+namespace AdminAreaManagement.Application.Formations.Commands.DeleteTraining
 {
     public class DeleteTrainingCommand : IRequest<Unit>
     {

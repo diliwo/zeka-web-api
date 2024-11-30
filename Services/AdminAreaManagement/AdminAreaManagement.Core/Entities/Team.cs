@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Core.Commun;
+﻿using AdminAreaManagement.Core.Common;
 using AdminAreaManagement.Core.Exceptions;
 
 namespace AdminAreaManagement.Core.Entities

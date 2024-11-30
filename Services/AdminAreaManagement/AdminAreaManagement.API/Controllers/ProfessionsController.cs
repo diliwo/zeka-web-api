@@ -1,16 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using AdminAreaManagement.API.Controllers;
-using AdminAreaManagement.Application.Common.Models;
+﻿using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.Professions.Commands.DeleteProfession;
 using AdminAreaManagement.Application.Professions.Commands.UpsertProfession;
 using AdminAreaManagement.Application.Professions.Queries;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Cpas.Isp.Api.Controllers
+namespace AdminAreaManagement.API.Controllers
 {
     public class ProfessionsController : ApiControllerBase
     {

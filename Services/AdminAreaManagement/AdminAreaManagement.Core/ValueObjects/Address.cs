@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Core.Commun;
+﻿using AdminAreaManagement.Core.Common;
 
 namespace AdminAreaManagement.Core.ValueObjects
 {

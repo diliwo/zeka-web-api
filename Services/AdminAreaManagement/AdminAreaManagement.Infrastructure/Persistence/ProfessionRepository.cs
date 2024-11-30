@@ -1,17 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Dynamic.Core;
-using System.Text;
-using System.Threading.Tasks;
-using AdminAreaManagement.Core.Entities;
+﻿using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
-using AdminAreaManagement.Infrastructure.Persistence;
 using LinqKit;
 using Microsoft.EntityFrameworkCore;
-using Extensions = LinqKit.Core.Extensions;
 
-namespace Cpas.Isp.Infrastructure.Persistence
+namespace AdminAreaManagement.Infrastructure.Persistence
 {
     public class ProfessionRepository : IProfessionRepository
     {

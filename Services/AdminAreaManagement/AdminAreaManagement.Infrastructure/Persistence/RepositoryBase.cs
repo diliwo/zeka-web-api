@@ -1,4 +1,5 @@
 ﻿using System.Linq.Expressions;
+using AdminAreaManagement.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace AdminAreaManagement.Infrastructure.Persistence;

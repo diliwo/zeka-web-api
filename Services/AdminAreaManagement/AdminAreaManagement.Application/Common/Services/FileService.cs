@@ -1,6 +1,6 @@
 ﻿using AdminAreaManagement.Core.Interfaces;
 
-namespace AdminAreaManagement.Infrastructure.Persistence
+namespace AdminAreaManagement.Application.Common.Services
 {
     public class FileService : IFileService
     {
@@ -28,12 +28,22 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             }
         }
 
-        public string GetFolderPath(int partnerId)
+        public byte[] GetContentFile(int partnerId, int docId, string contentType)
         {
-            return $@"{_fileServerPath}{FileRepositoryHelper.GetFolderNameForPartnerId(partnerId)}";
+            throw new NotImplementedException();
         }
 
-        public void SaveFile(int id, int partnerId, int jobId, string fileName, byte[] contentFile, string contentType)
+        public string GetFolderPath(int partnerId)
+        {
+            return ""; /*$@"{_fileServerPath}{FileRepositoryHelper.GetFolderNameForPartnerId(partnerId)}";*/
+        }
+
+        public void DeleteFile(int id, int partnerId, string contentType)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void SaveFile(int id, int partnerId, string fileName, byte[] contentFile, string contentType)
         {
             var folderPath = GetFolderPath(partnerId);
             try
@@ -49,12 +59,8 @@ namespace AdminAreaManagement.Infrastructure.Persistence
                 throw new ApplicationException($"Erreur lors de la tentative d'importation du document : le dossier d'enregistrement n'a pas pu être créé ou n'existe pas ! ({folderPath})");
             }
 
-            var fileFullPath = $@"{folderPath}\Document-{partnerId}-{jobId}-{id}.{contentType}";
+            var fileFullPath = $@"{folderPath}\Document-{partnerId}-{id}.{contentType}";
 
-            //if (File.Exists(fileFullPath))
-            //{
-
-            //}
 
             try
             {

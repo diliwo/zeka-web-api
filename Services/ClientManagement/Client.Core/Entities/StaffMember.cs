@@ -1,6 +1,6 @@
-﻿using AdminAreaManagement.Core.Commun;
+﻿using ClientManagement.Core.Common;
 
-namespace AdminAreaManagement.Core.Entities
+namespace ClientManagement.Core.Entities
 {
     public class StaffMember : AggregateRoot
     {
@@ -8,15 +8,14 @@ namespace AdminAreaManagement.Core.Entities
         public string LastName { get; set; }
         public string FullName => $"{LastName} {FirstName}";
         public string UserName { get; set; }
-        public int TeamId { get; set; }
-        public Team? Team { get; set; }
+        public string TeamName { get; set; }
 
         // Just for hydratation
         public  StaffMember()
         {
         }
 
-        public StaffMember(string firstName, string lastName,  Team team, string userName = "") : this()
+        public StaffMember(string firstName, string lastName,  string teamName, string userName = "") : this()
         {
             //Check if null
             if (string.IsNullOrEmpty(firstName))

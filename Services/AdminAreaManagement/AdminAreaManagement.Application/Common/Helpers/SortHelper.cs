@@ -1,9 +1,10 @@
-﻿using System.Linq.Dynamic.Core;
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text;
 using AdminAreaManagement.Core.Interfaces;
+using System.Linq;
+using System.Linq.Dynamic.Core;
 
-namespace AdminAreaManagement.Infrastructure.Persistence.Helpers
+namespace AdminAreaManagement.Application.Common.Helpers
 {
     public class SortHelper<T> : ISortHelper<T>
     {

@@ -3,7 +3,7 @@ using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Referents.Commands.DeleteReferent
+namespace AdminAreaManagement.Application.Staffs.Commands.DeleteStaff
 {
     public class DeleteStaffMemberCommand : IRequest
     {

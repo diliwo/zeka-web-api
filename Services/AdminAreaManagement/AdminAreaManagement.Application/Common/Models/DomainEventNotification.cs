@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Core.Commun;
+﻿using AdminAreaManagement.Core.Common;
 using MediatR;
 
 namespace AdminAreaManagement.Application.Common.Models

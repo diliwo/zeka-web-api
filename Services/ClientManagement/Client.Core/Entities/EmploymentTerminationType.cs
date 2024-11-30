@@ -1,12 +1,12 @@
-﻿using AdminAreaManagement.Core.Commun;
+﻿using ClientManagement.Core.Common;
 
-namespace AdminAreaManagement.Core.Entities;
+namespace ClientManagement.Core.Entities;
 
-public class NatureOfContract : Entity
+public class EmploymentTerminationType : Entity
 {
     public string Name { get; set; }
 
-    public NatureOfContract(string name)
+    public EmploymentTerminationType(string name)
     {
         if (string.IsNullOrEmpty(name))
         {

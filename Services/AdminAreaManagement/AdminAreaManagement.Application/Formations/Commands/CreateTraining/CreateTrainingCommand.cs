@@ -3,7 +3,7 @@ using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Formations.Commands.CreateFormation
+namespace AdminAreaManagement.Application.Formations.Commands.CreateTraining
 {
     public class CreateTrainingCommand : IRequest<int>
     {

@@ -1,12 +1,11 @@
 ﻿using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Application.Common.Models;
-using AdminAreaManagement.Application.StaffMembers.Queries;
 using AdminAreaManagement.Core.Interfaces;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Referents.Queries
+namespace AdminAreaManagement.Application.Staffs.Queries
 {
     public class GetStaffMemberListQuery : IRequest<PaginatedList<StaffMemberDto>>
     {

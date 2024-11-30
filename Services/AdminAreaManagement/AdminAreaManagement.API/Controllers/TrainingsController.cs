@@ -1,7 +1,7 @@
 ﻿using AdminAreaManagement.Application.Common.Models;
-using AdminAreaManagement.Application.Formations.Commands.CreateFormation;
-using AdminAreaManagement.Application.Formations.Commands.DeleteFormation;
-using AdminAreaManagement.Application.Formations.Commands.UpdateFormation;
+using AdminAreaManagement.Application.Formations.Commands.CreateTraining;
+using AdminAreaManagement.Application.Formations.Commands.DeleteTraining;
+using AdminAreaManagement.Application.Formations.Commands.UpdateTraining;
 using AdminAreaManagement.Application.Formations.Common;
 using AdminAreaManagement.Application.Formations.Queries.GetTrainingList;
 using Microsoft.AspNetCore.Mvc;

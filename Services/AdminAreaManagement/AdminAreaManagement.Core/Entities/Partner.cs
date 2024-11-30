@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Core.Commun;
+﻿using AdminAreaManagement.Core.Common;
 using AdminAreaManagement.Core.Enums;
 using AdminAreaManagement.Core.ValueObjects;
 

@@ -1,13 +1,13 @@
 ﻿using AdminAreaManagement.Core.Interfaces;
 using FluentValidation;
 
-namespace AdminAreaManagement.Application.Referents.Commands.UpsertReferent
+namespace AdminAreaManagement.Application.Staffs.Commands.UpsertStaff
 {
-    public class UpsertReferentCommandValidator : AbstractValidator<UpsertStaffMemberCommand>
+    public class UpsertStaffMemberCommandValidator : AbstractValidator<UpsertStaffMemberCommand>
     {
         private readonly IRepositoryManager _repository;
 
-        public UpsertReferentCommandValidator(IRepositoryManager repository)
+        public UpsertStaffMemberCommandValidator(IRepositoryManager repository)
         {
             _repository = repository;
 

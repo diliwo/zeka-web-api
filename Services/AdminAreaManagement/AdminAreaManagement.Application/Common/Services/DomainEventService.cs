@@ -1,5 +1,5 @@
 ﻿using AdminAreaManagement.Application.Common.Models;
-using AdminAreaManagement.Core.Commun;
+using AdminAreaManagement.Core.Common;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.Extensions.Logging;

@@ -1,9 +1,8 @@
-﻿using System.Collections;
-using AdminAreaManagement.Application.Common.Mappings;
+﻿using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Core.Entities;
 using AutoMapper;
 
-namespace AdminAreaManagement.Application.StaffMembers.Queries
+namespace AdminAreaManagement.Application.Staffs.Queries
 {
     public class StaffMemberDto : IMapFrom<StaffMember>
     {

@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace Cpas.Zeka.Domain.Beneficiaries.Exceptions
+﻿namespace AdminAreaManagement.Core.Exceptions
 {
     public class CannotHireException : Exception
     {

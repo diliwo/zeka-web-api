@@ -1,7 +1,7 @@
 ﻿using AdminAreaManagement.Application.Common.Models;
-using AdminAreaManagement.Application.Referents.Commands.UpsertReferent;
-using AdminAreaManagement.Application.Referents.Queries;
-using AdminAreaManagement.Application.StaffMembers.Queries;
+using AdminAreaManagement.Application.Staffs.Commands.DeleteStaff;
+using AdminAreaManagement.Application.Staffs.Commands.UpsertStaff;
+using AdminAreaManagement.Application.Staffs.Queries;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AdminAreaManagement.API.Controllers
@@ -30,18 +30,9 @@ namespace AdminAreaManagement.API.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Delete(int id)
         {
-            await Mediator.Send(new DeleteReferentCommand { Id = id });
+            await Mediator.Send(new DeleteStaffMemberCommand { Id = id });
 
             return NoContent();
-        }
-
-        [HttpGet("searchtext/{text}")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult<UsersDto>> GetBySearchText(string text)
-        {
-            var vm = await Mediator.Send(new GetUsersBySearchTextQuery() { SearchText = text });
-            return Ok(vm);
         }
     }
 }

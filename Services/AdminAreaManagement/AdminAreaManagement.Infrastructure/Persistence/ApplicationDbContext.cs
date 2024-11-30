@@ -1,5 +1,5 @@
 ﻿using System.Reflection;
-using AdminAreaManagement.Core.Commun;
+using AdminAreaManagement.Core.Common;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;

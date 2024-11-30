@@ -1,6 +1,4 @@
-﻿using AdminAreaManagement.Application.StaffMembers.Queries;
-
-namespace AdminAreaManagement.Application.Referents.Queries
+﻿namespace AdminAreaManagement.Application.Staffs.Queries
 {
     public class StaffMemberListDto
     {

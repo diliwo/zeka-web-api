@@ -1,5 +1,4 @@
-﻿using AdminAreaManagement.Core.Interfaces;
-using AdminAreaManagement.Infrastructure.Helpers;
+﻿using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 #if (UseApiOnly)
 using NSwag;
@@ -23,8 +22,7 @@ public static class DependencyInjection
             options.SuppressModelStateInvalidFilter = true);
 
         services.AddEndpointsApiExplorer();
-
-        services.AddSwaggerGen(c => { c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "Client.API", Version = "v1" }); });
+        services.AddSwaggerGen(c => { c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "AdminArea.API", Version = "v1" }); });
 
         //Register AutoMapper
         services.AddAutoMapper(typeof(Program).Assembly);
@@ -43,8 +41,7 @@ public static class DependencyInjection
         services.AddControllers().AddNewtonsoftJson(options =>
             options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore);
 
-        //Register AutoMapper
-        services.AddAutoMapper(typeof(Program).Assembly);
+
         return services;
     }
 }

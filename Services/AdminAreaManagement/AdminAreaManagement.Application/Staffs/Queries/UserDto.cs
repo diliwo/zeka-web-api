@@ -1,8 +1,8 @@
 ﻿using AdminAreaManagement.Application.Common.Mappings;
-using AdminAreaManagement.Core.Commun;
+using AdminAreaManagement.Core.Common;
 using AutoMapper;
 
-namespace AdminAreaManagement.Application.Referents.Queries
+namespace AdminAreaManagement.Application.Staffs.Queries
 {
     public class UserDto : IMapFrom<User>
     {

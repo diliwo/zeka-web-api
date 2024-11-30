@@ -3,7 +3,7 @@ using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Formations.Commands.UpdateFormation
+namespace AdminAreaManagement.Application.Formations.Commands.UpdateTraining
 {
     public class UpdateTrainingCommand : IRequest<int>
     {

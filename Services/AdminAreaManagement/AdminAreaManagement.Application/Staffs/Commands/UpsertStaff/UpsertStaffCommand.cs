@@ -3,7 +3,7 @@ using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Referents.Commands.UpsertReferent
+namespace AdminAreaManagement.Application.Staffs.Commands.UpsertStaff
 {
     public class UpsertStaffMemberCommand : IRequest<int>
     {

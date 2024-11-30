@@ -1,12 +1,12 @@
-﻿using AdminAreaManagement.Core.Common;
+﻿using ClientManagement.Core.Common;
 
-namespace AdminAreaManagement.Core.Entities;
+namespace ClientManagement.Core.Entities;
 
-public class TrainingField : Entity
+public class EmploymentTerminationReason : Entity
 {
     public string Name { get; set; }
 
-    TrainingField(string name)
+    public EmploymentTerminationReason(string name)
     {
         if (string.IsNullOrEmpty(name))
         {

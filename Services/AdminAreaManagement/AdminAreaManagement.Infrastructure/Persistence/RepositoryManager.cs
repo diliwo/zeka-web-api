@@ -1,7 +1,6 @@
-﻿using AdminAreaManagement.Core.Entities;
+﻿using AdminAreaManagement.Application.Common.Services;
+using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
-using Cpas.Isp.Infrastructure.Persistence;
-using Cpas.Zeka.Infrastructure.Persistence;
 
 namespace AdminAreaManagement.Infrastructure.Persistence;
 /**

@@ -1,0 +1,18 @@
+[
+  { "Name": "CDD" },
+  { "Name": "CDR" },
+  { "Name": "CDI" },
+  { "Name": "Santé Physique" },
+  { "Name": "Santé Psychologique" },
+  { "Name": "Problème relationnel" },
+  { "Name": "Respect des procédures" },
+  { "Name": "Dettes" },
+  { "Name": "Logement" },
+  { "Name": "Problèmes familiaux" },
+  { "Name": "Niveau de compétences" },
+  { "Name": "Fonction ne convient pas" },
+  { "Name": "Horaire ou travail trop lourd" },
+  { "Name": "Problématique partenaire" },
+  { "Name": "Réorientation" }
+]
+

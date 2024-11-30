@@ -16,10 +16,10 @@ namespace ClientManagement.Core.Entities
 
         public Candidacy() { }
 
-        public Candidacy(JobOffer jobOffer, Beneficiary beneficiary, DateTime applicationDate)
+        public Candidacy(JobOffer jobOffer, Client client, DateTime applicationDate)
         {
             JobOffer = jobOffer ?? throw new ArgumentNullException(nameof(jobOffer));
-            Beneficiary = beneficiary ?? throw new ArgumentNullException(nameof(beneficiary));
+            client = client ?? throw new ArgumentNullException(nameof(client));
             ApplicationDate = applicationDate;
         }
 
