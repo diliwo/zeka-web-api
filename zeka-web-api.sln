@@ -25,6 +25,12 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AdminAreaManagement.Core", 
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AdminAreaManagement.Infrastructure", "Services\AdminAreaManagement\AdminAreaManagement.Infrastructure\AdminAreaManagement.Infrastructure.csproj", "{91A32C20-423F-4610-A95F-EF36FF6275E4}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ApiGateways", "ApiGateways", "{58482BD3-0702-43F8-9CEC-522ABB57783E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ocelot.ApiGateway", "ApiGateways\Ocelot.ApiGateway\Ocelot.ApiGateway.csproj", "{9F147F8B-B6E6-4277-BE90-E6A765CDDFEF}"
+EndProject
+Project("{E53339B2-1760-4266-BCC7-CA923CBCF16C}") = "docker-compose", "docker-compose.dcproj", "{08B5E92D-DCE7-4854-97E0-70FD2EDF7168}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -63,6 +69,14 @@ Global
 		{91A32C20-423F-4610-A95F-EF36FF6275E4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{91A32C20-423F-4610-A95F-EF36FF6275E4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{91A32C20-423F-4610-A95F-EF36FF6275E4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9F147F8B-B6E6-4277-BE90-E6A765CDDFEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9F147F8B-B6E6-4277-BE90-E6A765CDDFEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9F147F8B-B6E6-4277-BE90-E6A765CDDFEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9F147F8B-B6E6-4277-BE90-E6A765CDDFEF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{08B5E92D-DCE7-4854-97E0-70FD2EDF7168}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{08B5E92D-DCE7-4854-97E0-70FD2EDF7168}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{08B5E92D-DCE7-4854-97E0-70FD2EDF7168}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{08B5E92D-DCE7-4854-97E0-70FD2EDF7168}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -78,6 +92,7 @@ Global
 		{9D3081D2-B975-4833-BE64-78D33B7CEBE6} = {5D64661C-A186-4109-AD3B-ED9097D5B2B1}
 		{50BA9385-981F-4EFF-A001-C69251717917} = {5D64661C-A186-4109-AD3B-ED9097D5B2B1}
 		{91A32C20-423F-4610-A95F-EF36FF6275E4} = {5D64661C-A186-4109-AD3B-ED9097D5B2B1}
+		{9F147F8B-B6E6-4277-BE90-E6A765CDDFEF} = {58482BD3-0702-43F8-9CEC-522ABB57783E}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A09D4BD9-B9A6-45F5-BE40-F2EE8E7C6B39}

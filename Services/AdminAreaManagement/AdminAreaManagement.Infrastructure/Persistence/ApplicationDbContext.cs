@@ -32,13 +32,13 @@ namespace AdminAreaManagement.Infrastructure.Persistence
                 switch (entry.State)
                 {
                     case EntityState.Added:
-                        entry.Entity.CreatedBy = _currentUserService.Username;
-                        entry.Entity.Created = _dateTime.Now;
+                        entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
+                        entry.Entity.Created = DateTime.Now;
                         break;
 
                     case EntityState.Modified:
-                        entry.Entity.LastModifiedBy = _currentUserService.Username;
-                        entry.Entity.LastModified = _dateTime.Now;
+                        entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
+                        entry.Entity.LastModified = DateTime.Now;
                         break;
                 }
             }
@@ -58,13 +58,13 @@ namespace AdminAreaManagement.Infrastructure.Persistence
                 switch (entry.State)
                 {
                     case EntityState.Added:
-                        entry.Entity.CreatedBy = _currentUserService.Username;
-                        entry.Entity.Created = _dateTime.Now;
+                        entry.Entity.CreatedBy = "ZeKa"; //TODO: This will be replaced by Identity Server
+                        entry.Entity.Created = DateTime.Now;
                         break;
 
                     case EntityState.Modified:
-                        entry.Entity.LastModifiedBy = _currentUserService.Username;
-                        entry.Entity.LastModified = _dateTime.Now;
+                        entry.Entity.LastModifiedBy = "ZeKa"; //TODO: This will be replaced by Identity Server
+                        entry.Entity.LastModified = DateTime.Now;
                         break;
                 }
             }

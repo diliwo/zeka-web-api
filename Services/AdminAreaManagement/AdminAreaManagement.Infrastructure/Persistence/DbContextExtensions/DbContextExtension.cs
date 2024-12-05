@@ -1,4 +1,5 @@
-﻿using AdminAreaManagement.Infrastructure.Persistence;
+﻿using AdminAreaManagement.Core.Entities;
+using AdminAreaManagement.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -23,41 +24,21 @@ namespace AdminAreaManagement.Infrastructure.Persistence.DbContextExtensions
 
         public static void EnsureSeeded(this ApplicationDbContext context)
         {
-            //if (!context.MonitoringActions.Any())
-            //{
-            //    var monitoringActions = JsonConvert.DeserializeObject<List<MonitoringAction>>(File.ReadAllText(Path.Combine("Persistence", "Seed", "MonitoringActions.json")));
+            if (!context.Teams.Any())
+            {
+                string currentDir = Directory.GetCurrentDirectory();
 
-            //    if (monitoringActions != null)
-            //    {
-            //        context.AddRange(monitoringActions);
-            //        context.SaveChanges();
+                //var path = Path.Combine("Persistence", "Seed", "Teams.json"); // uncomment When running in a docker container
+                string path = "../AdminAreaManagement.Infrastructure/Persistence/Seed/Teams.json"; // Uncomment when running locally
 
-            //    }
-            //}
+                var teams = JsonConvert.DeserializeObject<List<Team>>(File.ReadAllText(path));
 
-            //if (!context.EmploymentTerminationReasons.Any())
-            //{
-            //    var employmentTerminationReasons = JsonConvert.DeserializeObject<List<EmploymentTerminationReason>>(File.ReadAllText(Path.Combine("Persistence", "Seed", "EmploymentTerminationReasons.json")));
-
-            //    if (employmentTerminationReasons != null)
-            //    {
-            //        context.AddRange(employmentTerminationReasons);
-            //        context.SaveChanges();
-            //    }
-
-            //}
-
-            //if (!context.EmploymentTerminationTypes.Any())
-            //{
-            //    var employmentTerminationTypes = JsonConvert.DeserializeObject<List<EmploymentTerminationType>>(File.ReadAllText(Path.Combine("Persistence", "Seed", "EmploymentTerminationTypes.json")));
-
-            //    if (employmentTerminationTypes != null)
-            //    {
-            //        context.AddRange(employmentTerminationTypes);
-            //        context.SaveChanges();
-            //    }
-
-            //}
+                if (teams != null)
+                {
+                    context.AddRange(teams);
+                    context.SaveChanges();
+                }
+            }
         }
     }
 }
