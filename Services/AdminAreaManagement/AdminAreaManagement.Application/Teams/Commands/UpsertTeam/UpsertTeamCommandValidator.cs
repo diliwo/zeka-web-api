@@ -1,14 +1,14 @@
 ﻿using AdminAreaManagement.Core.Interfaces;
 using FluentValidation;
 
-namespace AdminAreaManagement.Application.Services.Commands.UpsertService
+namespace AdminAreaManagement.Application.Teams.Commands.UpsertTeam
 {
-    public class UpsertServiceCommandValidator : AbstractValidator<UpsertTeamCommand>
+    public class UpsertTeamCommandValidator : AbstractValidator<UpsertTeamCommand>
     {
 
         private readonly IRepositoryManager _repository;
 
-        public UpsertServiceCommandValidator(IRepositoryManager repository)
+        public UpsertTeamCommandValidator(IRepositoryManager repository)
         {
             _repository = repository;
 

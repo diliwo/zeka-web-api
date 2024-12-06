@@ -1,4 +1,6 @@
 ﻿using System.Reflection;
+using AdminAreaManagement.Core.Interfaces;
+using AdminAreaManagement.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 #if (UseApiOnly)
 using NSwag;
@@ -14,6 +16,7 @@ public static class DependencyInjection
         services.AddDatabaseDeveloperPageExceptionFilter();
 
         //services.AddScoped<IUser, CurrentUser>();
+        services.AddSingleton<ICurrentUserService, CurrentUserService>();
 
         services.AddHttpContextAccessor();
 

@@ -1,8 +1,14 @@
 version: '3.4'
 
 services:
-  adminareamanagement.api:
-    image: ${DOCKER_REGISTRY-}adminareamanagementapi
-    build:
+  # adminareamanagement.api:
+  #   image: ${DOCKER_REGISTRY-}adminareamanagementapi
+  #   build:
+  #     context: .
+  #     dockerfile: Services/AdminAreaManagement/AdminAreaManagement.API/Dockerfile
+  
+  ocelot.apigateway:
+     image: ${DOCKER_REGISTRY-}ocelotapigateway
+     build:
       context: .
-      dockerfile: Services/AdminAreaManagement/AdminAreaManagement.API/Dockerfile
+      dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile

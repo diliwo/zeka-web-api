@@ -2,11 +2,11 @@
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Services.Commands.UpsertService
+namespace AdminAreaManagement.Application.Teams.Commands.UpsertTeam
 {
     public class UpsertTeamCommand : IRequest<int>
     {
-        public int? TeamId { get; set; }
+        public int? Id { get; set; }
         public string Name { get; set; }
         public string Acronym { get; set; }
 
@@ -23,9 +23,9 @@ namespace AdminAreaManagement.Application.Services.Commands.UpsertService
             {
                 Team entity;
 
-                if (request.TeamId.HasValue)
+                if (request.Id.HasValue)
                 {
-                    entity = _repository.Team.Get(request.TeamId.Value);
+                    entity = _repository.Team.Get(request.Id.Value);
                     entity.Acronym = request.Acronym.Trim();
                     entity.Name = request.Name.Trim();
 

@@ -1,7 +1,7 @@
 ﻿using AdminAreaManagement.Core.Interfaces;
 using FluentValidation;
 
-namespace AdminAreaManagement.Application.Services.Commands.DeleteService
+namespace AdminAreaManagement.Application.Teams.Commands.DeleteTeam
 {
     public class DeleteTeamCommandValidator : AbstractValidator<DeleteTeamCommand>
     {

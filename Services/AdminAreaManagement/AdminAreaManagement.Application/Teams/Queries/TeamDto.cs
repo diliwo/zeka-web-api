@@ -2,7 +2,7 @@
 using AdminAreaManagement.Core.Entities;
 using AutoMapper;
 
-namespace AdminAreaManagement.Application.Services.Queries
+namespace AdminAreaManagement.Application.Teams.Queries
 {
     public class TeamDto : IMapFrom<Team>
     {

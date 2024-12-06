@@ -3,7 +3,7 @@ using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Services.Commands.DeleteService
+namespace AdminAreaManagement.Application.Teams.Commands.DeleteTeam
 {
     public class DeleteTeamCommand : IRequest
     {

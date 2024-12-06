@@ -5,7 +5,7 @@ using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Services.Queries
+namespace AdminAreaManagement.Application.Teams.Queries
 {
     public class GetTeamsListQuery : IRequest<PaginatedList<TeamDto>>
     {

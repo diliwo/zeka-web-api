@@ -1,9 +1,15 @@
 version: '3.4'
 
 services:
-  adminareamanagement.api:
+  # adminareamanagement.api:
+  #   environment:
+  #     - ASPNETCORE_ENVIRONMENT=Development
+  #     - ASPNETCORE_HTTP_PORTS=8080
+  #   ports:
+  #     - "8080"
+   
+  ocelot.apigateway:
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_HTTP_PORTS=8080
+     - ASPNETCORE_ENVIRONMENT=Development
     ports:
-      - "8080"
+     - "9010:8080"

@@ -1,7 +1,7 @@
 ﻿using AdminAreaManagement.Application.Common.Models;
-using AdminAreaManagement.Application.Services.Commands.DeleteService;
-using AdminAreaManagement.Application.Services.Commands.UpsertService;
-using AdminAreaManagement.Application.Services.Queries;
+using AdminAreaManagement.Application.Teams.Commands.DeleteTeam;
+using AdminAreaManagement.Application.Teams.Commands.UpsertTeam;
+using AdminAreaManagement.Application.Teams.Queries;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AdminAreaManagement.API.Controllers
@@ -40,7 +40,7 @@ namespace AdminAreaManagement.API.Controllers
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<Boolean>> Get(string name)
         {
-            var vm = await Mediator.Send(new GetServicesByNameQuery() { Name = name });
+            var vm = await Mediator.Send(new GetTeamsByNameQuery() { Name = name });
 
             return Ok(vm);
         }

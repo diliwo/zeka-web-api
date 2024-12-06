@@ -2,13 +2,13 @@
 using AutoMapper;
 using MediatR;
 
-namespace AdminAreaManagement.Application.Services.Queries
+namespace AdminAreaManagement.Application.Teams.Queries
 {
-    public class GetServicesByNameQuery : IRequest<Boolean>
+    public class GetTeamsByNameQuery : IRequest<Boolean>
     {
         public string Name{ get; set; }
 
-        public class GetServicesByNameQueryHandler : IRequestHandler<GetServicesByNameQuery, Boolean>
+        public class GetServicesByNameQueryHandler : IRequestHandler<GetTeamsByNameQuery, Boolean>
         {
             private readonly IRepositoryManager _repository;
             private readonly IMapper _mapper;
@@ -19,7 +19,7 @@ namespace AdminAreaManagement.Application.Services.Queries
                 _mapper = mapper;
             }
 
-            public async Task<Boolean> Handle(GetServicesByNameQuery request, CancellationToken cancellationToken)
+            public async Task<Boolean> Handle(GetTeamsByNameQuery request, CancellationToken cancellationToken)
             {
                 var vm = _repository.Team.IsTeamUnique(request.Name.Trim());
 

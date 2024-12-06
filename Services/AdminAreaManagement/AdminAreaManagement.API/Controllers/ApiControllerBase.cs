@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace AdminAreaManagement.API.Controllers
 {
-    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class ApiControllerBase : ControllerBase
