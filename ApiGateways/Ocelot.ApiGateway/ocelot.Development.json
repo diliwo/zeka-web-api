@@ -1,6 +1,7 @@
 {
   "Routes": [
     {
+      //Teams
       "DownstreamPathTemplate": "/api/teams?{url}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
@@ -35,6 +36,44 @@
         }
       ],
       "UpstreamPathTemplate": "/teams/{id}",
+      "UpstreamHttpMethod": [ "DELETE" ]
+    },
+    {
+      //Professions
+      "DownstreamPathTemplate": "/api/professions?{url}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5102"
+        }
+      ],
+      "UpstreamPathTemplate": "/professions?{url}",
+      "UpstreamHttpMethod": [ "GET" ],
+      "FileCacheOptions": { "TtlSeconds": 30 }
+    },
+    {
+      "DownstreamPathTemplate": "/api/professions",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5102"
+        }
+      ],
+      "UpstreamPathTemplate": "/professions",
+      "UpstreamHttpMethod": [ "POST" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/professions/{id}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5102"
+        }
+      ],
+      "UpstreamPathTemplate": "/professions/{id}",
       "UpstreamHttpMethod": [ "DELETE" ]
     }
   ],

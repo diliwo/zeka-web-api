@@ -55,10 +55,10 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             return professions;
         }
 
-        public void SoftDelete(Profession profession)
+        public async void SoftDelete(Profession profession)
         {
             _context.Professions.Update(profession);
-            _context.SaveChanges();
+           await _context.SaveChangesAsync();
         }
 
         public void Dispose()

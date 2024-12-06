@@ -9,8 +9,6 @@ namespace AdminAreaManagement.Application.Professions.Queries
         public int Id { get; set; }
         public string Name { get; set; }
 
-        //public IList<StaffMemberDto> Referents { get; set; }
-
         public void Mapping(Profile profile)
         {
             profile.CreateMap<Profession, ProfessionDto>();

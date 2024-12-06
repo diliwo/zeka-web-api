@@ -6,7 +6,7 @@ namespace AdminAreaManagement.Application.Professions.Commands.UpsertProfession
 {
     public class UpsertProfessionCommand : IRequest<int>
     {
-        public int? ProfessionId { get; set; }
+        public int? Id { get; set; }
         public string Name { get; set; }
 
         public class UpsertProfessionCommandHandler : IRequestHandler<UpsertProfessionCommand, int>
@@ -22,9 +22,9 @@ namespace AdminAreaManagement.Application.Professions.Commands.UpsertProfession
             {
                 Profession entity;
 
-                if (request.ProfessionId.HasValue)
+                if (request.Id.HasValue)
                 {
-                    entity = _repository.Profession.Get(request.ProfessionId.Value);
+                    entity = _repository.Profession.Get(request.Id.Value);
                     entity.Name = request.Name.Trim();
                 }
                 else

@@ -2,6 +2,6 @@
 {
     public class ProfessionsListVm
     {
-        public IList<ProfessionDto> Services { get; set; }
+        public IList<ProfessionDto> Professions { get; set; }
     }
 }

@@ -39,6 +39,22 @@ namespace AdminAreaManagement.Infrastructure.Persistence.DbContextExtensions
                     context.SaveChanges();
                 }
             }
+
+            if (!context.Professions.Any())
+            {
+                string currentDir = Directory.GetCurrentDirectory();
+
+                //var path = Path.Combine("Persistence", "Seed", "Teams.json"); // uncomment When running in a docker container
+                string path = "../AdminAreaManagement.Infrastructure/Persistence/Seed/Professions.json"; // Uncomment when running locally
+
+                var professions = JsonConvert.DeserializeObject<List<Profession>>(File.ReadAllText(path));
+
+                if (professions != null)
+                {
+                    context.AddRange(professions);
+                    context.SaveChanges();
+                }
+            }
         }
     }
 }
