@@ -26,8 +26,6 @@ namespace AdminAreaManagement.Infrastructure.Persistence.DbContextExtensions
         {
             if (!context.Teams.Any())
             {
-                string currentDir = Directory.GetCurrentDirectory();
-
                 //var path = Path.Combine("Persistence", "Seed", "Teams.json"); // uncomment When running in a docker container
                 string path = "../AdminAreaManagement.Infrastructure/Persistence/Seed/Teams.json"; // Uncomment when running locally
 
@@ -41,10 +39,8 @@ namespace AdminAreaManagement.Infrastructure.Persistence.DbContextExtensions
             }
 
             if (!context.Professions.Any())
-            {
-                string currentDir = Directory.GetCurrentDirectory();
-
-                //var path = Path.Combine("Persistence", "Seed", "Teams.json"); // uncomment When running in a docker container
+            { 
+                //var path = Path.Combine("Persistence", "Seed", "Professions.json"); // uncomment When running in a docker container
                 string path = "../AdminAreaManagement.Infrastructure/Persistence/Seed/Professions.json"; // Uncomment when running locally
 
                 var professions = JsonConvert.DeserializeObject<List<Profession>>(File.ReadAllText(path));
@@ -52,6 +48,20 @@ namespace AdminAreaManagement.Infrastructure.Persistence.DbContextExtensions
                 if (professions != null)
                 {
                     context.AddRange(professions);
+                    context.SaveChanges();
+                }
+            }
+
+            if (!context.Schools.Any())
+            {
+                //var path = Path.Combine("Persistence", "Seed", "Schools.json"); // uncomment When running in a docker container
+                string path = "../AdminAreaManagement.Infrastructure/Persistence/Seed/Schools.json"; // Uncomment when running locally
+
+                var schools = JsonConvert.DeserializeObject<List<School>>(File.ReadAllText(path));
+
+                if (schools != null)
+                {
+                    context.AddRange(schools);
                     context.SaveChanges();
                 }
             }
