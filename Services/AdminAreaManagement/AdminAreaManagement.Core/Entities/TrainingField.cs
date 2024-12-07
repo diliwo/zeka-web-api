@@ -6,7 +6,8 @@ public class TrainingField : Entity
 {
     public string Name { get; set; }
 
-    TrainingField(string name)
+    public TrainingField(){}
+    public TrainingField(string name)
     {
         if (string.IsNullOrEmpty(name))
         {
