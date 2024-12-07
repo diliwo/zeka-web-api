@@ -189,6 +189,58 @@
       ],
       "UpstreamPathTemplate": "/trainingtype/{id}",
       "UpstreamHttpMethod": [ "DELETE" ]
+    },
+    {
+      //Staffmember
+      "DownstreamPathTemplate": "/api/staffmember?{url}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5102"
+        }
+      ],
+      "UpstreamPathTemplate": "/staffmember?{url}",
+      "UpstreamHttpMethod": [ "GET" ],
+      "FileCacheOptions": { "TtlSeconds": 30 }
+    },
+    {
+      "DownstreamPathTemplate": "/api/staffmember",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5102"
+        }
+      ],
+      "UpstreamPathTemplate": "/staffmember",
+      "UpstreamHttpMethod": [ "POST" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/staffmember/{id}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5102"
+        }
+      ],
+      "UpstreamPathTemplate": "/staffmember/{id}",
+      "UpstreamHttpMethod": [ "DELETE" ]
+    },
+    {
+      //TrainingFields
+      "DownstreamPathTemplate": "/api/trainingfield?{url}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5102"
+        }
+      ],
+      "UpstreamPathTemplate": "/trainingfield?{url}",
+      "UpstreamHttpMethod": [ "GET" ],
+      "FileCacheOptions": { "TtlSeconds": 30 }
     }
   ],
   "GlobalConfiguration": {
