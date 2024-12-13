@@ -12,8 +12,7 @@ namespace AdminAreaManagement.Application.Partners.Queries.Common
         public int PartnerNumber { get; set; }
         public String Name { get; set; }
         public Address Address { get; set; }
-        public List<Phone> Phones { get; set; }
-        //public List<Email> Emails { get; set; }
+        public List<ContactPerson> ContactPersons { get; set; }
         public int JobCoachId { get; set; }
         public string JobCoachName { get; set; }
         public CategoryOfPartner CategoryOfPartner { get; set; }
@@ -32,8 +31,8 @@ namespace AdminAreaManagement.Application.Partners.Queries.Common
             profile.CreateMap<Partner, PartnerDto>()
                 .ForMember(b => b.PartnerId,
                     opt => opt.MapFrom(e => e.Id))
-                .ForMember(p => p.Phones,
-                    opt => opt.MapFrom(b => b.PhoneNumbers))
+                .ForMember(p => p.ContactPersons,
+                    opt => opt.MapFrom(b => b.Contacts))
                 .ForMember(p => p.CategoryOfPartnerName,
                     opt => opt.MapFrom(b => Enum.GetName((CategoryOfPartner) b.CategoryOfPartner)))
                 .ForMember(p => p.HasDocuments,

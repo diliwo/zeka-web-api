@@ -6,15 +6,13 @@ namespace AdminAreaManagement.Core.ValueObjects
     {
         public string Number { get; set; }
         public string Street { get; set; }
-        public string BoxNumber { get; set; }
         public string PostalCode { get; set; }
         public string City { get; set; }
 
-        public Address(string number, string street, string boxNumber, string postalCode, string city)
+        public Address(string number, string street, string postalCode, string city)
         {
             Number = number;
             Street = street;
-            BoxNumber = boxNumber;
             PostalCode = postalCode;
             City = city;
         }

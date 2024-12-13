@@ -17,15 +17,15 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
             builder
                 .OwnsOne(p => p.Address);
             builder
-                .OwnsMany<Phone>("Phones", t =>
+                .OwnsMany<ContactPerson>("ContactPersons", t =>
                 {
                     t.WithOwner().HasForeignKey("PartnerId");
-                    t.Property(p => p.PhoneNumber);
+                    t.Property(p => p.ContactDetails);
                     t.Property(p => p.ContactName);
                     t.Property(p => p.Gender);
                     t.Property(p => p.ToDelete);
-                    t.HasKey("PartnerId","PhoneNumber","Gender", "ToDelete");
-                    t.ToTable("Phones");
+                    t.HasKey("PartnerId","ContactDetails","Gender", "ToDelete");
+                    t.ToTable("ContactPersons");
                 });
             builder
                 .OwnsMany<Email>(e => e.Emails, a =>
@@ -38,7 +38,7 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
             builder
                 .Property(e => e.DateOfAgreementSignature).HasColumnType("date");
             builder
-                .Ignore( r =>r.PhoneNumbers);
+                .Ignore( r =>r.Contacts);
         }
     }
 }

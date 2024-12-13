@@ -13,13 +13,10 @@ namespace AdminAreaManagement.Application.Partners.Commands.CreatePartner
         public string Name { get; set; }
         public string StreetCity { get; set; }
         public string StreetName { get; set; }
-        public string BoxNumber { get; set; }
         public string StreetNumber { get; set; }
         public string StreetPostalCode { get; set; }
-        public List<Phone> Phones { get; set; }
-        public List<Email> Emails { get; set; }
-        public int JobCoachId { get; set; }
-        public bool? IsEconomieSociale { get; set; }
+        public List<ContactPerson> ContactPersons { get; set; }
+        public int StaffMemberId { get; set; }
         public CategoryOfPartner CategoryOfPartner { get; set; }
         public StatusOfPartner StatusOfPartner { get; set; }
         public DateTime DateOfAgreementSignature { get; set; }
@@ -39,35 +36,34 @@ namespace AdminAreaManagement.Application.Partners.Commands.CreatePartner
             {
                 Partner entity;
 
-                var foundedStaffMemberContact = _repository.StaffMember.Get(request.JobCoachId);
+                var foundedStaffMemberContact = _repository.StaffMember.Get(request.StaffMemberId);
 
                 if (foundedStaffMemberContact == null)
                 {
-                    throw new NotFoundException(nameof(foundedStaffMemberContact), request.JobCoachId);
+                    throw new NotFoundException(nameof(foundedStaffMemberContact), request.StaffMemberId);
                 }
 
                 entity = new Partner(
                     request.PartnerNumber,
                     request.Name,
-                    new Address(request.StreetNumber, request.StreetName, request.BoxNumber, request.StreetPostalCode, request.StreetCity),
+                    new Address(request.StreetNumber, request.StreetName, request.StreetPostalCode, request.StreetCity),
                     foundedStaffMemberContact,
                     request.CategoryOfPartner,
                     request.StatusOfPartner,
                     request.DateOfAgreementSignature.ToLocalTime(),
-                    request.IsEconomieSociale,
                     request.Note
                 );
 
                 entity.CategoryOfPartnerName = Enum.GetName(request.CategoryOfPartner);
 
-                if (request.Phones != null)
+                if (request.ContactPersons != null)
                 {
-                    foreach (var p in request.Phones)
+                    foreach (var p in request.ContactPersons)
                     {
-                        entity.AssignPhone(new Phone(p.PhoneNumber, p.ContactName, p.Gender));
+                        entity.AssignContactPerson(new ContactPerson(p.ContactDetails, p.ContactName, p.Gender));
                     }
 
-                    entity.removePhone(request.Phones);
+                    entity.removeContactPerson(request.ContactPersons);
                 }
 
                 if (request.DateOfConclusion.HasValue)

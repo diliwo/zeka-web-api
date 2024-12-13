@@ -1,0 +1,30 @@
+[
+  {
+    "partnerNumber": 787,
+    "name": "Roxon",
+    "streetName": "Albright Way",
+    "streetNumber": "180",
+    "streetboxNumber": "B7845",
+    "streetPostalCode": "95032",
+    "streetCity": "Los Gatos",
+    "contactPersons": [
+      {
+        "contactDetails": "215 456-7890",
+        "partnerId": 1
+      },
+      {
+        "contactDetails": "ac@roxon.com",
+        "partnerId": 1
+      }
+    ],
+    "staffMemberId": 1,
+    "categoryOfPartner": 1,
+    "categoryOfPartnerName": "AsblHors1030",
+    "statusOfPartner": 0,
+    "dateOfAgreementSignature": "2024-04-20",
+    "note": "Everything is ok!",
+    "softdelete": false,
+    "hasDocuments": true
+  }
+]
+

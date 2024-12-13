@@ -2,11 +2,9 @@
 {
     public enum CategoryOfPartner
     {
-        CPAS = 0,
-        Asbl1030 = 1,
-        AsblSc1030 = 2,
-        EntreprisePrivee = 3,
-        Commune = 4,
-        AsblHors1030 = 5
+        Private = 0,
+        Public  = 1,
+        Government = 2,
+        Foreign = 3
     }
 }

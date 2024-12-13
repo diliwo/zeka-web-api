@@ -19,13 +19,13 @@ namespace AdminAreaManagement.Core.Entities
         public Boolean? IsEconomieSociale { get; set; } = false;
         public String? Note { get; set; }
         public IList<DocumentPartner> Documents { get; set; } = new List<DocumentPartner>();
-        public List<Phone> Phones { get; set; } = new List<Phone>();
+        public List<ContactPerson> ContactPersons { get; set; } = new List<ContactPerson>();
         public List<Email> Emails { get; set; } = new List<Email>();
-        public IEnumerable<Phone> PhoneNumbers
+        public IEnumerable<ContactPerson> Contacts
         {
             get
             {
-                return this.Phones;
+                return this.ContactPersons;
             }
         }
 
@@ -37,11 +37,10 @@ namespace AdminAreaManagement.Core.Entities
             int partnerNumber,
             String name,
             Address address,
-            StaffMember StaffMember,
+            StaffMember staffMember,
             CategoryOfPartner categoryOfPartner,
             StatusOfPartner statusOfPartner,
             DateTime dateOfAgreementSignature,
-            Boolean? isEconomieSociale,
             String? note
             )
         {
@@ -53,33 +52,33 @@ namespace AdminAreaManagement.Core.Entities
             PartnerNumber = partnerNumber;
             Name = name;
             Address = address;
+            StaffMember = staffMember;
             CategoryOfPartner  = categoryOfPartner;
             StatusOfPartner = statusOfPartner;
             DateOfAgreementSignature = dateOfAgreementSignature;
-            IsEconomieSociale = isEconomieSociale;
             Note = note;
         }
 
-        public void AssignPhone(Phone phone)
+        public void AssignContactPerson(ContactPerson contactPerson)
         {
-            var exists = this.Phones.Contains(phone);
+            var exists = this.ContactPersons.Contains(contactPerson);
 
             if (!exists)
             {
-                this.Phones.Add(phone);
+                this.ContactPersons.Add(contactPerson);
             }
 
         }
 
-        public void removePhone(List<Phone> phones)
+        public void removeContactPerson(List<ContactPerson> contactPerson)
         {
-            foreach (var phone in this.Phones.ToList())
+            foreach (var contact in this.ContactPersons.ToList())
             {
-                var exists = phones.Contains(phone);
+                var exists = contactPerson.Contains(contact);
 
                 if (!exists)
                 {
-                    this.Phones.Remove(phone);
+                    this.ContactPersons.Remove(contact);
                 }
             }
             

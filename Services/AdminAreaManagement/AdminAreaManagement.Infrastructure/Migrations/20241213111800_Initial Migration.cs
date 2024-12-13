@@ -166,7 +166,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Name = table.Column<string>(type: "text", nullable: false),
                     Address_Number = table.Column<string>(type: "text", nullable: false),
                     Address_Street = table.Column<string>(type: "text", nullable: false),
-                    Address_BoxNumber = table.Column<string>(type: "text", nullable: false),
                     Address_PostalCode = table.Column<string>(type: "text", nullable: false),
                     Address_City = table.Column<string>(type: "text", nullable: false),
                     StaffMemberId = table.Column<int>(type: "integer", nullable: false),
@@ -190,6 +189,27 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                         name: "FK_Partners_StaffMembers_StaffMemberId",
                         column: x => x.StaffMemberId,
                         principalTable: "StaffMembers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ContactPersons",
+                columns: table => new
+                {
+                    ContactDetails = table.Column<string>(type: "text", nullable: false),
+                    Gender = table.Column<int>(type: "integer", nullable: false),
+                    ToDelete = table.Column<bool>(type: "boolean", nullable: false),
+                    PartnerId = table.Column<int>(type: "integer", nullable: false),
+                    ContactName = table.Column<string>(type: "text", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ContactPersons", x => new { x.PartnerId, x.ContactDetails, x.Gender, x.ToDelete });
+                    table.ForeignKey(
+                        name: "FK_ContactPersons_Partners_PartnerId",
+                        column: x => x.PartnerId,
+                        principalTable: "Partners",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -241,27 +261,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                         onDelete: ReferentialAction.Cascade);
                 });
 
-            migrationBuilder.CreateTable(
-                name: "Phones",
-                columns: table => new
-                {
-                    PhoneNumber = table.Column<string>(type: "text", nullable: false),
-                    Gender = table.Column<int>(type: "integer", nullable: false),
-                    ToDelete = table.Column<bool>(type: "boolean", nullable: false),
-                    PartnerId = table.Column<int>(type: "integer", nullable: false),
-                    ContactName = table.Column<string>(type: "text", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Phones", x => new { x.PartnerId, x.PhoneNumber, x.Gender, x.ToDelete });
-                    table.ForeignKey(
-                        name: "FK_Phones_Partners_PartnerId",
-                        column: x => x.PartnerId,
-                        principalTable: "Partners",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
             migrationBuilder.CreateIndex(
                 name: "IX_DocumentPartners_PartnerId",
                 table: "DocumentPartners",
@@ -287,13 +286,13 @@ namespace AdminAreaManagement.Infrastructure.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
+                name: "ContactPersons");
+
+            migrationBuilder.DropTable(
                 name: "DocumentPartners");
 
             migrationBuilder.DropTable(
                 name: "Emails");
-
-            migrationBuilder.DropTable(
-                name: "Phones");
 
             migrationBuilder.DropTable(
                 name: "Professions");

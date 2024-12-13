@@ -3,31 +3,26 @@ using AdminAreaManagement.Core.Enums;
 
 namespace AdminAreaManagement.Core.ValueObjects
 {
-    public class Phone : ValueObject
+    public class ContactPerson : ValueObject
     {
-        public String PhoneNumber { get; set; }
+        public String ContactDetails { get; set; }
         public String ContactName { get; set; }
         public Gender Gender { get; set; }
         public bool ToDelete { get; set; } = false;
 
 
-        public Phone() { }
+        public ContactPerson() { }
 
-        public Phone(String phoneNumber, String contactName, Gender gender)
+        public ContactPerson(String contactDetails, String contactName, Gender gender)
         {
-            //if (String.IsNullOrEmpty(phoneNumber))
-            //{
-            //    throw new ArgumentNullException(nameof(phoneNumber));
-            //}
-
-            PhoneNumber = phoneNumber;
+            ContactDetails = contactDetails;
             ContactName = contactName;
             Gender = gender;
         }
 
         protected override IEnumerable<object> GetEqualityComponents()
         {
-            yield return this.PhoneNumber;
+            yield return this.ContactDetails;
         }
     }
 }

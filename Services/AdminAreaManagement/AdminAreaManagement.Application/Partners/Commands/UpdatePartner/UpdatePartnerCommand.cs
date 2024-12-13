@@ -17,7 +17,7 @@ namespace AdminAreaManagement.Application.Partners.Commands.UpdatePartner
         public string BoxNumber { get; set; }
         public string StreetNumber { get; set; }
         public string StreetPostalCode { get; set; }
-        public List<Phone> Phones { get; set; }
+        public List<ContactPerson> ContactPersons { get; set; }
         public List<Email> Emails { get; set; }
         public int JobCoachId { get; set; }
         public bool? IsEconomieSociale { get; set; }
@@ -50,7 +50,6 @@ namespace AdminAreaManagement.Application.Partners.Commands.UpdatePartner
                 entity.Name = request.Name;
                 entity.Address.Street = request.StreetName;
                 entity.Address.Number = request.StreetNumber;
-                entity.Address.BoxNumber = request.BoxNumber;
                 entity.Address.City = request.StreetCity;
                 entity.Address.PostalCode = request.StreetPostalCode;
                 entity.CategoryOfPartner = request.CategoryOfPartner;
@@ -60,14 +59,14 @@ namespace AdminAreaManagement.Application.Partners.Commands.UpdatePartner
                 entity.IsEconomieSociale = request.IsEconomieSociale;
                 entity.Note = request.Note;
 
-                if (request.Phones != null)
+                if (request.ContactPersons != null)
                 {
-                    foreach (var p in request.Phones)
+                    foreach (var p in request.ContactPersons)
                     {
-                        entity.AssignPhone(new Phone(p.PhoneNumber, p.ContactName, p.Gender));
+                        entity.AssignContactPerson(new ContactPerson(p.ContactDetails, p.ContactName, p.Gender));
                     }
 
-                    entity.removePhone(request.Phones);
+                    entity.removeContactPerson(request.ContactPersons);
                 }
 
                 if (request.DateOfConclusion.HasValue)

@@ -429,10 +429,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                             b1.Property<int>("PartnerId")
                                 .HasColumnType("integer");
 
-                            b1.Property<string>("BoxNumber")
-                                .IsRequired()
-                                .HasColumnType("text");
-
                             b1.Property<string>("City")
                                 .IsRequired()
                                 .HasColumnType("text");
@@ -452,6 +448,32 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                             b1.HasKey("PartnerId");
 
                             b1.ToTable("Partners");
+
+                            b1.WithOwner()
+                                .HasForeignKey("PartnerId");
+                        });
+
+                    b.OwnsMany("AdminAreaManagement.Core.ValueObjects.ContactPerson", "ContactPersons", b1 =>
+                        {
+                            b1.Property<int>("PartnerId")
+                                .HasColumnType("integer");
+
+                            b1.Property<string>("ContactDetails")
+                                .HasColumnType("text");
+
+                            b1.Property<int>("Gender")
+                                .HasColumnType("integer");
+
+                            b1.Property<bool>("ToDelete")
+                                .HasColumnType("boolean");
+
+                            b1.Property<string>("ContactName")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.HasKey("PartnerId", "ContactDetails", "Gender", "ToDelete");
+
+                            b1.ToTable("ContactPersons", (string)null);
 
                             b1.WithOwner()
                                 .HasForeignKey("PartnerId");
@@ -480,38 +502,12 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                                 .HasForeignKey("PartnerId");
                         });
 
-                    b.OwnsMany("AdminAreaManagement.Core.ValueObjects.Phone", "Phones", b1 =>
-                        {
-                            b1.Property<int>("PartnerId")
-                                .HasColumnType("integer");
-
-                            b1.Property<string>("PhoneNumber")
-                                .HasColumnType("text");
-
-                            b1.Property<int>("Gender")
-                                .HasColumnType("integer");
-
-                            b1.Property<bool>("ToDelete")
-                                .HasColumnType("boolean");
-
-                            b1.Property<string>("ContactName")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.HasKey("PartnerId", "PhoneNumber", "Gender", "ToDelete");
-
-                            b1.ToTable("Phones", (string)null);
-
-                            b1.WithOwner()
-                                .HasForeignKey("PartnerId");
-                        });
-
                     b.Navigation("Address")
                         .IsRequired();
 
-                    b.Navigation("Emails");
+                    b.Navigation("ContactPersons");
 
-                    b.Navigation("Phones");
+                    b.Navigation("Emails");
 
                     b.Navigation("StaffMember");
                 });

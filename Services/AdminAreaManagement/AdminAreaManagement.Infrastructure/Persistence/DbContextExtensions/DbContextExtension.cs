@@ -121,6 +121,20 @@ namespace AdminAreaManagement.Infrastructure.Persistence.DbContextExtensions
                     context.SaveChanges();
                 }
             }
+
+            //if (!context.Partners.Any())
+            //{
+            //    //var path = Path.Combine("Persistence", "Seed", "Partners.json"); // uncomment When running in a docker container
+            //    string path = "../AdminAreaManagement.Infrastructure/Persistence/Seed/Partners.json"; // Uncomment when running locally
+
+            //    var partners = JsonConvert.DeserializeObject<List<Partner>>(File.ReadAllText(path));
+
+            //    if (partners != null)
+            //    {
+            //        context.AddRange(partners);
+            //        context.SaveChanges();
+            //    }
+            //}
         }
     }
 }
