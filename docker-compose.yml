@@ -1,14 +1,18 @@
 version: '3.4'
 
 services:
-  # adminareamanagement.api:
-  #   image: ${DOCKER_REGISTRY-}adminareamanagementapi
-  #   build:
-  #     context: .
-  #     dockerfile: Services/AdminAreaManagement/AdminAreaManagement.API/Dockerfile
+  adminareamanagement.api:
+    image: ${DOCKER_REGISTRY-}adminareamanagementapi
+    container_name: zekaadminareaapi
+    build:
+      context: .
+      dockerfile: Services/AdminAreaManagement/AdminAreaManagement.API/Dockerfile
   
-  ocelot.apigateway:
+  zekaocelotgw:
      image: ${DOCKER_REGISTRY-}ocelotapigateway
      build:
       context: .
       dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile
+
+volumes:
+    postgres_data:

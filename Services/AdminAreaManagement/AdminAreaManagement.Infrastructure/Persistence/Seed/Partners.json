@@ -2,19 +2,22 @@
   {
     "partnerNumber": 787,
     "name": "Roxon",
-    "streetName": "Albright Way",
-    "streetNumber": "180",
-    "streetboxNumber": "B7845",
-    "streetPostalCode": "95032",
-    "streetCity": "Los Gatos",
+    "Address": {
+      "street": "Albright Way",
+      "number": "180",
+      "postalCode": "95032",
+      "city": "Los Gatos"
+    },
     "contactPersons": [
       {
         "contactDetails": "215 456-7890",
-        "partnerId": 1
+        "partnerId": 1,
+        "contactName": "Julian MonRose"
       },
       {
         "contactDetails": "ac@roxon.com",
-        "partnerId": 1
+        "partnerId": 1,
+        "contactName": "Anne-Charlotte"
       }
     ],
     "staffMemberId": 1,

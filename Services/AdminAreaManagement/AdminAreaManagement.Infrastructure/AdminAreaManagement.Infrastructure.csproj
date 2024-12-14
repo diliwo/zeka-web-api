@@ -33,6 +33,33 @@
     <ProjectReference Include="..\AdminAreaManagement.Application\AdminAreaManagement.Application.csproj" />
   </ItemGroup>
 
+	<ItemGroup>
+		<None Update="Persistence\Seed\Teams.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Persistence\Seed\Professions.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Persistence\Seed\Schools.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Persistence\Seed\TrainingFields.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Persistence\Seed\Trainings.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Persistence\Seed\TrainingTypes.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Persistence\Seed\StaffMembers.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Persistence\Seed\Partners.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
   <ItemGroup>
     <Folder Include="Migrations\" />
   </ItemGroup>
