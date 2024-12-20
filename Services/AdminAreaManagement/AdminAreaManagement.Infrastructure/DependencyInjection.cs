@@ -44,12 +44,11 @@ public static class DependencyInjection
     {
         using (var serviceScope = app.ApplicationServices.GetRequiredService<IServiceScopeFactory>().CreateScope())
         {
-            if (!serviceScope.ServiceProvider.GetService<ApplicationDbContext>().Database.GetPendingMigrations().Any())
+            if (serviceScope.ServiceProvider.GetService<ApplicationDbContext>().Database.GetPendingMigrations().Any())
             {
                 serviceScope.ServiceProvider.GetService<ApplicationDbContext>()?.Database.Migrate();
                 serviceScope.ServiceProvider.GetService<ApplicationDbContext>()?.EnsureSeeded();
             }
-
         }
     }
 }

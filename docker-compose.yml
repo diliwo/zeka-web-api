@@ -2,14 +2,14 @@ version: '3.4'
 
 services:
   adminareamanagement.api:
-    image: ${DOCKER_REGISTRY-}adminareamanagementapi
+    image: diliwo/adminareamanagementapi
     container_name: zekaadminareaapi
     build:
       context: .
       dockerfile: Services/AdminAreaManagement/AdminAreaManagement.API/Dockerfile
   
   zekaocelotgw:
-     image: ${DOCKER_REGISTRY-}ocelotapigateway
+     image: diliwo/ocelotapigateway
      build:
       context: .
       dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile
