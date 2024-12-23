@@ -1,15 +1,15 @@
 ﻿using MediatR;
 
-namespace Client.Application.Tracks.Commands.SendReferentChangedNotification
+namespace ClientManagement.Application.Tracks.Commands.SendReferentChangedNotification
 {
-    public class SendStaffChangedNotificationCommand : INotification
+    public class SendStaffMemberChangedNotificationCommand : INotification
     {
-        public SendStaffChangedNotificationCommand(int trackId)
+        public SendStaffMemberChangedNotificationCommand(int trackId)
         {
             TrackId = trackId;
         }
 
-        public SendStaffChangedNotificationCommand()
+        public SendStaffMemberChangedNotificationCommand()
         {
         }
 

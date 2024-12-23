@@ -1,7 +1,7 @@
-﻿using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 
-namespace Client.Infrastructure.Persistence
+namespace ClientManagement.Infrastructure.Persistence
 {
     public class QuarterlyMonitoringRepository : IQuarterlyMonitoringRepository
     {
@@ -42,9 +42,9 @@ namespace Client.Infrastructure.Persistence
                         (q.Client.FirstName + " " + q.Client.LastName).ToUpper()
                         .Contains(searchText.ToUpper()) ||
                         (q.Client.Niss).Contains(searchText) ||
-                        (q.Staff.LastName + " " + q.Staff.FirstName).ToUpper()
+                        (q.StaffMember.LastName + " " + q.StaffMember.FirstName).ToUpper()
                         .Contains(searchText.ToUpper()) ||
-                        (q.Staff.FirstName + " " + q.Staff.LastName).ToUpper()
+                        (q.StaffMember.FirstName + " " + q.StaffMember.LastName).ToUpper()
                         .Contains(searchText.ToUpper()) ||
                         q.MonitoringAction.Action.ToUpper().Contains(searchText.ToUpper()));
         }
@@ -55,17 +55,17 @@ namespace Client.Infrastructure.Persistence
                 .Where(q => q.ClientId == ClientId)
                 .Where(q => withDeleted || !q.Softdelete)
                 .Where(q => String.IsNullOrWhiteSpace(searchText) ||
-                            (q.Staff.LastName + " " + q.Staff.FirstName).ToUpper()
+                            (q.StaffMember.LastName + " " + q.StaffMember.FirstName).ToUpper()
                             .Contains(searchText.ToUpper()) ||
-                            (q.Staff.FirstName + " " + q.Staff.LastName).ToUpper()
+                            (q.StaffMember.FirstName + " " + q.StaffMember.LastName).ToUpper()
                             .Contains(searchText.ToUpper()) ||
                             q.MonitoringAction.Action.ToUpper().Contains(searchText.ToUpper()));
         }
 
-        public IQueryable<QuarterlyMonitoring> getQuarterlyMonitoringsByStaffId(int referntId, string searchText = "", bool withDeleted = false)
+        public IQueryable<QuarterlyMonitoring> getQuarterlyMonitoringsByStaffMemberId(int referntId, string searchText = "", bool withDeleted = false)
         {
             return _context.QuarterlyMonitorings
-                .Where(q => q.StaffId == referntId)
+                .Where(q => q.StaffMemberId == referntId)
                 .Where(q => withDeleted || !q.Softdelete)
                 .Where(q => String.IsNullOrWhiteSpace(searchText) ||
                             (q.Client.LastName + " " + q.Client.FirstName).ToUpper()

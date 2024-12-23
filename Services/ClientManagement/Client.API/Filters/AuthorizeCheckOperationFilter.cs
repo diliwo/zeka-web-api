@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
-namespace Client.API.Filters
+namespace ClientManagement.API.Filters
 {
     public class AuthorizeCheckOperationFilter : IOperationFilter
     {

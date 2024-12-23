@@ -1,9 +1,8 @@
-﻿using Client.Application.Common.Exceptions;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc.Filters;
+﻿using ClientManagement.Application.Common.Exceptions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 
-namespace Client.API.Filters
+namespace ClientManagement.API.Filters
 {
     public class ApiExceptionFilterAttribute : ExceptionFilterAttribute
     {

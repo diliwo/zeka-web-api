@@ -1,5 +1,5 @@
 ﻿
-namespace Client.Application.Common.Services
+namespace ClientManagement.Application.Common.Services
 {
     public class AdminAreaGrpcService 
     {

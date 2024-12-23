@@ -1,10 +1,10 @@
 ﻿using FluentValidation;
 
-namespace Client.Application.QuarterlyMonitorings.Queries.GetListByReferent
+namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetListByReferent
 {
-    public class GetQuarterlyMonitoringsByStaffQueryValidator :AbstractValidator<GetQuarterlyMonitoringsByStaffQuery>
+    public class GetQuarterlyMonitoringsByStaffMemberQueryValidator :AbstractValidator<GetQuarterlyMonitoringsByStaffMemberQuery>
     {
-        public GetQuarterlyMonitoringsByStaffQueryValidator()
+        public GetQuarterlyMonitoringsByStaffMemberQueryValidator()
         {
             RuleFor(x => x.PageNumber)
                 .GreaterThanOrEqualTo(1).WithMessage("PageNumber doit être supérieur ou égal à 1");

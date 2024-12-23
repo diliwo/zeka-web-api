@@ -1,10 +1,10 @@
-﻿using Client.Application.Common.Exceptions;
-using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Application.MonitoringActions.Commands.UpdateAction
+namespace ClientManagement.Application.MonitoringActions.Commands.UpdateAction
 {
     public class UpdateMonitoringActionCommand : IRequest
     {

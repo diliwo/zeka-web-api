@@ -1,7 +1,7 @@
-﻿using Client.Core.Common;
+﻿using ClientManagement.Core.Common;
 using MediatR;
 
-namespace Client.Application.Common.Models
+namespace ClientManagement.Application.Common.Models
 {
     public class DomainEventNotification<TDomainEvent> : INotification where TDomainEvent : DomainEvent
     {

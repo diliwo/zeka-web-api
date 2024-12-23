@@ -1,9 +1,9 @@
 ﻿using System.Linq.Dynamic.Core;
 using System.Reflection;
 using System.Text;
-using Client.Core.Interfaces;
+using ClientManagement.Core.Interfaces;
 
-namespace Client.Infrastructure.Persistence.Helpers
+namespace ClientManagement.Infrastructure.Persistence.Helpers
 {
     public class SortHelper<T> : ISortHelper<T>
     {

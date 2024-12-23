@@ -1,9 +1,9 @@
-﻿using Client.Application.Common.Exceptions;
-using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.SchoolRegistations.Commands.DeleteSchoolRegistration
+namespace ClientManagement.Application.SchoolRegistations.Commands.DeleteSchoolRegistration
 {
     public class DeleteSchoolRegistrationCommand : IRequest<Unit>
     {

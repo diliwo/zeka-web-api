@@ -1,4 +1,4 @@
-﻿namespace Client.Application.Common.Exceptions
+﻿namespace ClientManagement.Application.Common.Exceptions
 {
     public class ForbiddenOperationException : ApplicationExceptionBase
     {

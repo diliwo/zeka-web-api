@@ -1,7 +1,7 @@
 ﻿using System.Collections;
-using Client.Core.Common;
+using ClientManagement.Core.Common;
 
-namespace Client.Core.ValueObjects
+namespace ClientManagement.Core.ValueObjects
 {
     public class PhoneList : ValueObject, IEnumerable
     {

@@ -1,4 +1,4 @@
-﻿namespace Client.Core.Interfaces
+﻿namespace ClientManagement.Core.Interfaces
 {
     public interface IDateTime
     {

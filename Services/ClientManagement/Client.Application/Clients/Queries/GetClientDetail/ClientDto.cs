@@ -1,11 +1,12 @@
 ﻿using AutoMapper;
-using Client.Application.Common.Mappings;
-using Client.Application.Tracks.Queries;
-using Client.Core.Enums;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Application.Tracks.Queries;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Enums;
 
-namespace Client.Application.Clients.Queries.GetClientDetail
+namespace ClientManagement.Application.Clients.Queries.GetClientDetail
 {
-    public class ClientDto : IMapFrom<Core.Entities.Client>
+    public class ClientDto : IMapFrom<Client>
     {
         public int ClientId { get; set; }
         public string ReferenceNumber { get; set; }
@@ -21,8 +22,8 @@ namespace Client.Application.Clients.Queries.GetClientDetail
         public string Email { get; set; }
         public string Phone { get; set; }
         public string MobilePhone { get; set; }
-        public string SupportStaffName { get; set; }
-        public string SupportStaffService { get; set; }
+        public string SupportStaffMemberName { get; set; }
+        public string SupportStaffMemberService { get; set; }
         public DateTime? SupportStartDate { get; set; }
         public DateTime? SupportEndDate { get; set; }
         public string NativeLanguage { get; set; }
@@ -47,7 +48,7 @@ namespace Client.Application.Clients.Queries.GetClientDetail
 
         public void Mapping(Profile profile)
         {
-            profile.CreateMap<Core.Entities.Client, ClientDto>()
+            profile.CreateMap<Client, ClientDto>()
                 .ForMember(b => b.CivilStatus, opt => opt.MapFrom(s => (int)s.CivilStatus))
                 .ForMember(b => b.Gender, opt => opt.MapFrom(e => (int)e.Gender))
                 .ForMember(b => b.ClientId, opt => opt.MapFrom(e => e.Id))
@@ -61,16 +62,16 @@ namespace Client.Application.Clients.Queries.GetClientDetail
                                 : "Néant"))
                 .ForMember(b => b.NativeLanguage, opt => opt.MapFrom(e => e.NativeLanguage.SpokenLanguage))
                 .ForMember(b => b.ContactLanguage, opt => opt.MapFrom(e => e.ContactLanguage.SpokenLanguage))
-                .ForMember(b => b.SupportStaffName,
+                .ForMember(b => b.SupportStaffMemberName,
                     opt => opt.MapFrom(e =>
                         e.Supports.Where(b => b.Softdelete != true).Count() > 0
-                            ? e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().Staff
+                            ? e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().StaffMember
                                 .FullName
                             : string.Empty))
-                .ForMember(b => b.SupportStaffService,
+                .ForMember(b => b.SupportStaffMemberService,
                     opt => opt.MapFrom(e =>
                         e.Supports.Where(b => b.Softdelete != true).Count() > 0
-                            ? ("(" + e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().Staff
+                            ? ("(" + e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().StaffMember
                                 .Service.Acronym + ")")
                             : string.Empty))
                 .ForMember(b => b.SupportStartDate,

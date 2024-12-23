@@ -1,13 +1,13 @@
-﻿using Client.Core.Common;
+﻿using ClientManagement.Core.Common;
 
-namespace Client.Core.Entities
+namespace ClientManagement.Core.Entities
 {
     public class Track : Entity
     {
         public DateTime StartDate { get; set; }
         public DateTime? EndDate { get; set; }
-        public int StaffId { get; set; }
-        public Staff Staff { get; set; }
+        public int StaffMemberId { get; set; }
+        public StaffMember StaffMember { get; set; }
         public int ClientId { get; set; }
         public Client Client { get; set; }
         public String? Note { get; set; }
@@ -19,11 +19,11 @@ namespace Client.Core.Entities
         {
         }
 
-        public Track(Client client,  DateTime startDate, Staff staff, String? note = "")
+        public Track(Client client,  DateTime startDate, StaffMember StaffMember, String? note = "")
         {
             Client = client;
             StartDate = startDate;
-            Staff = staff;
+            StaffMember = StaffMember;
             Note = note;
         }
     }

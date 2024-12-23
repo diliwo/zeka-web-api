@@ -1,8 +1,8 @@
-﻿using Client.Application.Clients.Commands.Exceptions;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Clients.Commands.Exceptions;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Clients.Commands.UpdateBeneficiaries
+namespace ClientManagement.Application.Clients.Commands.UpdateBeneficiaries
 {
     public class UpdateBeneficiairesCommand : IRequest<int>
     {

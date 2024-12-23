@@ -1,7 +1,7 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using FluentValidation;
 
-namespace Client.Application.Clients.Commands.UpSertIbisNumber
+namespace ClientManagement.Application.Clients.Commands.UpSertIbisNumber
 {
     public class UpSertIbisNumberCommandValidator : AbstractValidator<UpSertIbisNumberCommand>
     {

@@ -1,6 +1,6 @@
 ﻿using FluentValidation;
 
-namespace Client.Application.MonitoringActions.Commands.UpdateAction
+namespace ClientManagement.Application.MonitoringActions.Commands.UpdateAction
 {
     public class UpdateMonitoringActionCommandValidator : AbstractValidator<UpdateMonitoringActionCommand>
     {

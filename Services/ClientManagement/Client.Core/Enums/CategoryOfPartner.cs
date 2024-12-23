@@ -1,4 +1,4 @@
-﻿namespace Client.Core.Enums
+﻿namespace ClientManagement.Core.Enums
 {
     public enum CategoryOfPartner
     {

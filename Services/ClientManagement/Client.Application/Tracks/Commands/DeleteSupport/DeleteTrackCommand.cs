@@ -1,10 +1,10 @@
-﻿using Client.Application.Common.Exceptions;
-using Client.Application.Tracks.Commands.SendReferentChangedNotification;
-using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Tracks.Commands.SendReferentChangedNotification;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Tracks.Commands.DeleteSupport
+namespace ClientManagement.Application.Tracks.Commands.DeleteSupport
 {
     public class DeleteTrackCommand : IRequest
     {
@@ -36,7 +36,7 @@ namespace Client.Application.Tracks.Commands.DeleteSupport
 
                     if (previousSupport is not null && previousSupport.Id != foundedSupport.Id)
                     {
-                        await _mediator.Publish(new SendStaffChangedNotificationCommand(previousSupport.Id),
+                        await _mediator.Publish(new SendStaffMemberChangedNotificationCommand(previousSupport.Id),
                             cancellationToken);
                     }
 

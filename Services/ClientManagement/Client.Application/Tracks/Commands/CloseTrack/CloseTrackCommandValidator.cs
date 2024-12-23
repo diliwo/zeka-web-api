@@ -1,7 +1,7 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using FluentValidation;
 
-namespace Client.Application.Tracks.Commands.CloseTrack
+namespace ClientManagement.Application.Tracks.Commands.CloseTrack
 {
     public class CloseTrackCommandValidator : AbstractValidator<CloseTrackCommand>
     {

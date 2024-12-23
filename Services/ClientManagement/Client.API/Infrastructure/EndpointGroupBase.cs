@@ -1,4 +1,4 @@
-﻿namespace Client.API.Infrastructure;
+﻿namespace ClientManagement.API.Infrastructure;
 
 public abstract class EndpointGroupBase
 {

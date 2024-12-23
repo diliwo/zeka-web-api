@@ -1,8 +1,8 @@
-﻿using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Infrastructure.Persistence
+namespace ClientManagement.Infrastructure.Persistence
 {
     public class LanguageRepository : ILanguageRepository
     {

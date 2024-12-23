@@ -1,15 +1,13 @@
-﻿using Client.Core.Entities;
-
-namespace Client.Core.Interfaces
+﻿namespace ClientManagement.Core.Interfaces
 {
-    public interface IStaffRepository
+    public interface IStaffMemberRepository
     {
-        void Persist(Staff staff);
-        Staff Get(int id);
+        void Persist(StaffMember StaffMember);
+        StaffMember Get(int id);
         bool UserAlreadyExists(string username, int idService);
-        IQueryable<Staff> GetStaffs(string filter = null, string orderBy = "");
-        //void Delete(Staff staff);
-        void SoftDelete(Staff staff);
-        public Task<bool> ServiceHasStaffs(int serviceId);
+        IQueryable<StaffMember> GetStaffMembers(string filter = null, string orderBy = "");
+        //void Delete(StaffMember StaffMember);
+        void SoftDelete(StaffMember StaffMember);
+        public Task<bool> ServiceHasStaffMembers(int serviceId);
     }
 }

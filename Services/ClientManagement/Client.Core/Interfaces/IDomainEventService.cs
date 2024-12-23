@@ -1,6 +1,6 @@
-﻿using Client.Core.Common;
+﻿using ClientManagement.Core.Common;
 
-namespace Client.Core.Interfaces
+namespace ClientManagement.Core.Interfaces
 {
     public interface IDomainEventService
     {

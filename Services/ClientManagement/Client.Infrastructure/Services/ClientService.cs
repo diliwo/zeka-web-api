@@ -1,8 +1,6 @@
-﻿using Client.Core.Common.Dto;
-using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 
-namespace Client.Infrastructure.Services;
+namespace ClientManagement.Infrastructure.Services;
 
 public class ClientService : IClientService
 {

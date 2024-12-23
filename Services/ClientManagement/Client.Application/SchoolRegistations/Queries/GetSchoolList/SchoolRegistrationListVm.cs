@@ -1,6 +1,6 @@
-﻿using Client.Application.SchoolRegistations.Common;
+﻿using ClientManagement.Application.SchoolRegistations.Common;
 
-namespace Client.Application.SchoolRegistations.Queries.GetSchoolList
+namespace ClientManagement.Application.SchoolRegistations.Queries.GetSchoolList
 {
     public class SchoolRegistrationListVm
     {

@@ -1,7 +1,7 @@
-﻿using Client.Infrastructure.Persistence.Helpers;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
+using ClientManagement.Infrastructure.Persistence.Helpers;
 
-namespace Client.Infrastructure.Persistence
+namespace ClientManagement.Infrastructure.Persistence
 {
     public class FileService : IFileService
     {

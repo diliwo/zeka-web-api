@@ -1,10 +1,10 @@
 ﻿using System.Text.RegularExpressions;
-using Client.Core.Common;
-using Client.Core.Enums;
-using Client.Core.Exceptions;
-using Client.Core.ValueObjects;
+using ClientManagement.Core.Common;
+using ClientManagement.Core.Enums;
+using ClientManagement.Core.Exceptions;
+using ClientManagement.Core.ValueObjects;
 
-namespace Client.Core.Entities
+namespace ClientManagement.Core.Entities
 {
     public class Client : AggregateRoot
     {

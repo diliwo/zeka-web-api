@@ -1,12 +1,12 @@
 ﻿using System.Reflection;
-using Client.Application.Common.Behaviours;
-using Client.Application.Common.Services;
-using Client.Core.Interfaces;
+using ClientManagement.Application.Common.Behaviours;
+using ClientManagement.Application.Common.Services;
+using ClientManagement.Core.Interfaces;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Client.Application
+namespace ClientManagement.Application
 {
     public static class DependencyInjection
     {

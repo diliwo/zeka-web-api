@@ -1,10 +1,10 @@
-﻿namespace Client.Core.Interfaces;
+﻿namespace ClientManagement.Core.Interfaces;
 
 public interface IRepositoryManager
 {
     IClientRepository Client { get; }
     ITrackRepository Track { get; }
-    IStaffRepository Staff { get; }
+    IStaffMemberRepository StaffMember { get; }
     ISchoolRegistrationRepository SchoolRegistration { get; }
     ITrainingTypeRepository TrainingType { get; }
     IProfessionRepository Profession { get; }

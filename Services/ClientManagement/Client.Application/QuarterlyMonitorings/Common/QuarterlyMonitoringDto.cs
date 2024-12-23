@@ -1,8 +1,8 @@
 ﻿using AutoMapper;
-using Client.Application.Common.Mappings;
-using Client.Core.Entities;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Core.Entities;
 
-namespace Client.Application.QuarterlyMonitorings.Common
+namespace ClientManagement.Application.QuarterlyMonitorings.Common
 {
     public class QuarterlyMonitoringDto : IMapFrom<QuarterlyMonitoring>
     {
@@ -13,10 +13,10 @@ namespace Client.Application.QuarterlyMonitorings.Common
         public string ClientFirstName { get; set; }
         public string ClientNiss { get; set; }
         public string ClientDossier { get; set; }
-        public int StaffId { get; set; }
-        public string StaffName { get; set; }
-        public string StaffLastName { get; set; }
-        public string StaffFirstName { get; set; }
+        public int StaffMemberId { get; set; }
+        public string StaffMemberName { get; set; }
+        public string StaffMemberLastName { get; set; }
+        public string StaffMemberFirstName { get; set; }
         public int MonitoringActionId { get; set; }
         public string MonitoringActionLabel { get; set; }
         public DateTime ActionDate { get; set; }
@@ -41,14 +41,14 @@ namespace Client.Application.QuarterlyMonitorings.Common
                     opt => opt.MapFrom(q => q.Client.Niss))
                 .ForMember(d => d.ClientDossier,
                     opt => opt.MapFrom(q => q.Client.ReferenceNumber))
-                .ForMember(d => d.StaffId,
-                    opt => opt.MapFrom(q => q.StaffId))
-                .ForMember(d => d.StaffName,
-                    opt => opt.MapFrom(q => q.Staff.FullName))
-                .ForMember(d => d.StaffLastName,
-                    opt => opt.MapFrom(q => q.Staff.LastName))
-                .ForMember(d => d.StaffFirstName,
-                    opt => opt.MapFrom(q => q.Staff.FirstName))
+                .ForMember(d => d.StaffMemberId,
+                    opt => opt.MapFrom(q => q.StaffMemberId))
+                .ForMember(d => d.StaffMemberName,
+                    opt => opt.MapFrom(q => q.StaffMember.FullName))
+                .ForMember(d => d.StaffMemberLastName,
+                    opt => opt.MapFrom(q => q.StaffMember.LastName))
+                .ForMember(d => d.StaffMemberFirstName,
+                    opt => opt.MapFrom(q => q.StaffMember.FirstName))
                 .ForMember(d => d.MonitoringActionId,
                     opt => opt.MapFrom(q => q.MonitoringActionId))
                 .ForMember(d => d.MonitoringActionLabel,

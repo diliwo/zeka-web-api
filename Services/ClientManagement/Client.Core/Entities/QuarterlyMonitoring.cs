@@ -1,6 +1,6 @@
-﻿using Client.Core.Common;
+﻿using ClientManagement.Core.Common;
 
-namespace Client.Core.Entities
+namespace ClientManagement.Core.Entities
 {
     public class QuarterlyMonitoring : Entity
     {
@@ -10,8 +10,8 @@ namespace Client.Core.Entities
 
         public int ClientId { get; set; }
         public Client Client { get; set; }
-        public int StaffId { get; set; }
-        public Staff Staff { get; set; }
+        public int StaffMemberId { get; set; }
+        public StaffMember StaffMember { get; set; }
         public int MonitoringActionId { get; set; }
         public MonitoringAction MonitoringAction { get; set; }
         public DateTime ActionDate { get; set; } = DateTime.Now;
@@ -23,21 +23,21 @@ namespace Client.Core.Entities
             set => _quarter = value;
         }
 
-        public QuarterlyMonitoring(Client client, Staff staff, MonitoringAction monitoringAction,
+        public QuarterlyMonitoring(Client client, StaffMember StaffMember, MonitoringAction monitoringAction,
             DateTime actionDate, string actionComment)
         {
             Client = client;
-            Staff = staff;
+            StaffMember = StaffMember;
             MonitoringAction = monitoringAction;
             ActionDate = actionDate;
             ActionComment = actionComment;
         }
 
-        public QuarterlyMonitoring(int ClientId, int StaffId, int monitoringActionId, DateTime actionDate,
+        public QuarterlyMonitoring(int ClientId, int StaffMemberId, int monitoringActionId, DateTime actionDate,
             string actionComment)
         {
             ClientId = ClientId;
-            StaffId = StaffId;
+            StaffMemberId = StaffMemberId;
             MonitoringActionId = monitoringActionId;
             ActionDate = actionDate;
             ActionComment = actionComment;

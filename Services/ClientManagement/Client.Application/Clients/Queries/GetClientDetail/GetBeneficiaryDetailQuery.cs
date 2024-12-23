@@ -1,10 +1,10 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Client.Core.Interfaces;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Application.Clients.Queries.GetClientDetail
+namespace ClientManagement.Application.Clients.Queries.GetClientDetail
 {
     public class GetClientDetailQuery : IRequest<ClientDto>
     {

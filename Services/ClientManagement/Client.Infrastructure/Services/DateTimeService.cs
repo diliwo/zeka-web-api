@@ -1,6 +1,6 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 
-namespace Client.Infrastructure.Services
+namespace ClientManagement.Infrastructure.Services
 {
     public class DateTimeService : IDateTime
     {

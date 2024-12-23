@@ -1,6 +1,6 @@
 ﻿using System.Reflection;
 
-namespace Client.API.Infrastructure;
+namespace ClientManagement.API.Infrastructure;
 
 public static class MethodInfoExtensions
 {

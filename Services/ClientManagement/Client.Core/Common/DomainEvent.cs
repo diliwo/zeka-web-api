@@ -1,4 +1,4 @@
-﻿namespace Client.Core.Common
+﻿namespace ClientManagement.Core.Common
 {
     public interface IHasDomainEvent
     {

@@ -1,8 +1,8 @@
 ﻿using AutoMapper;
-using Client.Application.Common.Mappings;
-using Client.Core.Entities;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Core.Entities;
 
-namespace Client.Application.Assessments.Common
+namespace ClientManagement.Application.Assessments.Common
 {
     public class ProfessionalAssessmentDto : IMapFrom<ProfessionalAssessmentDto>
     {

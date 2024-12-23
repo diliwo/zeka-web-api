@@ -1,12 +1,12 @@
 ﻿using AutoMapper;
-using Client.Application.Common.Exceptions;
-using Client.Application.Common.Mappings;
-using Client.Application.Common.Models;
-using Client.Core.Common.Dto;
-using Client.Core.Interfaces;
+using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Mappings;
+using ClientManagement.Application.Common.Models;
+using ClientManagement.Core.Common.Dto;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Tracks.Queries.GetSupportsByReferents
+namespace ClientManagement.Application.Tracks.Queries.GetSupportsByReferents
 {
     public class GetSupportsByJobCoachQuery : IRequest<PaginatedList<MyJobCoachSupportDto>>
     {
@@ -37,14 +37,14 @@ namespace Client.Application.Tracks.Queries.GetSupportsByReferents
 
             public async Task<PaginatedList<MyJobCoachSupportDto>> Handle(GetSupportsByJobCoachQuery request, CancellationToken cancellationToken)
             {
-                //var StaffUserName = _httpContextAccessor.HttpContext.User.Identity.Name;
-                var StaffUserName = "System";
-                if (StaffUserName == null)
+                //var StaffMemberUserName = _httpContextAccessor.HttpContext.User.Identity.Name;
+                var StaffMemberUserName = "System";
+                if (StaffMemberUserName == null)
                 {
-                    throw new NotFoundException(nameof(StaffUserName), StaffUserName);
+                    throw new NotFoundException(nameof(StaffMemberUserName), StaffMemberUserName);
                 }
 
-                var supports = _sortMyJobCoachSupports.ApplySort(_repository.Track.GetJobCoachSupportsByUserName(StaffUserName,request.Filter, request.IsActive),request.OrderBy);
+                var supports = _sortMyJobCoachSupports.ApplySort(_repository.Track.GetJobCoachSupportsByUserName(StaffMemberUserName,request.Filter, request.IsActive),request.OrderBy);
 
                 return await supports.PaginatedListAsync(request.PageNumber, request.PageSize);
             }

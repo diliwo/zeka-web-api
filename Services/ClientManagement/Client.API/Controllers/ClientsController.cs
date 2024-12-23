@@ -1,14 +1,12 @@
 ﻿using System.Reflection;
-using Client.Application.Clients.Commands.AddClient;
-using Client.Application.Clients.Commands.UpdateNativeLanguage;
-using Client.Application.Clients.Commands.UpSertIbisNumber;
-using Client.Application.Clients.Model;
-using Client.Application.Clients.Queries.GetClientDetail;
-using Client.Application.Clients.Queries.GetClients;
+using ClientManagement.Application.Clients.Commands.AddClient;
+using ClientManagement.Application.Clients.Commands.UpdateNativeLanguage;
+using ClientManagement.Application.Clients.Queries.GetClientDetail;
+using ClientManagement.Application.Clients.Queries.GetClients;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Client.API.Controllers
+namespace ClientManagement.API.Controllers
 {
     public class ClientsController : ApiControllerBase
     {

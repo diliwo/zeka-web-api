@@ -1,4 +1,4 @@
-﻿namespace Client.Application.Exceptions
+﻿namespace ClientManagement.Application.Exceptions
 {
     public class FluidException : Exception
     {

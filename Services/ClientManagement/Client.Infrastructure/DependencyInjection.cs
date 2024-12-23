@@ -1,21 +1,16 @@
-﻿using System.Configuration;
-using System.Reflection;
-using Client.Core.Entities;
-using Client.Core.Interfaces;
-using Client.Core.ValueObjects;
-using Client.Infrastructure.Persistence;
-using Client.Infrastructure.Persistence.Configurations;
-using Client.Infrastructure.Persistence.Helpers;
-using Client.Infrastructure.Services;
-using FluentAssertions.Common;
-using Humanizer.Configuration;
+﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
+using ClientManagement.Core.ValueObjects;
+using ClientManagement.Infrastructure.Persistence;
+using ClientManagement.Infrastructure.Persistence.Configurations;
+using ClientManagement.Infrastructure.Persistence.Helpers;
+using ClientManagement.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
-
-namespace Client.Infrastructure;
+namespace ClientManagement.Infrastructure;
 
 public static class DependencyInjection
 {
@@ -35,11 +30,7 @@ public static class DependencyInjection
         services.AddTransient<ILanguageRepository, LanguageRepository>();
         //services.AddTransient<IFileService, FileService>();
         services.AddTransient<IDateTime, DateTimeService>();
-        services.AddScoped<ISortHelper<TrainingType>, SortHelper<TrainingType>>();
-        services.AddScoped<ISortHelper<TrainingField>, SortHelper<TrainingField>>();
         services.AddScoped<ISortHelper<SchoolRegistration>, SortHelper<SchoolRegistration>>();
-        services.AddScoped<ISortHelper<Staff>, SortHelper<Staff>>();
-        services.AddScoped<ISortHelper<Team>, SortHelper<Team>>();
         services.AddScoped<IRepositoryManager, RepositoryManager>();
 
         services.Configure<GenericReadRepository<Reward>>(configuration.GetSection(ConfigurationKeys.Rewards));

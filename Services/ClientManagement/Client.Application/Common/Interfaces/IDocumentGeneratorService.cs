@@ -1,6 +1,6 @@
-﻿using Client.Application.Models;
+﻿using ClientManagement.Application.Models;
 
-namespace Client.Application.Common.Interfaces
+namespace ClientManagement.Application.Common.Interfaces
 {
     public interface IDocumentGeneratorService
     {

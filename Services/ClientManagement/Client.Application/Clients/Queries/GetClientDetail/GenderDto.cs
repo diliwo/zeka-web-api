@@ -1,4 +1,4 @@
-﻿namespace Client.Application.Clients.Queries.GetClientDetail
+﻿namespace ClientManagement.Application.Clients.Queries.GetClientDetail
 {
     class GenderDto
     {

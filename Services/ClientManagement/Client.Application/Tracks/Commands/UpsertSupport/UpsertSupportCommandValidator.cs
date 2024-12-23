@@ -1,7 +1,7 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using FluentValidation;
 
-namespace Client.Application.Tracks.Commands.UpsertSupport
+namespace ClientManagement.Application.Tracks.Commands.UpsertSupport
 {
     public class UpsertSupportCommandValidator : AbstractValidator<UpsertSupportCommand>
     {

@@ -1,8 +1,8 @@
-﻿using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.MonitoringActions.Commands.CreateAction
+namespace ClientManagement.Application.MonitoringActions.Commands.CreateAction
 {
     public class CreateMonitoringActionCommand : IRequest
     {

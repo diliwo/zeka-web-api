@@ -1,8 +1,8 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using MediatR.Pipeline;
 using Microsoft.Extensions.Logging;
 
-namespace Client.Application.Common.Behaviours
+namespace ClientManagement.Application.Common.Behaviours
 {
     public class LoggingBehaviour<TRequest> : IRequestPreProcessor<TRequest>
     {
@@ -26,7 +26,7 @@ namespace Client.Application.Common.Behaviours
                 userName =  _currentUserService.Username;
             }
 
-            _logger.LogInformation("Isp Request: {FirstName} {@UserId} {@UserName} {@Request}",
+            _logger.LogInformation("Zeka Request: {FirstName} {@UserId} {@UserName} {@Request}",
                 requestName, userId, userName, request);
         }
     }

@@ -1,16 +1,16 @@
-﻿using Client.Application.Common.Exceptions;
-using Client.Core.Entities;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Application.QuarterlyMonitorings.Commands.UpdateQuarterlyMonitoring
+namespace ClientManagement.Application.QuarterlyMonitorings.Commands.UpdateQuarterlyMonitoring
 {
     public class UpdateQuarterlyMonitoringCommand : IRequest<int>
     {
         public int QMonitoringId { get; set; }
         public int ClientId { get; set; }
-        public int StaffId { get; set; }
+        public int StaffMemberId { get; set; }
         public int MonitoringActionId { get; set; }
         public DateTime ActionDate { get; set; }
         public string ActionComment { get; set; }
@@ -46,10 +46,10 @@ namespace Client.Application.QuarterlyMonitorings.Commands.UpdateQuarterlyMonito
                 throw new NotFoundException(nameof(Client), request.ClientId);
             }
 
-            var Staff = _repository.Staff.Get(request.StaffId);
-            if (Staff == null)
+            var StaffMember = _repository.StaffMember.Get(request.StaffMemberId);
+            if (StaffMember == null)
             {
-                throw new NotFoundException(nameof(Staff), request.StaffId);
+                throw new NotFoundException(nameof(StaffMember), request.StaffMemberId);
             }
 
             var monitoringAction = await _monitoringActionRepository.GetMonitoringActionById(request.MonitoringActionId)
@@ -61,8 +61,8 @@ namespace Client.Application.QuarterlyMonitorings.Commands.UpdateQuarterlyMonito
 
             qMonitoring.Client = Client;
             qMonitoring.ClientId = request.ClientId;
-            qMonitoring.Staff = Staff;
-            qMonitoring.StaffId = request.StaffId;
+            qMonitoring.StaffMember = StaffMember;
+            qMonitoring.StaffMemberId = request.StaffMemberId;
             qMonitoring.MonitoringAction = monitoringAction;
             qMonitoring.MonitoringActionId = request.MonitoringActionId;
             qMonitoring.ActionDate = request.ActionDate.ToLocalTime();

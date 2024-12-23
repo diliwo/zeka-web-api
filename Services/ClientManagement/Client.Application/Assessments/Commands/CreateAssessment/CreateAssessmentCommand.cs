@@ -1,11 +1,11 @@
-﻿using Client.Application.Assessments.Common;
-using Client.Application.Common.Exceptions;
-using Client.Core.Entities;
-using Client.Core.Enums;
-using Client.Core.Interfaces;
+﻿using ClientManagement.Application.Assessments.Common;
+using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.Enums;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Assessments.Commands.CreateAssessment
+namespace ClientManagement.Application.Assessments.Commands.CreateAssessment
 {
     public class CreateAssessmentCommand : IRequest<int>
     {

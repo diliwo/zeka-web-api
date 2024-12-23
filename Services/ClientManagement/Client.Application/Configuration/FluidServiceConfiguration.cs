@@ -1,4 +1,4 @@
-﻿namespace Client.Application.Configuration
+﻿namespace ClientManagement.Application.Configuration
 {
     public class FluidServiceConfiguration
     {

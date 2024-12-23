@@ -1,6 +1,6 @@
 ﻿using FluentValidation;
 
-namespace Client.Application.QuarterlyMonitorings.Commands.CreateQuarterlyMonitoring
+namespace ClientManagement.Application.QuarterlyMonitorings.Commands.CreateQuarterlyMonitoring
 {
     public class CreateQuarterlyMonitoringCommandValidator : AbstractValidator<CreateQuarterlyMonitoringCommand>
     {

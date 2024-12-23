@@ -1,7 +1,7 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using FluentValidation;
 
-namespace Client.Application.Assessments.Commands.FinalizeAssessment
+namespace ClientManagement.Application.Assessments.Commands.FinalizeAssessment
 {
     public class FinalizeBilanCommandValidator : AbstractValidator<FinalizeAssessmentCommand>
     {

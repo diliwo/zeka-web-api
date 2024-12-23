@@ -1,5 +1,5 @@
 ﻿
-namespace Client.Application.Clients.Commands.SociabiliDBChangeBeneficiaryMessage.Config
+namespace ClientManagement.Application.Clients.Commands.SociabiliDBChangeBeneficiaryMessage.Config
 {
     public class RabbitMqSociabiliDBChangeSettings
     {

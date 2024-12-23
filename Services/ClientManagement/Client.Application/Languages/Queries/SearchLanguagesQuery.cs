@@ -1,7 +1,7 @@
-﻿using Client.Core.Interfaces;
+﻿using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace Client.Application.Languages.Queries
+namespace ClientManagement.Application.Languages.Queries
 {
     public class SearchLanguagesQuery : IRequest<List<LanguageDto>>
     {

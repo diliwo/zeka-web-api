@@ -1,9 +1,9 @@
-﻿using Client.Application.Clients.Model;
+﻿using ClientManagement.Application.Clients.Model;
 using FluentValidation;
 using Microsoft.AspNetCore.JsonPatch;
 using Microsoft.AspNetCore.JsonPatch.Operations;
 
-namespace Client.Application.Clients.Commands.UpSertIbisNumber;
+namespace ClientManagement.Application.Clients.Commands.UpSertIbisNumber;
 
 public class JsonPatchDocumentValidator : AbstractValidator<JsonPatchDocument<UpdateClientDto>>
 {

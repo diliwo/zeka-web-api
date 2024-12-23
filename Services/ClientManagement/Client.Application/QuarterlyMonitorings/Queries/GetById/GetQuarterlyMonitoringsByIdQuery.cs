@@ -1,11 +1,11 @@
 ﻿using AutoMapper;
 using AutoMapper.QueryableExtensions;
-using Client.Application.QuarterlyMonitorings.Common;
-using Client.Core.Interfaces;
+using ClientManagement.Application.QuarterlyMonitorings.Common;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Client.Application.QuarterlyMonitorings.Queries.GetById
+namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetById
 {
     public class GetQuarterlyMonitoringsByIdQuery : IRequest<QuarterlyMonitoringDto>
     {
@@ -32,7 +32,7 @@ namespace Client.Application.QuarterlyMonitorings.Queries.GetById
         {
             var qMonitoring =  await _repository.QuarterlyMonitoring.GetQuarterlyMonitoringById(query.Id)
                 .Include(q => q.Client)
-                .Include(q => q.Staff)
+                .Include(q => q.StaffMember)
                 .Include(q => q.MonitoringAction)
                 .ProjectTo<QuarterlyMonitoringDto>(_mapper.ConfigurationProvider)
                 .SingleOrDefaultAsync(cancellationToken);

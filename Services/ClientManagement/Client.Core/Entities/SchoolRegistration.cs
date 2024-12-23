@@ -1,7 +1,7 @@
-﻿using Client.Core.Common;
-using Client.Core.Enums;
+﻿using ClientManagement.Core.Common;
+using ClientManagement.Core.Enums;
 
-namespace Client.Core.Entities
+namespace ClientManagement.Core.Entities
 {
     public class SchoolRegistration : Entity
     {

@@ -1,4 +1,4 @@
-﻿namespace Client.Core.Common.Dto
+﻿namespace ClientManagement.Core.Common.Dto
 {
     public class MyConsultantSupportDto
     {

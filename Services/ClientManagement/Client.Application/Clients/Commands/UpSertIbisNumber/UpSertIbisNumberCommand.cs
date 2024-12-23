@@ -1,12 +1,12 @@
 ﻿using AutoMapper;
-using Client.Application.Clients.Commands.Exceptions;
-using Client.Application.Clients.Model;
-using Client.Application.Common.Exceptions;
-using Client.Core.Interfaces;
+using ClientManagement.Application.Clients.Commands.Exceptions;
+using ClientManagement.Application.Clients.Model;
+using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.AspNetCore.JsonPatch;
 
-namespace Client.Application.Clients.Commands.UpSertIbisNumber
+namespace ClientManagement.Application.Clients.Commands.UpSertIbisNumber
 {
     public class UpSertIbisNumberCommand : IRequest<UpdateClientDto>
     {

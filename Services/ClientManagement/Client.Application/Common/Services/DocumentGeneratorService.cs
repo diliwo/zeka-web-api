@@ -1,16 +1,16 @@
 ﻿using System.Globalization;
 using System.Text;
-using Client.Application.Common.Interfaces;
-using Client.Application.Configuration;
-using Client.Application.Models;
-using Client.Core.Entities;
-using Client.Core.ValueObjects;
+using ClientManagement.Application.Common.Interfaces;
+using ClientManagement.Application.Configuration;
+using ClientManagement.Application.Models;
+using ClientManagement.Core.Entities;
+using ClientManagement.Core.ValueObjects;
 using DinkToPdf;
 using DinkToPdf.Contracts;
 using Fluid;
 using Microsoft.Extensions.Options;
 
-namespace Client.Application.Common.Services
+namespace ClientManagement.Application.Common.Services
 {
     public class DocumentGeneratorService: IDocumentGeneratorService
     {
@@ -26,12 +26,12 @@ namespace Client.Application.Common.Services
             Context = new TemplateContext();
             Context.CultureInfo = new CultureInfo("fr-BE"); //For dates and numbers formatting
             Context.Options.MemberAccessStrategy.Register<BilanReportDocumentModel>();
-            Context.Options.MemberAccessStrategy.Register<Core.Entities.Client>();
+            Context.Options.MemberAccessStrategy.Register<Client>();
             Context.Options.MemberAccessStrategy.Register<Phone>();
             Context.Options.MemberAccessStrategy.Register<Email>();
             Context.Options.MemberAccessStrategy.Register<Assessment>();
             Context.Options.MemberAccessStrategy.Register<Track>();
-            Context.Options.MemberAccessStrategy.Register<Staff>();
+            Context.Options.MemberAccessStrategy.Register<StaffMember>();
             Context.Options.MemberAccessStrategy.Register<Team>();
             Context.Options.MemberAccessStrategy.Register<Training>();
             Context.Options.MemberAccessStrategy.Register<School>();
