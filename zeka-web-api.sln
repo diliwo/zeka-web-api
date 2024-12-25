@@ -27,9 +27,17 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AdminAreaManagement.Infrast
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ApiGateways", "ApiGateways", "{58482BD3-0702-43F8-9CEC-522ABB57783E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ocelot.ApiGateway", "ApiGateways\Ocelot.ApiGateway\Ocelot.ApiGateway.csproj", "{9F147F8B-B6E6-4277-BE90-E6A765CDDFEF}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Ocelot.ApiGateway", "ApiGateways\Ocelot.ApiGateway\Ocelot.ApiGateway.csproj", "{9F147F8B-B6E6-4277-BE90-E6A765CDDFEF}"
 EndProject
 Project("{E53339B2-1760-4266-BCC7-CA923CBCF16C}") = "docker-compose", "docker-compose.dcproj", "{08B5E92D-DCE7-4854-97E0-70FD2EDF7168}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{7F105668-1AED-4366-8CB0-117DC56452E3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Application.IntegrationTests", "Tests\Application.IntegrationTests\Application.IntegrationTests.csproj", "{DCE126D3-27E1-4509-8269-2F11AE471D43}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Application.UnitTests", "Tests\Application.UnitTests\Application.UnitTests.csproj", "{7B1ADE5D-840C-468E-9A53-F3F18E4A6762}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Domain.UnitTests", "Tests\Domain.UnitTests\Domain.UnitTests.csproj", "{6A7730C3-5D37-426A-8E9A-14B1914227B8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -77,6 +85,18 @@ Global
 		{08B5E92D-DCE7-4854-97E0-70FD2EDF7168}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{08B5E92D-DCE7-4854-97E0-70FD2EDF7168}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{08B5E92D-DCE7-4854-97E0-70FD2EDF7168}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DCE126D3-27E1-4509-8269-2F11AE471D43}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DCE126D3-27E1-4509-8269-2F11AE471D43}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DCE126D3-27E1-4509-8269-2F11AE471D43}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DCE126D3-27E1-4509-8269-2F11AE471D43}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7B1ADE5D-840C-468E-9A53-F3F18E4A6762}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7B1ADE5D-840C-468E-9A53-F3F18E4A6762}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7B1ADE5D-840C-468E-9A53-F3F18E4A6762}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7B1ADE5D-840C-468E-9A53-F3F18E4A6762}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6A7730C3-5D37-426A-8E9A-14B1914227B8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6A7730C3-5D37-426A-8E9A-14B1914227B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6A7730C3-5D37-426A-8E9A-14B1914227B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6A7730C3-5D37-426A-8E9A-14B1914227B8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -93,6 +113,9 @@ Global
 		{50BA9385-981F-4EFF-A001-C69251717917} = {5D64661C-A186-4109-AD3B-ED9097D5B2B1}
 		{91A32C20-423F-4610-A95F-EF36FF6275E4} = {5D64661C-A186-4109-AD3B-ED9097D5B2B1}
 		{9F147F8B-B6E6-4277-BE90-E6A765CDDFEF} = {58482BD3-0702-43F8-9CEC-522ABB57783E}
+		{DCE126D3-27E1-4509-8269-2F11AE471D43} = {7F105668-1AED-4366-8CB0-117DC56452E3}
+		{7B1ADE5D-840C-468E-9A53-F3F18E4A6762} = {7F105668-1AED-4366-8CB0-117DC56452E3}
+		{6A7730C3-5D37-426A-8E9A-14B1914227B8} = {7F105668-1AED-4366-8CB0-117DC56452E3}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A09D4BD9-B9A6-45F5-BE40-F2EE8E7C6B39}
