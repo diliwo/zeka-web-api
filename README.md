@@ -10,6 +10,10 @@ By focusing on simplicity and functionality, Zeka aims to streamline workflows a
 - Secure authentication and authorization.
 - Scalable microservices architecture.
 
+## Architecture
+
+![image](https://github.com/user-attachments/assets/58139f64-ddd6-428b-b2c1-0cff5dc764a0)
+
 ## API Documentation
 
 - Visit /swagger for API documentation
