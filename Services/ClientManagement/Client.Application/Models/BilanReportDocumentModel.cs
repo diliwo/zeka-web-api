@@ -14,7 +14,7 @@ namespace ClientManagement.Application.Models
         public string EmailNl { get; set; }
         public Assessment Assessment { get; set; }
         public Client Client { get; set; }
-        public List<Track> Supports { get; set; }
+        public List<Support> Supports { get; set; }
         public List<SchoolRegistration> SchoolRegistrations { get; set; } = new List<SchoolRegistration>();
     }
 }

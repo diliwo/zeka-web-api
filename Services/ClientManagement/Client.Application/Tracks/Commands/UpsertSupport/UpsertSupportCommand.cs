@@ -30,7 +30,7 @@ namespace ClientManagement.Application.Tracks.Commands.UpsertSupport
 
             public async Task<int> Handle(UpsertSupportCommand request, CancellationToken cancellationToken)
             {
-                Track entity;
+                Support entity;
 
                 if (request.SupportId.HasValue)
                 {
@@ -56,7 +56,7 @@ namespace ClientManagement.Application.Tracks.Commands.UpsertSupport
                         throw new NotFoundException(nameof(entity), request.SupportId);
                     }
 
-                    entity = new Track(Client,request.StartDate, StaffMember, request.Note);
+                    entity = new Support(Client,request.StartDate, StaffMember, request.Note);
                 }
 
                 _repository.Track.Persist(entity);

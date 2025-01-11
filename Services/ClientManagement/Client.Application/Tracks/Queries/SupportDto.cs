@@ -5,7 +5,7 @@ using ClientManagement.Core.Entities;
 
 namespace ClientManagement.Application.Tracks.Queries
 {
-    public class TrackDto : IMapFrom<Track>
+    public class SupportDto : IMapFrom<Support>
     {
         public int SupportId { get; set; }
         public DateTime StartDate { get; set; }
@@ -21,14 +21,14 @@ namespace ClientManagement.Application.Tracks.Queries
         public bool IsLastSupport { get; set; }
         public void Mapping(Profile profile)
         {
-            profile.CreateMap<Track, TrackDto>()
+            profile.CreateMap<Support, SupportDto>()
                 .ForMember(b => b.SupportId,
                     opt => opt.MapFrom(e => e.Id))
                 .ForMember(b => b.StaffMemberInfo,
                     opt =>
                         opt.MapFrom(e =>
                             e.StaffMemberId != null
-                                ? e.StaffMember.FullName + ' ' + '(' + e.StaffMember.Service.Acronym + ')'
+                                ? e.SocialWorker.FullName + ' ' + '(' + e.SocialWorker.TeamAcronym + ')'
                                 : string.Empty))
                 .ForMember(s => s.HasNote, 
                     opt => 

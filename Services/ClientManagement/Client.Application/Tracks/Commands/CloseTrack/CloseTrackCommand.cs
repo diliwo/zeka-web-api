@@ -23,11 +23,11 @@ namespace ClientManagement.Application.Tracks.Commands.CloseTrack
 
             public async Task<int> Handle(CloseTrackCommand request, CancellationToken cancellationToken)
             {
-                Track entity;
+                Support entity;
 
                 if (!request.TrackId.HasValue)
                 {
-                    throw new InvalidOperationException(nameof(Track));
+                    throw new InvalidOperationException(nameof(Support));
                 }
                
                 entity = _repository.Track.Get(request.TrackId.Value);

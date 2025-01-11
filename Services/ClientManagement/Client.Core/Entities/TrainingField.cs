@@ -2,11 +2,11 @@
 
 namespace ClientManagement.Core.Entities;
 
-public class EmploymentTerminationReason : Entity
+public class TrainingField : Entity
 {
     public string Name { get; set; }
 
-    public EmploymentTerminationReason(string name)
+    TrainingField(string name)
     {
         if (string.IsNullOrEmpty(name))
         {

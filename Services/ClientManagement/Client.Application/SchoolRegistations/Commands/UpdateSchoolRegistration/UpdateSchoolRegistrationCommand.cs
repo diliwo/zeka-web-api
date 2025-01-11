@@ -1,4 +1,5 @@
 ﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Enums;
 using ClientManagement.Core.Interfaces;
 using MediatR;

@@ -30,8 +30,8 @@ namespace ClientManagement.Application.Common.Services
             Context.Options.MemberAccessStrategy.Register<Phone>();
             Context.Options.MemberAccessStrategy.Register<Email>();
             Context.Options.MemberAccessStrategy.Register<Assessment>();
-            Context.Options.MemberAccessStrategy.Register<Track>();
-            Context.Options.MemberAccessStrategy.Register<StaffMember>();
+            Context.Options.MemberAccessStrategy.Register<Support>();
+            Context.Options.MemberAccessStrategy.Register<SocialWorker>();
             Context.Options.MemberAccessStrategy.Register<Team>();
             Context.Options.MemberAccessStrategy.Register<Training>();
             Context.Options.MemberAccessStrategy.Register<School>();

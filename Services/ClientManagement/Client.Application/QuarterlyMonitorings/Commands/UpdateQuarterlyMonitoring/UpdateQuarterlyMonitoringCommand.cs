@@ -37,7 +37,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.UpdateQuart
                 .SingleOrDefaultAsync(cancellationToken);
             if (qMonitoring == null)
             {
-                throw new NotFoundException(nameof(QuarterlyMonitoring), request.QMonitoringId);
+                throw new NotFoundException(nameof(MonitoringReport), request.QMonitoringId);
             }
 
             var Client = _repository.Client.Get(request.ClientId);
@@ -61,8 +61,8 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.UpdateQuart
 
             qMonitoring.Client = Client;
             qMonitoring.ClientId = request.ClientId;
-            qMonitoring.StaffMember = StaffMember;
-            qMonitoring.StaffMemberId = request.StaffMemberId;
+            qMonitoring.SocialWorker = StaffMember;
+            qMonitoring.SocialWorkerId = request.StaffMemberId;
             qMonitoring.MonitoringAction = monitoringAction;
             qMonitoring.MonitoringActionId = request.MonitoringActionId;
             qMonitoring.ActionDate = request.ActionDate.ToLocalTime();

@@ -32,7 +32,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetById
         {
             var qMonitoring =  await _repository.QuarterlyMonitoring.GetQuarterlyMonitoringById(query.Id)
                 .Include(q => q.Client)
-                .Include(q => q.StaffMember)
+                .Include(q => q.SocialWorker)
                 .Include(q => q.MonitoringAction)
                 .ProjectTo<QuarterlyMonitoringDto>(_mapper.ConfigurationProvider)
                 .SingleOrDefaultAsync(cancellationToken);

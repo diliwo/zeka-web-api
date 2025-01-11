@@ -4,17 +4,17 @@ using MediatR;
 
 namespace ClientManagement.Application.Clients.Commands.UpdateBeneficiaries
 {
-    public class UpdateBeneficiairesCommand : IRequest<int>
+    public class UpdateClientCommand : IRequest<int>
     {
         //public int Id { get; set; }
         public List<string> ListOfNiss { get; set; }
 
-        public class UpdateBeneficiairesCommandHandler : IRequestHandler<UpdateBeneficiairesCommand, int>
+        public class UpdateClientCommandHandler : IRequestHandler<UpdateClientCommand, int>
         {
             public readonly IRepositoryManager _repository;
             public readonly IClientService _ClientService;
 
-            public UpdateBeneficiairesCommandHandler(
+            public UpdateClientCommandHandler(
                 IRepositoryManager repository,
                 IClientService ClientService
                 )
@@ -23,7 +23,7 @@ namespace ClientManagement.Application.Clients.Commands.UpdateBeneficiaries
                 _ClientService = ClientService;
             }
 
-            public async Task<int> Handle(UpdateBeneficiairesCommand request, CancellationToken cancellationToken)
+            public async Task<int> Handle(UpdateClientCommand request, CancellationToken cancellationToken)
             {
                 if (request.ListOfNiss.Count == 0)
                 {

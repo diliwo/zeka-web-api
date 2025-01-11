@@ -2,28 +2,28 @@
 
 namespace ClientManagement.Core.Entities
 {
-    public class QuarterlyMonitoring : Entity
+    public class MonitoringReport : Entity
     {
-        public QuarterlyMonitoring()
+        public MonitoringReport()
         {
         }
 
         public int ClientId { get; set; }
         public Client Client { get; set; }
-        public int StaffMemberId { get; set; }
-        public StaffMember StaffMember { get; set; }
+        public int SocialWorkerId { get; set; }
+        public SocialWorker SocialWorker { get; set; }
         public int MonitoringActionId { get; set; }
         public MonitoringAction MonitoringAction { get; set; }
         public DateTime ActionDate { get; set; } = DateTime.Now;
         public string ActionComment { get; set; } = string.Empty;
         private string _quarter;
-        public string Quarter
+        public string Period
         {
             get => ActionDate.Year.ToString() + "Q" + ((ActionDate.Month - 1) / 3 + 1).ToString();
             set => _quarter = value;
         }
 
-        public QuarterlyMonitoring(Client client, StaffMember StaffMember, MonitoringAction monitoringAction,
+        public MonitoringReport(Client client, SocialWorker StaffMember, MonitoringAction monitoringAction,
             DateTime actionDate, string actionComment)
         {
             Client = client;
@@ -33,7 +33,7 @@ namespace ClientManagement.Core.Entities
             ActionComment = actionComment;
         }
 
-        public QuarterlyMonitoring(int ClientId, int StaffMemberId, int monitoringActionId, DateTime actionDate,
+        public MonitoringReport(int ClientId, int StaffMemberId, int monitoringActionId, DateTime actionDate,
             string actionComment)
         {
             ClientId = ClientId;

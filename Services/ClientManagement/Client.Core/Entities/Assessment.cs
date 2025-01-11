@@ -83,28 +83,6 @@ namespace ClientManagement.Core.Entities
             bool professionalExpectationItKnowledgeWord
         )
         {
-
-            //if (TrainingDifficulty.Length > 255)
-            //{
-            //    throw new StringSizeLimitException(nameof(TrainingDifficulty));
-            //}
-            //if (TrainingOpinion.Length > 255)
-            //{
-            //    throw new StringSizeLimitException(nameof(TrainingOpinion));
-            //}
-            //if (TrainingFacilitiesAndStrengths.Length > 255)
-            //{
-            //    throw new StringSizeLimitException(nameof(TrainingFacilitiesAndStrengths));
-            //}
-            //if (TrainingPersonalImprovments.Length > 255)
-            //{
-            //    throw new StringSizeLimitException(nameof(TrainingPersonalImprovments));
-            //}
-            //if (TrainingDifficulty.Length > 255)
-            //{
-            //    throw new StringSizeLimitException(nameof(TrainingDifficulty));
-            //}
-
             IsFinalized = isFinalized;
             Client = client;
             UserName = userName;
@@ -114,12 +92,6 @@ namespace ClientManagement.Core.Entities
             PersonalSituationFinancialSituation = personalSituationFinancialSituation;
             PersonalSituationAdministrativeStatus = personalSituationAdministrativeStatus;
             LanguageTrainingNote = languageTrainingNote;
-            TrainingDifficulty = TrainingDifficulty;
-            TrainingOpinion = TrainingOpinion;
-            TrainingFacilitiesAndStrengths = TrainingFacilitiesAndStrengths;
-            TrainingPersonalImprovments = TrainingPersonalImprovments;
-            TrainingConsultantNote = TrainingConsultantNote;
-            TrainingConsultantLanguageLearningNote = TrainingConsultantLanguageLearningNote;
             ProfessionalExperienceProblemEncountered = professionalExperienceProblemEncountered;
             ProfessionalExperienceWhatsRewarding = professionalExperienceWhatsRewarding;
             ProfessionalExperienceKnowledge = professionalExperienceKnowledge;
@@ -142,14 +114,6 @@ namespace ClientManagement.Core.Entities
             ProfessionalExpectationItKnowledgeEmail = professionalExpectationItKnowledgeEmail;
             ProfessionalExpectationItKnowledgeInternet = professionalExpectationItKnowledgeInternet;
             ProfessionalExpectationItKnowledgeWord = professionalExpectationItKnowledgeWord;
-
-            //ProfessionalExpectationNlOralLanguageScore = PersonalExpectationLanguageknowledgeScore.NotAtAll;
-            //ProfessionalExpectationFrOralLanguageScore = PersonalExpectationLanguageknowledgeScore.NotAtAll;
-            //ProfessionalExpectationNlWrittentLanguageScore = PersonalExpectationLanguageknowledgeScore.NotAtAll;
-            //ProfessionalExpectationFrWrittenLanguageScore = PersonalExpectationLanguageknowledgeScore.NotAtAll;
-            //ProfessionalExpectationItKnowledgeEmail = false;
-            //ProfessionalExpectationItKnowledgeInternet = false;
-            //ProfessionalExpectationItKnowledgeWord = false;
         }
 
         public IEnumerable<ProfessionalAssessment> Professions

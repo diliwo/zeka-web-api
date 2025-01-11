@@ -19,7 +19,7 @@ namespace ClientManagement.Application.Assessments.Commands.FinalizeAssessment
 
                     return result;
 
-                }).OverridePropertyName("Property").WithMessage("Action impossible, Le assessment est déjà finalisé !");
+                }).OverridePropertyName("Property").WithMessage("Action not allowed, the assessment is already completed !");
         }
     }
 }

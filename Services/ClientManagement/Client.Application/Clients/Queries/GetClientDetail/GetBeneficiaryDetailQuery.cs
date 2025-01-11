@@ -26,7 +26,7 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
                 var vm = await _repository.Client.GetClients()
                     //.Include(b =>b.Candidacies)
                     .Include(b => b.SchoolRegistrations)
-                    .Where(b => b.Niss == request.Niss)
+                    .Where(b => b.Ssn == request.Niss)
                     .AsNoTracking()
                     .ProjectTo<ClientDto>(_mapper.ConfigurationProvider)
                     .SingleOrDefaultAsync(cancellationToken);

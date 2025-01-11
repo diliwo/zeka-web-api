@@ -22,7 +22,7 @@ namespace ClientManagement.Application.Tracks.Queries
             public async Task<TracksListVm> Handle(GetTracksListQuery request, CancellationToken cancellationToken)
             {
                 var supports = await _repository.Track.GetTracks()
-                    .ProjectTo<TrackDto>(_mapper.ConfigurationProvider)
+                    .ProjectTo<SupportDto>(_mapper.ConfigurationProvider)
                     .OrderBy(s => s.StartDate)
                     .ToListAsync(cancellationToken);
 

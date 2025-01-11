@@ -2,8 +2,8 @@
 {
     public class InvalidNissFormatException : Exception
     {
-        public InvalidNissFormatException(string ClientNiss)
-            :base($"Le format du niss \"{ClientNiss}\" n'est pas valide !")
+        public InvalidNissFormatException(string ClientSsn)
+            :base($"Le format du niss \"{ClientSsn}\" n'est pas valide !")
         {
         }
     }

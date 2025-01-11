@@ -43,7 +43,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.CreateQuart
             {
                 throw new NotFoundException(nameof(MonitoringAction), request.MonitoringActionId);
             }
-            return await _repository.QuarterlyMonitoring.Persist(new QuarterlyMonitoring(request.ClientId, request.StaffMemberId, request.MonitoringActionId, request.ActionDate.ToLocalTime(), request.ActionComment));
+            return await _repository.QuarterlyMonitoring.Persist(new MonitoringReport(request.ClientId, request.StaffMemberId, request.MonitoringActionId, request.ActionDate.ToLocalTime(), request.ActionComment));
         }
     }
 }

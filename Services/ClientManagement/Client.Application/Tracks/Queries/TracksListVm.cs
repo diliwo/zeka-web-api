@@ -2,6 +2,6 @@
 {
     public class TracksListVm
     {
-        public IList<TrackDto> Tracks { get; set; }
+        public IList<SupportDto> Tracks { get; set; }
     }
 }

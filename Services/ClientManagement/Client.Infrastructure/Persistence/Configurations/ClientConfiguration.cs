@@ -36,9 +36,9 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
             builder
                 .Property(e => e.BirthDate).HasColumnType("date");
             builder
-                .Property(e => e.StartDateInCpas).HasColumnType("date");
+                .Property(e => e.StartDate).HasColumnType("date");
             builder
-                .Property(e => e.EndDateInCpas).HasColumnType("date");
+                .Property(e => e.EndDate).HasColumnType("date");
             //builder
             //    .Ignore(b => b.Candidates);
             builder

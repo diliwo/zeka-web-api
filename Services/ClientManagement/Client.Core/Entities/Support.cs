@@ -2,12 +2,12 @@
 
 namespace ClientManagement.Core.Entities
 {
-    public class Track : Entity
+    public class Support : Entity
     {
         public DateTime StartDate { get; set; }
         public DateTime? EndDate { get; set; }
         public int StaffMemberId { get; set; }
-        public StaffMember StaffMember { get; set; }
+        public SocialWorker SocialWorker { get; set; }
         public int ClientId { get; set; }
         public Client Client { get; set; }
         public String? Note { get; set; }
@@ -15,11 +15,11 @@ namespace ClientManagement.Core.Entities
 
         public bool IsActif => !EndDate.HasValue;
 
-        public Track()
+        public Support()
         {
         }
 
-        public Track(Client client,  DateTime startDate, StaffMember StaffMember, String? note = "")
+        public Support(Client client,  DateTime startDate, SocialWorker StaffMember, String? note = "")
         {
             Client = client;
             StartDate = startDate;

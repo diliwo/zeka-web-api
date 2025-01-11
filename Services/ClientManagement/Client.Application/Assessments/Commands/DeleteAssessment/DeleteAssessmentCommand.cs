@@ -1,4 +1,5 @@
 ﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
@@ -6,7 +7,7 @@ namespace ClientManagement.Application.Assessments.Commands.DeleteAssessment
 {
     public class DeleteAssessmentCommand : IRequest<Unit>
     {
-        public int BilanId { get; set; }
+        public int AssessmentId { get; set; }
 
         public class DeleteAssessmentCommandHandler : IRequestHandler<DeleteAssessmentCommand, Unit>
         {
@@ -18,7 +19,7 @@ namespace ClientManagement.Application.Assessments.Commands.DeleteAssessment
             }
             public async Task<Unit> Handle(DeleteAssessmentCommand request, CancellationToken cancellationToken)
             {
-                var entity = _repository.Assessment.GetBilanById(request.BilanId);
+                var entity = _repository.Assessment.GetBilanById(request.AssessmentId);
 
                 if (entity != null)
                 {
@@ -26,7 +27,7 @@ namespace ClientManagement.Application.Assessments.Commands.DeleteAssessment
                 }
                 else
                 {
-                    throw new NotFoundException(nameof(Training), request.BilanId);
+                    throw new NotFoundException(nameof(Training), request.AssessmentId);
                 }
 
                 return Unit.Value;

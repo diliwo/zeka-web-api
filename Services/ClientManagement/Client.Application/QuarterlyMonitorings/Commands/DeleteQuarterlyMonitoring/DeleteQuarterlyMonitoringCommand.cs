@@ -29,7 +29,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.DeleteQuart
                 .SingleOrDefaultAsync(cancellationToken);
             if (quarterlyMonitoring == null)
             {
-                throw new NotFoundException(nameof(QuarterlyMonitoring), request.QMonitoringId);
+                throw new NotFoundException(nameof(MonitoringReport), request.QMonitoringId);
             }
             _repository.QuarterlyMonitoring.SoftDelete(request.QMonitoringId);
         }

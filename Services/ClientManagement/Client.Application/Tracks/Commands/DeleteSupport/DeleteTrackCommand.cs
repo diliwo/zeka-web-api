@@ -43,7 +43,7 @@ namespace ClientManagement.Application.Tracks.Commands.DeleteSupport
                 }
                 else
                 {
-                    throw new NotFoundException(nameof(Track), request.Id);
+                    throw new NotFoundException(nameof(Support), request.Id);
                 }
             }
         }

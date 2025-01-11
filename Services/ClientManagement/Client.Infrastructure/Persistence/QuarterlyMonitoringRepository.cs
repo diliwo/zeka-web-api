@@ -11,20 +11,20 @@ namespace ClientManagement.Infrastructure.Persistence
             _context = context;
         }
         
-        public async Task<int> Persist(QuarterlyMonitoring qMonitoring)
+        public async Task<int> Persist(MonitoringReport qMonitoringReport)
         {
-            if (qMonitoring.Id == default(int))
+            if (qMonitoringReport.Id == default(int))
             {
-                _context.QuarterlyMonitorings.Add(qMonitoring);
+                _context.QuarterlyMonitorings.Add(qMonitoringReport);
                 await _context.SaveChangesAsync();
-                return qMonitoring.Id;
+                return qMonitoringReport.Id;
             }
             else
             {
-                var entity = await _context.QuarterlyMonitorings.FindAsync(qMonitoring.Id);
+                var entity = await _context.QuarterlyMonitorings.FindAsync(qMonitoringReport.Id);
                 if (entity != null)
                 {
-                    _context.Entry(entity).CurrentValues.SetValues(qMonitoring);
+                    _context.Entry(entity).CurrentValues.SetValues(qMonitoringReport);
                     await _context.SaveChangesAsync();
                     return entity.Id;
                 }
@@ -32,7 +32,7 @@ namespace ClientManagement.Infrastructure.Persistence
             return 0;
         }
 
-        public IQueryable<QuarterlyMonitoring> getQuarterlyMonitorings(string searchText = "", bool withDeleted = false)
+        public IQueryable<MonitoringReport> getQuarterlyMonitorings(string searchText = "", bool withDeleted = false)
         {
             return _context.QuarterlyMonitorings
                 .Where(q => withDeleted || !q.Softdelete)
@@ -41,38 +41,38 @@ namespace ClientManagement.Infrastructure.Persistence
                         .Contains(searchText.ToUpper()) ||
                         (q.Client.FirstName + " " + q.Client.LastName).ToUpper()
                         .Contains(searchText.ToUpper()) ||
-                        (q.Client.Niss).Contains(searchText) ||
-                        (q.StaffMember.LastName + " " + q.StaffMember.FirstName).ToUpper()
+                        (q.Client.Ssn).Contains(searchText) ||
+                        (q.SocialWorker.LastName + " " + q.SocialWorker.FirstName).ToUpper()
                         .Contains(searchText.ToUpper()) ||
-                        (q.StaffMember.FirstName + " " + q.StaffMember.LastName).ToUpper()
+                        (q.SocialWorker.FirstName + " " + q.SocialWorker.LastName).ToUpper()
                         .Contains(searchText.ToUpper()) ||
                         q.MonitoringAction.Action.ToUpper().Contains(searchText.ToUpper()));
         }
 
-        public IQueryable<QuarterlyMonitoring> getQuarterlyMonitoringsByClientId(int ClientId, string searchText = "", bool withDeleted = false)
+        public IQueryable<MonitoringReport> getQuarterlyMonitoringsByClientId(int ClientId, string searchText = "", bool withDeleted = false)
         {
             return _context.QuarterlyMonitorings
                 .Where(q => q.ClientId == ClientId)
                 .Where(q => withDeleted || !q.Softdelete)
                 .Where(q => String.IsNullOrWhiteSpace(searchText) ||
-                            (q.StaffMember.LastName + " " + q.StaffMember.FirstName).ToUpper()
+                            (q.SocialWorker.LastName + " " + q.SocialWorker.FirstName).ToUpper()
                             .Contains(searchText.ToUpper()) ||
-                            (q.StaffMember.FirstName + " " + q.StaffMember.LastName).ToUpper()
+                            (q.SocialWorker.FirstName + " " + q.SocialWorker.LastName).ToUpper()
                             .Contains(searchText.ToUpper()) ||
                             q.MonitoringAction.Action.ToUpper().Contains(searchText.ToUpper()));
         }
 
-        public IQueryable<QuarterlyMonitoring> getQuarterlyMonitoringsByStaffMemberId(int referntId, string searchText = "", bool withDeleted = false)
+        public IQueryable<MonitoringReport> getQuarterlyMonitoringsByStaffMemberId(int referntId, string searchText = "", bool withDeleted = false)
         {
             return _context.QuarterlyMonitorings
-                .Where(q => q.StaffMemberId == referntId)
+                .Where(q => q.SocialWorkerId == referntId)
                 .Where(q => withDeleted || !q.Softdelete)
                 .Where(q => String.IsNullOrWhiteSpace(searchText) ||
                             (q.Client.LastName + " " + q.Client.FirstName).ToUpper()
                             .Contains(searchText.ToUpper()) ||
                             (q.Client.FirstName + " " + q.Client.LastName).ToUpper()
                             .Contains(searchText.ToUpper()) ||
-                            (q.Client.Niss).Contains(searchText) ||
+                            (q.Client.Ssn).Contains(searchText) ||
                             q.MonitoringAction.Action.ToUpper().Contains(searchText.ToUpper()));
         }
 
@@ -86,7 +86,7 @@ namespace ClientManagement.Infrastructure.Persistence
             }
         }
 
-        public IQueryable<QuarterlyMonitoring> GetQuarterlyMonitoringById(int id)
+        public IQueryable<MonitoringReport> GetQuarterlyMonitoringById(int id)
         {
             return _context.QuarterlyMonitorings.Where(m => m.Id == id);
         }

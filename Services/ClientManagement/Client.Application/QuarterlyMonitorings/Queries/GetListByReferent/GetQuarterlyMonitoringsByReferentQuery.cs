@@ -33,7 +33,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetListByRef
         {
             var qMonitorings = await _repository.QuarterlyMonitoring.getQuarterlyMonitoringsByStaffMemberId(query.StaffMemberId, query.Filter, query.WithDeleted)
                 .Include(q => q.Client)
-                .Include(q => q.StaffMember)
+                .Include(q => q.SocialWorker)
                 .Include(q => q.MonitoringAction)
                 .OrderByDescending(x => x.ActionDate)
                 //.ThenBy(q => q.Client.FullName)

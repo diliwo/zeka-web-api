@@ -31,7 +31,7 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
         public string Address { get; set; }
         public int Age { get; set; }
         public string SocialWorkerName { get; set; }
-        public IList<TrackDto> Supports { get; set; } = new List<TrackDto>();
+        public IList<SupportDto> Supports { get; set; } = new List<SupportDto>();
         //public IEnumerable<CandidacyDto> Candidacies { get; set; }
         public string? LastTrainingName { get; set; }
         public string? LastTrainingNote { get; set; }
@@ -65,14 +65,14 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
                 .ForMember(b => b.SupportStaffMemberName,
                     opt => opt.MapFrom(e =>
                         e.Supports.Where(b => b.Softdelete != true).Count() > 0
-                            ? e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().StaffMember
+                            ? e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().SocialWorker
                                 .FullName
                             : string.Empty))
                 .ForMember(b => b.SupportStaffMemberService,
                     opt => opt.MapFrom(e =>
                         e.Supports.Where(b => b.Softdelete != true).Count() > 0
-                            ? ("(" + e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().StaffMember
-                                .Service.Acronym + ")")
+                            ? ("(" + e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().SocialWorker
+                                .TeamAcronym + ")")
                             : string.Empty))
                 .ForMember(b => b.SupportStartDate,
                     opt => opt.MapFrom(
