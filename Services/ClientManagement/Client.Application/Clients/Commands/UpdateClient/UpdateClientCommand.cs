@@ -2,7 +2,7 @@
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
-namespace ClientManagement.Application.Clients.Commands.UpdateBeneficiaries
+namespace ClientManagement.Application.Clients.Commands.UpdateClient
 {
     public class UpdateClientCommand : IRequest<int>
     {
@@ -12,15 +12,12 @@ namespace ClientManagement.Application.Clients.Commands.UpdateBeneficiaries
         public class UpdateClientCommandHandler : IRequestHandler<UpdateClientCommand, int>
         {
             public readonly IRepositoryManager _repository;
-            public readonly IClientService _ClientService;
 
             public UpdateClientCommandHandler(
-                IRepositoryManager repository,
-                IClientService ClientService
-                )
+                IRepositoryManager repository
+            )
             {
                 _repository = repository;
-                _ClientService = ClientService;
             }
 
             public async Task<int> Handle(UpdateClientCommand request, CancellationToken cancellationToken)
@@ -30,9 +27,7 @@ namespace ClientManagement.Application.Clients.Commands.UpdateBeneficiaries
                     throw new ClientBadRequestException();
                 }
 
-                var numberOfUpdatedClients = await _ClientService.Update(request.ListOfNiss);
-
-                return numberOfUpdatedClients;
+                return 0;
             }
         }
     }

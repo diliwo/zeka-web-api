@@ -25,13 +25,13 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.DeleteQuart
         }
         public async Task Handle(DeleteQuarterlyMonitoringCommand request, CancellationToken cancellationToken)
         {
-            var quarterlyMonitoring = await _repository.QuarterlyMonitoring.GetQuarterlyMonitoringById(request.QMonitoringId)
+            var quarterlyMonitoring = await _repository.MonitoringReport.GetQuarterlyMonitoringById(request.QMonitoringId)
                 .SingleOrDefaultAsync(cancellationToken);
             if (quarterlyMonitoring == null)
             {
                 throw new NotFoundException(nameof(MonitoringReport), request.QMonitoringId);
             }
-            _repository.QuarterlyMonitoring.SoftDelete(request.QMonitoringId);
+            _repository.MonitoringReport.SoftDelete(request.QMonitoringId);
         }
     }
 }

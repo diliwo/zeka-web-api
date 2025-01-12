@@ -25,14 +25,13 @@ namespace ClientManagement.Application.Common.Services
 
             Context = new TemplateContext();
             Context.CultureInfo = new CultureInfo("fr-BE"); //For dates and numbers formatting
-            Context.Options.MemberAccessStrategy.Register<BilanReportDocumentModel>();
+            Context.Options.MemberAccessStrategy.Register<AssessmentReportDocumentModel>();
             Context.Options.MemberAccessStrategy.Register<Client>();
             Context.Options.MemberAccessStrategy.Register<Phone>();
             Context.Options.MemberAccessStrategy.Register<Email>();
             Context.Options.MemberAccessStrategy.Register<Assessment>();
             Context.Options.MemberAccessStrategy.Register<Support>();
             Context.Options.MemberAccessStrategy.Register<SocialWorker>();
-            Context.Options.MemberAccessStrategy.Register<Team>();
             Context.Options.MemberAccessStrategy.Register<Training>();
             Context.Options.MemberAccessStrategy.Register<School>();
             Context.Options.MemberAccessStrategy.Register<SchoolRegistration>();
@@ -41,19 +40,19 @@ namespace ClientManagement.Application.Common.Services
         }
 
 
-        public async Task<byte[]> GenerateBilanReportAsync(BilanReportDocumentModel bilanReportDocumentModel)
+        public async Task<byte[]> GenerateAssessmentReportAsync(AssessmentReportDocumentModel assessmentReportDocumentModel)
         {
-            var htmlRendered = await Task.Run(() => RenderBilanReportHTML(bilanReportDocumentModel));
+            var htmlRendered = await Task.Run(() => RenderBilanReportHTML(assessmentReportDocumentModel));
             var pdfContent = await Task.Run(() => ConvertHTMLToPDF(htmlRendered));
             return pdfContent;
         }
 
-        private string RenderBilanReportHTML(BilanReportDocumentModel bilanReportDocumentModel)
+        private string RenderBilanReportHTML(AssessmentReportDocumentModel assessmentReportDocumentModel)
         {
             var parser = new FluidParser();
             var source = File.ReadAllText(Configuration.BilanTemplateFilePath);
 
-            Context.SetValue("bilanModel", bilanReportDocumentModel);
+            Context.SetValue("bilanModel", assessmentReportDocumentModel);
 
             var result = string.Empty;
 

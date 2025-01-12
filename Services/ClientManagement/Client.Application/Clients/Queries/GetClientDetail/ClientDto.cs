@@ -1,6 +1,6 @@
 ﻿using AutoMapper;
 using ClientManagement.Application.Common.Mappings;
-using ClientManagement.Application.Tracks.Queries;
+using ClientManagement.Application.Supports.Queries;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Enums;
 

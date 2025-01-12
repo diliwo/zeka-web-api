@@ -30,7 +30,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetById
 
         public async Task<QuarterlyMonitoringDto> Handle(GetQuarterlyMonitoringsByIdQuery query, CancellationToken cancellationToken)
         {
-            var qMonitoring =  await _repository.QuarterlyMonitoring.GetQuarterlyMonitoringById(query.Id)
+            var qMonitoring =  await _repository.MonitoringReport.GetQuarterlyMonitoringById(query.Id)
                 .Include(q => q.Client)
                 .Include(q => q.SocialWorker)
                 .Include(q => q.MonitoringAction)

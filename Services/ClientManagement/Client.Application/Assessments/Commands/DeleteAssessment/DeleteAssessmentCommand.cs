@@ -19,7 +19,7 @@ namespace ClientManagement.Application.Assessments.Commands.DeleteAssessment
             }
             public async Task<Unit> Handle(DeleteAssessmentCommand request, CancellationToken cancellationToken)
             {
-                var entity = _repository.Assessment.GetBilanById(request.AssessmentId);
+                var entity = _repository.Assessment.GetAssessmentById(request.AssessmentId);
 
                 if (entity != null)
                 {

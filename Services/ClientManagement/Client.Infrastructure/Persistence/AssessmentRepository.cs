@@ -31,21 +31,21 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public IQueryable<Assessment> GetAssessments()
         {
-            return from bilans in _context.Assessments where bilans.Softdelete != true select bilans;
+            return from assessments in _context.Assessments where assessments.Softdelete != true select assessments;
         }
 
         public IQueryable<Assessment> GetAssessments(int ClientId)
         {
-            return from bilans in _context.Assessments 
-                where (bilans.ClientId == ClientId && bilans.Softdelete != true) select bilans;
+            return from assessments in _context.Assessments 
+                where (assessments.ClientId == ClientId && assessments.Softdelete != true) select assessments;
         }
 
-        public Assessment GetBilanById(int id)
+        public Assessment GetAssessmentById(int id)
         {
             return _context.Assessments.Include(b => b.BilanProfessions).ThenInclude(bp => bp.Profession).FirstOrDefault(s => s.Id == id);
         }
 
-        public Assessment GetCurrentBilan()
+        public Assessment GetCurrentAssessment()
         {
             return _context.Assessments.FirstOrDefault(b => b.IsFinalized != true);
         }
@@ -87,7 +87,7 @@ namespace ClientManagement.Infrastructure.Persistence
             return !bilan.Result.IsFinalized ? true : false;
         }
 
-        public async Task<bool> AreAllBilansNotFinalized(int ClientId)
+        public async Task<bool> AreAllAssessmentsNotFinalized(int ClientId)
         {
             var bilans = _context.Assessments.Where(b => b.ClientId == ClientId && b.Softdelete != true);
 

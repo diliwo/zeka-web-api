@@ -29,6 +29,7 @@ namespace ClientManagement.Core.Entities
         public string SocialWorkerName { get; set; }
         public virtual IList<Support> Supports { get; set; } = new List<Support>();
         public virtual IList<SchoolRegistration> SchoolRegistrations { get; set; } = new List<SchoolRegistration>();
+        public virtual IList<ProfessionnalExperience> ProfessionnalExpectations { get; set; } = new List<ProfessionnalExperience>();
         public virtual IList<Assessment> Assessments { get; set; } = new List<Assessment>();
         public virtual IList<MonitoringReport> MonitoringReports { get; set; } = new List<MonitoringReport>();
         public IEnumerable<SchoolRegistration> Registrations

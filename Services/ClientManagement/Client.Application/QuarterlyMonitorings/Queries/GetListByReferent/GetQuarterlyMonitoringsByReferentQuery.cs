@@ -31,7 +31,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetListByRef
 
         public async Task<PaginatedList<QuarterlyMonitoringDto>> Handle(GetQuarterlyMonitoringsByStaffMemberQuery query, CancellationToken cancellationToken)
         {
-            var qMonitorings = await _repository.QuarterlyMonitoring.getQuarterlyMonitoringsByStaffMemberId(query.StaffMemberId, query.Filter, query.WithDeleted)
+            var qMonitorings = await _repository.MonitoringReport.getQuarterlyMonitoringsByStaffMemberId(query.StaffMemberId, query.Filter, query.WithDeleted)
                 .Include(q => q.Client)
                 .Include(q => q.SocialWorker)
                 .Include(q => q.MonitoringAction)

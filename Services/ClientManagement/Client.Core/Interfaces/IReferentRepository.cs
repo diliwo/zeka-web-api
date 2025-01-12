@@ -2,14 +2,13 @@
 
 namespace ClientManagement.Core.Interfaces
 {
-    public interface IStaffMemberRepository
+    public interface ISocialWorkerRepository
     {
         void Persist(SocialWorker StaffMember);
         SocialWorker Get(int id);
         bool UserAlreadyExists(string username, int idService);
-        IQueryable<SocialWorker> GetStaffMembers(string filter = null, string orderBy = "");
-        //void Delete(StaffMember StaffMember);
+        IQueryable<SocialWorker> GetSocialWorkers(string filter = null, string orderBy = "");
         void SoftDelete(SocialWorker StaffMember);
-        public Task<bool> ServiceHasStaffMembers(int serviceId);
+        public Task<bool> TeamHasSocialWorkers(int serviceId);
     }
 }

@@ -6,7 +6,7 @@ namespace ClientManagement.Core.Entities
     {
         public DateTime StartDate { get; set; }
         public DateTime? EndDate { get; set; }
-        public int StaffMemberId { get; set; }
+        public int SocialWorkerId { get; set; }
         public SocialWorker SocialWorker { get; set; }
         public int ClientId { get; set; }
         public Client Client { get; set; }
@@ -19,11 +19,11 @@ namespace ClientManagement.Core.Entities
         {
         }
 
-        public Support(Client client,  DateTime startDate, SocialWorker StaffMember, String? note = "")
+        public Support(Client client,  DateTime startDate, SocialWorker socialWorker, String? note = "")
         {
             Client = client;
             StartDate = startDate;
-            StaffMember = StaffMember;
+            SocialWorker = socialWorker;
             Note = note;
         }
     }

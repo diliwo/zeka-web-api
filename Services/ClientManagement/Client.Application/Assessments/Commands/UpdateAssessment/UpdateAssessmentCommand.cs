@@ -61,7 +61,7 @@ namespace ClientManagement.Application.Assessments.Commands.UpdateAssessment
 
             public async Task<int> Handle(UpdateAssessmentCommand request, CancellationToken cancellationToken)
             {
-                var bilan = _repository.Assessment.GetBilanById((int)request.BilanId);
+                var bilan = _repository.Assessment.GetAssessmentById((int)request.BilanId);
 
                 if (bilan == null)
                 {

@@ -33,7 +33,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.UpdateQuart
 
         public async Task<int> Handle(UpdateQuarterlyMonitoringCommand request, CancellationToken cancellationToken)
         {
-            var qMonitoring = await _repository.QuarterlyMonitoring.GetQuarterlyMonitoringById(request.QMonitoringId)
+            var qMonitoring = await _repository.MonitoringReport.GetQuarterlyMonitoringById(request.QMonitoringId)
                 .SingleOrDefaultAsync(cancellationToken);
             if (qMonitoring == null)
             {
@@ -46,7 +46,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.UpdateQuart
                 throw new NotFoundException(nameof(Client), request.ClientId);
             }
 
-            var StaffMember = _repository.StaffMember.Get(request.StaffMemberId);
+            var StaffMember = _repository.SocialWorker.Get(request.StaffMemberId);
             if (StaffMember == null)
             {
                 throw new NotFoundException(nameof(StaffMember), request.StaffMemberId);
@@ -67,7 +67,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.UpdateQuart
             qMonitoring.MonitoringActionId = request.MonitoringActionId;
             qMonitoring.ActionDate = request.ActionDate.ToLocalTime();
             qMonitoring.ActionComment = request.ActionComment;
-            return await _repository.QuarterlyMonitoring.Persist(qMonitoring);
+            return await _repository.MonitoringReport.Persist(qMonitoring);
         }
     }
 }

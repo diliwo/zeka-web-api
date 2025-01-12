@@ -28,7 +28,7 @@ namespace ClientManagement.Application.Assessments.Commands.FinalizeAssessment
                     throw new InvalidOperationException(nameof(Assessment));
                 }
                
-                entity = _repository.Assessment.GetBilanById(request.BilanId.Value);
+                entity = _repository.Assessment.GetAssessmentById(request.BilanId.Value);
 
                 if (entity.IsFinalized == false)
                 {
