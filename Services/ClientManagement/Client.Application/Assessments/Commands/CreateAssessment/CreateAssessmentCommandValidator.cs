@@ -15,7 +15,7 @@ namespace ClientManagement.Application.Assessments.Commands.CreateAssessment
                 .NotEmpty().WithMessage("ClientId is required.")
                 .MustAsync(async (obj, id,cancellationToken) =>
                 {
-                    bool result = await _repository.Assessment.AreAllBilansNotFinalized(obj.ClientId);
+                    bool result = await _repository.Assessment.AreAllAssessmentsNotFinalized(obj.ClientId);
 
                     return result;
 

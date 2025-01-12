@@ -3,7 +3,7 @@
     public class InvalidEmailException : Exception
     {
         public InvalidEmailException(string ClientNiss)
-            :base($"Le format de l'adresse email \"{ClientNiss}\" n'est pas correct !")
+            :base($"The format of the email address \"{ClientNiss}\" is not correct !")
         {
         }
     }

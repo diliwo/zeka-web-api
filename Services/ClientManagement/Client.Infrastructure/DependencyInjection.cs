@@ -1,4 +1,5 @@
-﻿using ClientManagement.Core.Entities;
+﻿using ClientManagement.Application.Common.Helpers;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using ClientManagement.Core.ValueObjects;
 using ClientManagement.Infrastructure.Persistence;
@@ -20,7 +21,7 @@ public static class DependencyInjection
 
             services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(
-                    configuration.GetConnectionString("ClientApiConnection"),
+                    configuration.GetConnectionString("DefaultApiConnection"),
                     b => b.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
 
             // to revert to the pre-6.0 behavior to avoid the timeZone mapping

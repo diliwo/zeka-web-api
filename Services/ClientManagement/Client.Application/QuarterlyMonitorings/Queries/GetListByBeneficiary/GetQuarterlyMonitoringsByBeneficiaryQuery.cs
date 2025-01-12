@@ -29,9 +29,9 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetListByBen
         }
         public async Task<PaginatedList<QuarterlyMonitoringDto>> Handle(GetQuarterlyMonitoringsByClientQuery query, CancellationToken cancellationToken)
         {
-            var qMonitorings = await _repository.QuarterlyMonitoring.getQuarterlyMonitoringsByClientId(query.ClientId, query.Filter, query.WithDeleted)
+            var qMonitorings = await _repository.MonitoringReport.getQuarterlyMonitoringsByClientId(query.ClientId, query.Filter, query.WithDeleted)
                 .Include(q => q.Client)
-                .Include(q => q.StaffMember)
+                .Include(q => q.SocialWorker)
                 .Include(q => q.MonitoringAction)
                 .OrderByDescending(x => x.ActionDate)
                 //.ThenBy(q => q.StaffMember.FullName)

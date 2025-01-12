@@ -7,7 +7,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/teams?{url}",
@@ -20,7 +20,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/teams",
@@ -32,7 +32,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/teams/{id}",
@@ -45,7 +45,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/professions?{url}",
@@ -58,7 +58,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/professions",
@@ -70,7 +70,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/professions/{id}",
@@ -83,7 +83,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/schools?{url}",
@@ -96,7 +96,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/schools",
@@ -108,7 +108,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/schools/{id}",
@@ -121,7 +121,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/trainings?{url}",
@@ -134,7 +134,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/trainings",
@@ -146,7 +146,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/trainings/{id}",
@@ -159,7 +159,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/trainingtype?{url}",
@@ -172,7 +172,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/trainingtype",
@@ -184,7 +184,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/trainingtype/{id}",
@@ -197,7 +197,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/staffmember?{url}",
@@ -210,7 +210,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/staffmember",
@@ -222,7 +222,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/staffmember/{id}",
@@ -235,7 +235,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/trainingfield?{url}",
@@ -249,7 +249,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/partners?{url}",
@@ -262,7 +262,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/partners",
@@ -274,7 +274,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "host.docker.internal",
-          "Port": "9011"
+          "Port": "5102"
         }
       ],
       "UpstreamPathTemplate": "/partners/{id}",

@@ -1,0 +1,2045 @@
+<HTML>
+
+<HEAD>
+    <META NAME="description" content="BILAN ISP">
+    <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+    <TITLE>Bilan ISP</TITLE>
+    <LINK rel="stylesheet" type="text/css">
+    <style>
+        body {
+            font-family: Calibri, 'Lucida Sans', 'Lucida Sans Regular', 'Lucida Grande', 'Lucida Sans Unicode', sans-serif;
+        }
+
+        .cpas-header-info-container {
+            left: 24px;
+            width: 100%;
+        }
+
+        .cpas-header-info-address,
+        .cpas-header-info-contact {
+            font-size: 12pt;
+            color: #00517e;
+            font-weight: normal;
+            vertical-align: top;
+        }
+
+        .cpas-header-info-address {
+            margin-bottom: 5px
+        }
+
+        .cpas-name {
+            font-weight: bold;
+        }
+
+        .ocmw-name {
+            color: #11b0b0;
+            font-weight: bold;
+        }
+
+        .main-beneficiary-picture {
+            flex: 2;
+        }
+
+
+        .beneficiary-infos-container-table span {
+            font-size: 13pt;
+        }
+
+        .main-beneficiary-address {
+            font-size: 11pt;
+        }
+
+        .bilan-report-titre {
+            margin: auto;
+            margin-top: 70px;
+            padding-top: 5px;
+            padding-bottom: 5px;
+            font-size: 18pt;
+            text-align: center;
+            color: #00517e;
+            border-radius: 15px;
+            border: 1px solid #656363;
+            width: 356px;
+            font-weight: bold;
+        }
+
+        .beneficiary-infos-container {
+            width: 50%;
+            border-collapse: collapse;
+            margin-top: 50px;
+            font-size: 13pt;
+        }
+
+        .infos-suivi-titre {
+            margin-top: 30px;
+            border-left: solid;
+            border-left-color: #e7276d;
+            border-left-width: 15px;
+            padding: 5px;
+            margin-bottom: 2px;
+            margin-left: 5px;
+            font-weight: bold;
+            font-size: large;
+        }
+
+        .infos-suivi-container {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            margin-top: 5px;
+            page-break-after: always; 
+        }
+
+        .infos-suivi-container table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            border-bottom: 1px solid #656363;
+            border-left: 1px solid #656363;
+            height: 30px;
+        }
+
+        .infos-suivi-container table td {
+            font-size: 10.5pt;
+            color: #000000;
+            border-left: 1px solid #656363;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+        }
+
+        .sit-perso-container-global {
+           /* page-break-after: always; */
+        }
+
+
+        .sit-perso-titre {
+
+            border-left: solid;
+            border-left-color: #c2ca28;
+            border-left-width: 15px;
+            padding: 5px;
+            margin-left: 5px;
+            font-weight: bold;
+            font-size: large;
+        }
+
+        .sit-perso-container-part1,
+        .sit-perso-container-part2,
+        .sit-perso-container-part3,
+        .experiences-professionnelles-infos-suite1,
+        .experiences-professionnelles-infos-suite2,
+        .connaissances-linguistiques-informatiques-container {
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
+
+        .experiences-professionnelles-infos-suite1 {
+            page-break-after: always;
+        }
+
+        .connaissances-linguistiques-informatiques-container table td {
+            vertical-align: top;
+        }
+
+        .logement-container,
+        .sante-container,
+        .sit-fin-container {
+            margin-top: 15px;
+            width: auto;
+            height: 260px;
+            padding: 5px;
+        }
+
+        .famille-container {
+            margin-top: 30px;
+            width: auto;
+            height: 260px;
+            padding: 5px;
+        }
+
+        .experience-problemes-bloc,
+        .experience-points-positifs,
+        .recherche-emploi-bloc,
+        .points-ameliorer-bloc {
+            width:auto;
+            height: 255px;
+            padding: 5px;
+        }
+
+        .etudes-difficultes-bloc {
+            margin-top: 5px;
+            width: auto;
+            height: 170px;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+        }
+
+        .famille-container table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 25px;
+        }
+
+        .famille-container table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .commentaire,
+        .sit-famille-commentaire,
+        .experience-problemes-bloc-commentaire,
+        .experience-points-positifs-commentaire,
+        .recherche-emploi-bloc-commentaire,
+        .points-ameliorer-bloc-commentaire {
+            margin-top: 5px;
+            margin-left: 5px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+            border-collapse: collapse;
+            border: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+            padding: 10px;
+            font-size: 10.5pt;
+            text-align: left;
+        }
+
+        .commentaire {
+            height: 180px;
+            width: auto;
+        }
+
+        .sit-famille-commentaire {
+            height: 140px;
+            width: auto;
+        }
+
+        .etudes-difficultes-bloc-commentaire {
+            height: 80px;
+            border-collapse: collapse;
+            border: 1px solid #656363;
+            margin-top: 5px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+            padding: 10px;
+            font-size: 11pt;
+            text-align: left;
+        }
+
+        .future-experience-commentaire-s,
+        .future-experience-commentaire-m {
+            margin-top: 3px;
+            margin-left: 5px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+            experience-problemes-bloc-commentaire border-collapse: collapse;
+            border: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+            padding: 10px;
+            font-size: 10.5pt;
+            text-align: left;
+        }
+
+        .future-experience-commentaire-s {
+            height: 160px;
+        }
+
+        .future-experience-commentaire-m {
+            height: 100px;
+        }
+
+        .experience-problemes-bloc-commentaire,
+        .experience-points-positifs-commentaire,
+        .recherche-emploi-bloc-commentaire,
+        .points-ameliorer-bloc-commentaire{
+            height: 160px;
+        }
+
+        .notes-regard-consultant-commentaire {
+            width: auto;
+            height: 120px;
+            margin-top: 10px;
+            margin-left: 5px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+            border-collapse: collapse;
+            border: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+            padding: 10px;
+            font-size: 10.5pt;
+            text-align: left;
+        }
+
+        .logement-container table th {
+            font-size: 12pt;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .logement-container table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .sante-container table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .sante-container table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .sit-fin-container table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .sit-fin-container table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .sit-admin-container {
+            margin-top:5px;
+            width: auto;
+            height: 250px;
+            padding: 5px;
+        }
+
+
+        .sit-admin-container table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .sit-admin-container table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .langues-container-global {
+            margin-top: 10px;
+            page-break-after: always;
+        }
+
+        .langues-titre {
+            border-left: solid;
+            border-left-color: #811b45;
+            border-left-width: 15px;
+            padding: 5px;
+            margin-bottom: 2px;
+            margin-left: 5px;
+            font-weight: bold;
+            font-size: large;
+        }
+
+        .langues-container {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            margin-top: 5px;
+        }
+
+        .langues-container table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            border-bottom: 1px solid #656363;
+            border-left: 1px solid #656363;
+            height: 30px;
+        }
+
+        .langues-container table td {
+            font-size: 10.5pt;
+            color: #000000;
+            border-left: 1px solid #656363;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+        }
+
+        .notes-accompagnement-titre {
+            margin-top: 20px;
+            font-size: 16px;
+            font-weight:bold;
+            margin-bottom: 2px;
+            margin-left: 5px;
+        }
+
+        .notes-accompagnement-txt {
+            border-collapse: collapse;
+            border: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            height: 150px;
+            padding:10px;
+        }
+
+        .etudes-formations-global {
+            margin-top: 30px;
+            page-break-after: always;
+        }
+
+        .etudes-formations-titre {
+            border-left: solid;
+            border-left-color: #007487;
+            border-left-width: 15px;
+            padding: 5px;
+            margin-bottom: 2px;
+            margin-left: 5px;
+            font-weight: bold;
+            font-size: large;
+        }
+
+        .etudes-formations {
+            width: 100%;
+            margin-top: 5px;
+            height: 250px;
+        }
+
+        .etudes-formations table {
+            border-top: 1px solid #656363;
+            border-left: 1px solid #656363;
+            border-collapse: collapse;
+        }
+
+        .etudes-formations table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            border-right: 1px solid #656363;
+            border-bottom: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            height: 30px;
+        }
+
+        .etudes-formations table td {
+            font-size: 10.5pt;
+            color: #000000;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 2px;
+            padding-bottom: 2px;
+            border-right: 1px solid #656363;
+            border-bottom: 1px solid #656363;
+        }
+
+        .etudes-infos-container {
+            margin-top: 5px;
+            margin-bottom: 10px;
+        }
+
+        .etudes-difficultes-bloc {
+            width: 100%;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+        }
+
+        .etudes-difficultes-bloc table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 30px;
+        }
+
+        .etudes-difficultes-bloc table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .etudes-formations-sous-titre {
+            font-size: 18px;
+            font-weight: bold;
+            margin-top: 10px;
+            margin-bottom: 5px;
+            margin-left: 10px;
+        }
+
+        .interets-motivations-bloc {
+            margin-bottom:5px;
+            padding:5px;
+        }
+
+
+        .facilites-forces-bloc table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            height: 25px;
+        }
+
+        .facilites-forces-bloc table td {
+            font-size: 10.5pt;
+            color: #000000;
+            height: 80px;
+            vertical-align:top;
+        }
+
+        .points-amelioration-bloc table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            height: 25px;
+        }
+
+        .points-amelioration-bloc table td {
+            font-size: 10.5pt;
+            color: #000000;
+            height: 80px;
+            vertical-align:top;
+        }
+
+        .notes-consultant-bloc {
+            margin-top: 5px;
+        }
+
+        .notes-consultant-bloc table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            height: 25px;
+        }
+
+        .notes-consultant-bloc table td {
+            font-size: 10.5pt;
+            color: #000000;
+            height: 90px;
+            vertical-align: top;
+        }
+
+        .experiences-professionnelles-titre {
+            border-left: solid;
+            border-left-color: #00add7;
+            border-left-width: 15px;
+            padding: 5px;
+            margin-bottom: 2px;
+            margin-left: 5px;
+            font-weight: bold;
+            font-size: large;
+        }
+
+        .experiences-professionnelles-global {
+            margin-top: 30px;
+            page-break-after: always;
+        }
+
+        .experiences-professionnelles-infos {
+            width: 100%;
+            border-collapse: collapse;
+            border-top: 1px solid #656363;
+            border-bottom: 1px solid #656363;
+            border-right: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            margin-top: 5px;
+        }
+
+        .experiences-professionnelles-infos table th {
+            font-size: 12pt;
+            color: #000000;
+            font-weight: bold;
+            border-left: 1px solid #656363;
+            height: 30px;
+        }
+
+        .experiences-professionnelles-infos table td {
+            color: #000000;
+            border-left: 1px solid #656363;
+            border-top: 1px solid #656363;
+            padding-left: 5px;
+            padding-right: 5px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            height: auto;
+            font-size: 10.5pt;
+            vertical-align: top;
+        }
+
+        .experience-problemes-bloc table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .experience-problemes-bloc table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .experience-points-positifs table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .experience-points-positifs table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .recherche-emploi-bloc table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .recherche-emploi-bloc table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .points-ameliorer-bloc table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .points-ameliorer-bloc table td {
+            height: 20px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .notes-regard-consultant {
+            width: auto;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            margin-top: 5px;
+            margin-bottom: 10px;
+            padding: 5px;
+        }
+
+        .notes-regard-consultant table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .notes-regard-consultant table td {
+            height: 100px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .attentes-professionnelles-titre {
+            margin-top: 30px;
+            border-left: solid;
+            border-left-color: #fdc600;
+            border-left-width: 15px;
+            padding: 5px;
+            margin-bottom: 2px;
+            margin-left: 5px;
+            font-weight: bold;
+            font-size: large;
+        }
+
+        .objectif-court-terme {
+            width: 100%;
+            height: 400px;
+            margin-top: 2px;
+            padding-bottom: 5px;
+        }
+
+        .objectif-court-terme table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            height: 25px;
+        }
+
+        .objectif-court-terme table td {
+            font-size: 10.5pt;
+            color: #000000;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            vertical-align: top;
+        }
+
+        .objectif-moyen-terme {
+            width: 100%;
+            height: 210px;
+            margin-top: 10px;
+            padding-bottom: 5px;
+        }
+
+        .objectif-moyen-terme table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            height: 25px;
+        }
+
+        .objectif-moyen-terme table td {
+            font-size: 10.5pt;
+            color: #000000;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            vertical-align: top;
+        }
+
+        .objectif-long-terme {
+            width: 100%;
+            height: 210px;
+            margin-top: 10px;
+            padding-bottom: 5px;
+            page-break-after: always;
+        }
+
+        .objectif-long-terme table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            height: 25px;
+        }
+
+        .objectif-long-terme table td {
+            font-size: 10.5pt;
+            color: #000000;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            vertical-align: top;
+        }
+
+        .note-objectif-court-terme{
+            font-size: 10.5pt;
+            vertical-align: top;
+            padding: 10px;
+            height: 320px;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+            border-collapse: collapse;
+            border: 1px solid #656363;
+        }
+
+        .note-objectif-moyen-terme,
+        .note-objectif-long-terme {
+            font-size: 10.5pt;
+            vertical-align: top;
+            padding: 10px;
+            height: 130px;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+            border-collapse: collapse;
+            border: 1px solid #656363;
+        }
+
+
+        .connaissances-linguistiques-informatiques-titre,
+        .condition-travail-titre,
+        .metier-titre {
+            margin-top: 10px;
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 2px;
+            margin-left: 5px;
+        }
+
+        .connaissances-linguistiques {
+            width: 900px;
+            height: 165px;
+        }
+
+        .connaissances-linguistiques table {
+            width: 100%;
+        }
+
+        .connaissances-linguistiques table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .connaissances-linguistiques table td {
+            font-size: 10.5pt;
+            color: #000000;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            height: 40px;
+            vertical-align: middle;
+        }
+
+        .connaissances-informatiques {
+            width: 410px;
+            height: 80px;
+        }
+
+        .connaissances-informatiques table {
+            width: 100%;
+        }
+
+        .connaissances-informatiques table th {
+            font-size: 11pt;
+            color: #000000;
+            font-weight: bold;
+            height: 40px;
+        }
+
+        .connaissances-informatiques table td {
+            font-size: 10.5pt;
+            color: #000000;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 5px;
+            padding-bottom: 3px;
+            height: 40px;
+            vertical-align:middle;
+        }
+
+        .condition-travail-container {
+            height: auto;
+            width: auto;
+            page-break-after: always;
+        }
+
+        .future-experience {
+            width: auto;
+            height: auto;
+            padding: 5px;
+        }
+
+        .future-experience table th {
+            font-size: 11pt;
+            font-weight: bold;
+            height: 20px;
+        }
+
+        .future-experience table td {
+            height: 25px;
+            text-align: center;
+            font-size: 10.5pt;
+        }
+
+        .metier1-container {
+            width: auto;
+            height: auto;
+            margin-bottom: 10px;
+            border-top: 1px solid #656363;
+            border-left: 1px solid #656363;
+            border-right: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+        }
+
+        .metier1-container table th {
+            font-size: 13pt;
+            color: #000000;
+            font-weight: bold;
+            height: 30px;
+            padding-left: 10px;
+            padding-top: 5px;
+        }
+
+        .metier1-container table td {
+            font-size: 12pt;
+            color: #000000;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            border-bottom: 1px solid #656363;
+            border-top: 1px solid #656363;
+            border-left: 1px solid #656363;
+            height: 30px;
+            vertical-align: top
+        }
+
+        .metier2-container {
+            width: auto;
+            height: auto;
+            border-top: 1px solid #656363;
+            border-left: 1px solid #656363;
+            border-right: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            page-break-after: always;
+        }
+
+        .metier2-container table th {
+            font-size: 13pt;
+            color: #000000;
+            font-weight: bold;
+            height: 30px;
+            padding-left: 10px;
+            padding-top:5px;
+        }
+
+        .metier2-container table td {
+            font-size: 12pt;
+            color: #000000;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            border-top: 1px solid #656363;
+            border-bottom: 1px solid #656363;
+            border-left: 1px solid #656363;
+            height: 30px;
+            vertical-align: top
+        }
+
+        .metier3-container {
+            width: auto;
+            height: auto;
+            border-top: 1px solid #656363;
+            border-left: 1px solid #656363;
+            border-right: 1px solid #656363;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+        }
+
+        .metier3-container table th {
+            font-size: 13pt;
+            color: #000000;
+            font-weight: bold;
+            height: 30px;
+            padding-left: 10px;
+            padding-top: 5px;
+        }
+
+        .metier3-container table td {
+            font-size: 12pt;
+            color: #000000;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            border-top: 1px solid #656363;
+            border-bottom: 1px solid #656363;
+            border-left: 1px solid #656363;
+            height: 30px;
+            vertical-align: top
+        }
+
+        .mes-facilites,
+        .mes-points-amelioration {
+            font-size: 10.5pt;
+            vertical-align: top;
+            padding: 10px;
+            height: 100px;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+            border-collapse: collapse;
+            border: 1px solid #656363;
+        }
+
+        .mes-points-amelioration {
+            margin-left: 5px;
+        }
+
+        .consultant-note,
+        .formation-opinion {
+            vertical-align: top;
+            height: 70px;
+            padding: 10px;
+            font-size: 11pt;
+            text-align: left;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+            border-collapse: collapse;
+            border: 1px solid #656363;
+            margin-top: 3px;
+        }
+
+        .metier-item {
+            height: 175px;
+            font-size: 11pt;
+        }
+
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            padding-right: 10px;
+            padding-left: 10px;
+        }
+
+        label.checkbox {
+            vertical-align: middle;
+            line-height: 20px;
+            padding-right: 10px;
+            display: inline-block;
+            height: 20px;
+        }
+
+    </style>
+</HEAD>
+
+<BODY>
+
+    <div class="cpas-header-info-container">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <td width="20%" align="left"><img src="data:image/jpeg;base64, {{bilanModel.CpasLogo}}" width="130" height="71"></td>
+                <td width="80%" align="left">
+                    <div class="cpas-header-info-address">
+                        <span class="cpas-name">{{bilanModel.CpasNameFr}}</span>
+                        <span class="ocmw-name">
+                            {{bilanModel.CpasNameNl}}
+                        </span>
+                        <br>
+                        <span>{{bilanModel.CpasAdresse}}</span> <span>-&nbsp; {{bilanModel.CpasZip}}</span>
+
+                    </div>
+                    <div class="cpas-header-info-contact">
+                        <span>Call Center:&nbsp; {{bilanModel.CallCenter}}</span><br>
+                        <span>{{bilanModel.EmailFr}}&nbsp;-&nbsp; </span>
+                        <span style="color: #11b0b0">{{bilanModel.EmailNl}}</span>
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="bilan-report-titre">
+        B I L A N &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;I S P
+    </div>
+
+    <div class="beneficiary-infos-container">
+        <table cellpadding="0" cellspacing="0">
+            <tr>
+                <td>
+                    <table>
+                        <tr>
+                            <td>&nbsp;Nom</td>
+                            <td>
+                                : &nbsp;
+                                <span>
+                                    <b>{{bilanModel.Beneficiary.LastName}}</b>
+                                </span>
+                            </td>
+                            <td>&nbsp;Prénom</td>
+                            <td>
+                                : &nbsp;
+                                <span>
+                                    <b>{{bilanModel.Beneficiary.FirstName}}</b>
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>&nbsp;N° dossier </td>
+                            <td colspan="3">
+                                : &nbsp;
+                                <span>
+                                    <b>{{bilanModel.Beneficiary.ReferenceNumber}}</b>
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>&nbsp;N° téléphone</td>
+                            <td colspan="3">
+                                : &nbsp;
+                                {% if bilanModel.Beneficiary.Phone.PhoneNumber != null and bilanModel.Beneficiary.Phone.PhoneNumber != "" %}
+                                <span>
+                                    <b>{{bilanModel.Beneficiary.Phone.PhoneNumber}}</b>
+                                </span>
+                                {% else %}
+                                <span>
+                                    <b>N/D</b><br />
+                                </span>
+                                {% endif %}
+
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>&nbsp;Mail</td>
+                            <td colspan="3">
+                                : &nbsp;
+                                {% if bilanModel.Beneficiary.Email.EmailAddress != null and bilanModel.Beneficiary.Email.EmailAddress != "" %}
+                                <span>
+                                    <b>{{bilanModel.Beneficiary.Email.EmailAddress}}</b><br />
+                                </span>
+                                {% else %}
+                                <span>
+                                    <b>N/D</b><br />
+                                </span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+                <td></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="infos-suivi-titre">
+        1. INFORMATIONS DE SUIVI
+    </div>
+    <div class="infos-suivi-container">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <th width="40%">Consultant</th>
+                <th width="20%" colspan="2">Période</th>
+                <th width="40%">Service</th>
+            </tr>
+            {% for support in bilanModel.Supports %}
+            <tr>
+                <td>{{support.Referent.FullName}}</td>
+                <td align="center">{{support.StartDate | date: "%d-%m-%Y"  }}</td>
+                <td align="center">{{support.EndDate | date: "%d-%m-%Y"  }}</td>
+                <td>{{support.Referent.Service.Name}}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div class="sit-perso-container-global">
+        <div class="sit-perso-titre">
+            2. SITUATION PERSONNELLE
+        </div>
+        <div class="sit-perso-container-part1">
+            <table width="100%">
+                <tr>
+                    <td width="50%">
+                        <div class="sit-admin-container">
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <th align="center">SITUATION ADMINISTRATIVE</th>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <span align="center"><i>Type de séjour ? Accès limité (emploi/formation) ? </i></span> <br>
+                                        <span align="center"> <i>Générateur de stress ? Casier judiciaire ? Mutuelle ?</i></span>
+
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="commentaire">
+                                            {{bilanModel.Bilan.PersonalSituationAdministrativeStatus}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                    <td width="50%">
+                        <div class="logement-container">
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <th align="center">LOGEMENT</th>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <span align="center">
+                                            <i>Logement insalubre reconnu ? Procédure en cours ? </i>
+                                        </span><br>
+                                        <span align="center"> <i>expulsions/préavis ? Confort/sécurité ?</i></span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="commentaire">
+                                            {{bilanModel.Bilan.PersonalSituationHousing}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        <div class="sit-perso-container-part2">
+            <table width="100%">
+                <tr>
+                    <td width="50%">
+                        <div class="sante-container">
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <th align="center">SANTE</th>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <span align="center"><i>Freins/points d'attention? </i></span> <br>
+                                        <span align="center"> <i>Difficultés physiques et/ou psychologiques ?</i></span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="commentaire">
+                                            {{bilanModel.Bilan.PersonalSituationHealth}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                    <td width="50%">
+                        <div class="sit-fin-container">
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <th align="center">SITUATION FINANCIERE</th>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <span align="center">
+                                            <i>Besoin financier ? Dettes ? Suivi en médiation de dettes ? </i>
+                                        </span><br>
+                                        <span align="center"> <i>Niveau de confort/inconfort ?</i></span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="commentaire">
+                                            {{bilanModel.Bilan.PersonalSituationFinancialSituation}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        <div class="sit-perso-container-part3">
+            <div class="famille-container">
+                <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                        <th align="center">FAMILLE</th>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span align="center">
+                                <i>
+                                    Contrainte liées aux enfants, à la situation de couple ? Soutien de la
+                                    famille ?
+                                </i>
+                            </span> <br>
+                            <span align="center"> <i>Pistes de solution éventuelles ?</i></span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="sit-famille-commentaire">
+                                {{bilanModel.Bilan.PersonalSituationFamily}}
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="langues-container-global">
+        <div class="langues-titre">
+            3. APPRENTISSAGE DES LANGUES
+        </div>
+        <div class="langues-container">
+            <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                    <th width="8%">Date début</th>
+                    <th width="8%">Date fin</th>
+                    <th width="10%">Langue</th>
+                    <th width="12%">Niveau</th>
+                    <th width="20%">Ecole</th>
+                    <th width="32%">Remarques</th>
+                    <th width="10%">Résultat</th>
+                </tr>
+                {% for schoolRegLangue in bilanModel.SchoolRegistrations %}
+                {% if schoolRegLangue.Formation.TrainingFieldId == 16 %}
+                <tr>
+                    <td>{{schoolRegLangue.StartDate | date: "%d-%m-%Y" }} </td>
+                    <td>{{schoolRegLangue.EnDate | date: "%d-%m-%Y" }}</td>
+                    <td>{{schoolRegLangue.Formation.Name}}</td>
+                    {% case schoolRegLangue.CourseLevel  %}
+                    {% when "0" %}
+                    <td>Autre</td>
+                    {% when "1" %}
+                    <td>1ère</td>
+                    {% when "2" %}
+                    <td>2ème</td>
+                    {% when "3" %}
+                    <td>3ème</td>
+                    {% when "4" %}
+                    <td>4ème</td>
+                    {% when "5" %}
+                    <td>5ème</td>
+                    {% when "6" %}
+                    <td>6ème</td>
+                    {% when "7" %}
+                    <td>7ème</td>
+                    {% when "8" %}
+                    <td>A1</td>
+                    {% when "9" %}
+                    <td>A2</td>
+                    {% when "10" %}
+                    <td>B1</td>
+                    {% when "11" %}
+                    <td>B2</td>
+                    {% when "12" %}
+                    <td>C1</td>
+                    {% when "13" %}
+                    <td>C2</td>
+                    {% else %}
+                    <td></td>
+                    {% endcase %}
+                    <td>{{schoolRegLangue.School.Name}}</td>
+                    <td>{{schoolRegLangue.Note}}</td>
+                    {% case schoolRegLangue.Result  %}
+                    {% when "0" %}
+                    <td>En cours</td>
+                    {% when "1" %}
+                    <td>Réussie</td>
+                    {% when "2" %}
+                    <td>Echec</td>
+                    {% when "3" %}
+                    <td>Abandon</td>
+                    {% else %}
+                    <td></td>
+                    {% endcase %}
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </table>
+        </div>
+        <div class="notes-accompagnement-titre">
+            NOTES D'APPRENTISSAGE ET D'ACCOMPAGNEMENT
+        </div>
+        <div class="notes-accompagnement-txt">
+            {{bilanModel.Bilan.FormationConsultantLanguageLearningNote}}
+        </div>
+    </div>
+
+    <div class="etudes-formations-global">
+        <div class="etudes-formations-titre">
+            4. ETUDES ET FORMATIONS
+        </div>
+        <div class="etudes-formations">
+            <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                    <th width="8%">DATE DEBUT</th>
+                    <th width="8%">DATE FIN</th>
+                    <th width="20%">INTITULE</th>
+                    <th width="21%">ECOLE</th>
+                    <th width="33%">TYPE DE DIPLOME OBTENU</th>
+                    <th width="10%">RESULTAT</th>
+                </tr>
+
+                {% for schoolRegFormation in bilanModel.SchoolRegistrations %}
+                {% if schoolRegFormation.Formation.TrainingFieldId != 16 %}
+                <tr>
+                    <td>{{schoolRegFormation.StartDate | date: "%d-%m-%Y"  }}</td>
+                    <td>{{schoolRegFormation.EnDate | date: "%d-%m-%Y" }}</td>
+                    <td>{{schoolRegFormation.Formation.Name}}</td>
+                    <td>{{schoolRegFormation.School.Name}}</td>
+                    <td>{{schoolRegFormation.Formation.TrainingFieldName}}</td>
+                    {% case schoolRegFormation.Result %}
+                    {% when "0" %}
+                    <td>En cours</td>
+                    {% when "1" %}
+                    <td>Réussie</td>
+                    {% when "2" %}
+                    <td>Echec</td>
+                    {% when "3" %}
+                    <td>Abandon</td>
+                    {% else %}
+                    <td></td>
+                    {% endcase %}
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </table>
+        </div>
+
+        <div class="etudes-difficultes-bloc">
+            <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                    <th align="center">QUELLES ONT ETE LES DIFFICULTES LORS DE MES ETUDES/FORMATIONS</th>
+                </tr>
+                <tr>
+                    <td>
+                        <span align="center" style="height:20px">
+                            <i>
+                                Situation perso, méthodes de travail, peu d'intérêt, difficulté
+                                spécifique, programme incomplet, prérequis personnels …
+                            </i>
+                        </span>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <div class="etudes-difficultes-bloc-commentaire">
+                            {{bilanModel.Bilan.FormationDifficulty}}
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="etudes-formations-sous-titre">
+            CE QUI RESSORT DE MES ETUDES, DE MES FORMATIONS ...
+        </div>
+        <div class="interets-motivations-bloc">
+            <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                    <th align="left">
+                        <span style="margin-left:5px; font-style:italic">
+                            Ce que j'ai appris/intérêt pour tel métier, ce que je n'aime plus/ne peux/veux plus
+                            faire, comment j'ai fait mes choix, ce que j'ai envie de continuer, …
+                        </span>
+                    </th>
+                </tr>
+                <tr>
+                    <td>
+                        <div class="formation-opinion">
+                            {{bilanModel.Bilan.FormationOpinion}}
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        <table width="100%">
+            <tr>
+                <td width="50%">
+                    <div class="facilites-forces-bloc">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <th align="left"><span style="margin-left: 5px; font-style: italic ">Mes facilités/mes forces</span></th>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="mes-facilites">
+                                        {{bilanModel.Bilan.FormationFacilitiesAndStrengths}}
+                                    </div>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </td>
+                <td width="50%">
+                    <div class="points-amelioration-bloc">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <th align="left"><span style="margin-left: 5px; font-style: italic ">Mes points d’amélioration</span></th>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="mes-points-amelioration">
+                                        {{bilanModel.Bilan.FormationPersonalImprovments}}
+                                    </div>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </td>
+            </tr>
+        </table>
+
+        <div class="notes-consultant-bloc">
+            <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                    <th align="left"><span style="margin-left: 5px; font-style: italic ">Notes du consultant</span></th>
+                </tr>
+                <tr>
+                    <td>
+                        <div class="consultant-note">
+                            {{bilanModel.Bilan.FormationConsultantNote}}
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="experiences-professionnelles-global">
+        <div class="experiences-professionnelles-titre">
+            5. EXPERIENCES PROFESSIONNELLES
+        </div>
+        <div class="experiences-professionnelles-infos">
+            <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                    <th width="14%">Fonction et lieu</th>
+                    <th width="6%">Début</th>
+                    <th width="6%">Fin</th>
+                    <th width="22%">
+                        Tâches et environnement<br>
+                        <span style="font-size: 10px;">
+                            (ce que je devais faire, mes responsabilités, <br>
+                            conditions de travail)
+                        </span>
+                    </th>
+                    <th width="19%">
+                        Comment ai-je obtenu ce contrat<br>
+                        <span style="font-size: 10px;">(candidature, porte-à-porte, bouche-à-oreille, etc.)</span>
+                    </th>
+                    <th width="10%">
+                        Type de contrat<br>
+                        <span style="font-size: 10px;">(CDD, CDI, Intérim, ALE, bénévolat, …)</span>
+                    </th>
+                    <th width="20%">
+                        Raison fin de contrat<br>
+                        <span style="font-size: 10px;">(fin du contrat, démission, licenciement, rupture, etc.)</span>
+                    </th>
+                </tr>
+                <tr>
+                    {% for profExperience in bilanModel.ProfessionalExperiences %}
+                <tr>
+                    <td>{{profExperience.Function}} ({{profExperience.CompanyName}})</td>
+                    <td>{{profExperience.StartDate | date: "%d-%m-%Y" }}</td>
+                    <td>{{profExperience.EndDate | date: "%d-%m-%Y" }}</td>
+                    <td>{{profExperience.Task}}</td>
+                    <td>{{profExperience.ContextOfHiring}}</td>
+                    {% case profExperience.TypeOfContract  %}
+                    {% when "0" %}
+                    <td>CDD</td>
+                    {% when "1" %}
+                    <td>CDI</td>
+                    {% when "2" %}
+                    <td>Interim</td>
+                    {% when "3" %}
+                    <td>ALE</td>
+                    {% when "4" %}
+                    <td>Bénévolat</td>
+                    {% when "5" %}
+                    <td>Insertion</td>
+                    {% else %}
+                    <td></td>
+                    {% endcase %}
+                    <td>{{profExperience.ReasonEndOfContract}}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+        <br>
+        <div class="experiences-professionnelles-infos-suite1">
+            <table width="100%">
+                <tr>
+                    <td width="50%">
+                        <div class="experience-problemes-bloc">
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <th align="center"> QU'EST-CE QUI A POSE PROBLEME LORS DE CES EXPERIENCES ?</th>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <span align="center"> <i>Des manquements ? Ce qui n’a pas plu ?</i></span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="experience-problemes-bloc-commentaire">
+                                            {{bilanModel.Bilan.ProfessionalExperienceProblemEncountered}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                    <td width="50%">
+                        <div class="experience-points-positifs">
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <th align="center">QU'EST-CE QUE JE RETIRE DE POSITIF DE CES EXPERIENCES ?</th>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <span align="center">
+                                            <i>
+                                                Enrichissement ? Apprentissage ? Responsabilités ?
+                                            </i>
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="experience-points-positifs-commentaire">
+                                            {{bilanModel.Bilan.ProfessionalExperienceWhatsRewarding}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        <div class="experiences-professionnelles-infos-suite2">
+            <table width="100%">
+                <tr>
+                    <td width="50%">
+                        <div class="recherche-emploi-bloc">
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <th align="center">MA CONNAISSANCE DE LA RECHERCHE D'EMPLOI ?</th>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <span align="center"><i>Quel canal ? Comment? Agence d’intérim ? Internet ?</i></span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="recherche-emploi-bloc-commentaire">
+                                            {{bilanModel.Bilan.ProfessionalExperienceKnowledge}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                    <td width="50%">
+                        <div class="points-ameliorer-bloc">
+                            <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <th align="center">POINTS A AMELIORER</th>
+                                </tr>
+                                <tr>
+                                    <td>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="points-ameliorer-bloc-commentaire">
+                                            {{bilanModel.Bilan.ProfessionalExperiencePointToImprove}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        <div class="notes-regard-consultant">
+            <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                    <th align="center">NOTES ET REGARD DU CONSULTANT</th>
+                </tr>
+                <tr>
+                    <td>
+                        <div class="notes-regard-consultant-commentaire">
+                            {{bilanModel.Bilan.ProfessionalExperienceNote}}
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+
+    <div class="attentes-professionnelles-titre">
+        6. ATTENTES PROFESSIONNELLES ET AUTONOMIE
+    </div>
+    <div class="objectif-court-terme">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <th align="left" colspan="2"><span style="margin-left:15px">OBJECTIF A COURT TERME (dans les mois à venir) </span></th>
+            </tr>
+            <tr>
+                <th width="50%" align="left"><span style="margin-left:15px"><i>Premier objectif</i></span></th>
+                <th width="50%" align="left"><span style="margin-left:15px"><i>Deuxième objectif</i></span></th>
+            </tr>
+            <tr>
+                <td>
+                    <div class="note-objectif-court-terme">
+                        {{bilanModel.Bilan.ProfessionalExpectationShortTermA}}
+                    </div>
+                </td>
+                <td>
+                    <div class="note-objectif-court-terme">
+                        {{bilanModel.Bilan.ProfessionalExpectationShortTermB}}
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+    <div class="objectif-moyen-terme">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <th align="left"><span style="margin-left:15px">OBJECTIF A MOYEN TERME</span></th>
+            </tr>
+            <tr>
+                <th align="left"><span style="margin-left:15px"><i>Pistes d'actions pendant ou après mon prochain contrat de travail</i></span></th>
+            </tr>
+            <tr>
+                <td>
+                    <div class="note-objectif-moyen-terme">
+                        {{bilanModel.Bilan.ProfessionalExpectationMediumTerm}}
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="objectif-long-terme">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <th align="left"><span style="margin-left:15px">OBJECTIF A LONG TERME</span></th>
+            </tr>
+            <tr>
+                <th align="left"><span style="margin-left:15px"> <i>Ce que j'aimerais faire dans quelques années</i></span></th>
+            </tr>
+            <tr>
+                <td>
+                    <div class="note-objectif-long-terme">
+                        {{bilanModel.Bilan.ProfessionalExpectationLongTerm}}
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="connaissances-linguistiques-informatiques-titre">
+        AUTONOMIE LINGUISTIQUE ET INFORMATIQUE
+    </div>
+    <div class="connaissances-linguistiques-informatiques-container">
+        <table width="100%">
+            <tr>
+                <td width="80%">
+                    <div class="connaissances-linguistiques">
+                        <table cellpadding="0" cellspacing="0">
+                            <tr>
+                                <th align="center" colspan="3">LANGUES </th>
+                            </tr>
+                            <tr>
+                                <th align="center" width="16%" style="border-bottom: 1px solid #656363; border-left: 1px solid #656363; border-top: 1px solid #656363;"></th>
+                                <th align="center" width="42%" style=" border-bottom: 1px solid #656363; border-top: 1px solid #656363;">
+                                    Expression orale<br>
+                                    <span style="font-size: 11px;font-style: italic;">
+                                        (Pas du tout/ En initiation/Besoin de
+                                        soutien/Autonome)
+                                    </span>
+                                </th>
+                                <th align="center" width="42%" style="border-bottom: 1px solid #656363; border-top: 1px solid #656363; border-right: 1px solid #656363;">
+                                    Expression écrite<br>
+                                    <span style="font-size: 11px;font-style: italic;">
+                                        (Pas du tout/ En initiation/ Besoin de
+                                        soutien/ Autonome)
+                                    </span>
+                                </th>
+                            </tr>
+                            <tr>
+                                <td align="center" style="border-left: 1px solid #656363;">
+                                    <div>Français</div>
+                                </td>
+                                <td style="padding-left:150px; vertical-align:middle">
+                                    {% if bilanModel.Bilan.ProfessionalExpectationFrOralLanguageScore == 0 %}
+                                    <div >
+                                        <label class="checkbox"><input type="checkbox" checked value="0">&nbsp;&nbsp;Pas du tout</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationFrOralLanguageScore == 1 %}
+                                    <div >
+                                        <label class="checkbox"><input type="checkbox" checked value="1">&nbsp;&nbsp;En initiation</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationFrOralLanguageScore == 2 %}
+                                    <div >
+                                        <label class="checkbox"><input type="checkbox" checked value="2">&nbsp;&nbsp;Besoin de soutien</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationFrOralLanguageScore == 3 %}
+                                    <div >
+                                        <label class="checkbox"><input type="checkbox" checked value="3">&nbsp;&nbsp;Autonome</label>
+                                    </div>
+                                    {% endif %}
+
+                                </td>
+                                <td style="padding-left: 150px; border-right: 1px solid #656363; ">
+                                    {% if bilanModel.Bilan.ProfessionalExpectationFrWrittenLanguageScore == 0 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="0">&nbsp;&nbsp;Pas du tout</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationFrWrittenLanguageScore == 1 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="1">&nbsp;&nbsp;En initiation</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationFrWrittenLanguageScore == 2 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="2">&nbsp;&nbsp;Besoin de soutien</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationFrWrittenLanguageScore == 3 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="3">&nbsp;&nbsp;Autonome</label>
+                                    </div>
+                                    {% endif %}
+
+                                </td>
+                            </tr>
+                            <tr>
+                                <td align="center" style="border-left: 1px solid #656363; border-bottom: 1px solid #656363;">
+                                    <span>Néerlandais</span>
+                                </td>
+                                <td style="padding-left: 150px; border-bottom: 1px solid #656363;">
+                                    {% if bilanModel.Bilan.ProfessionalExpectationNlOralLanguageScore == 0 %}
+                                    <div>
+                                        <label><input type="checkbox" checked value="0">&nbsp;&nbsp;Pas du tout</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationNlOralLanguageScore == 1 %}
+                                    <div>
+                                        <label><input type="checkbox" checked value="1">&nbsp;&nbsp;En initiation</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationNlOralLanguageScore == 2 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="2">&nbsp;&nbsp;Besoin de soutien</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationNlOralLanguageScore == 3 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="3">&nbsp;&nbsp;Autonome</label>
+                                    </div>
+                                    {% endif %}
+                                </td>
+                                <td style="padding-left: 150px; border-right: 1px solid #656363; border-bottom: 1px solid #656363;">
+                                    {% if bilanModel.Bilan.ProfessionalExpectationNlWrittentLanguageScore == 0 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="0">&nbsp;&nbsp;Pas du tout</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationNlWrittentLanguageScore == 1 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="1">&nbsp;&nbsp;En initiation</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationNlWrittentLanguageScore == 2 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="2">&nbsp;&nbsp;Besoin de soutien</label>
+                                    </div>
+                                    {% elsif bilanModel.Bilan.ProfessionalExpectationNlWrittentLanguageScore == 3 %}
+                                    <div >
+                                        <label><input type="checkbox" checked value="3">&nbsp;&nbsp;&Autonome</label>
+                                    </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </td>
+                <td width="20%">
+                    <div class="connaissances-informatiques">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <th align="center">INFORMATIQUE</th>
+                            </tr>
+                            <tr>
+                                <td style="border-left: 1px solid #656363; border-right: 1px solid #656363; border-top: 1px solid #656363; border-bottom: 1px solid #656363;">
+                                    <div align="center" style="height: 30px;">
+                                        {% if bilanModel.Bilan.ProfessionalExpectationItKnowledgeEmail %}
+                                        <label><input type="checkbox" checked value="0">&nbsp;&nbsp;Email</label>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                                        {% else %}
+                                        <label><input type="checkbox" value="0">&nbsp;&nbsp;&nbsp;Email</label>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                                        {% endif %}
+                                        {% if bilanModel.Bilan.ProfessionalExpectationItKnowledgeInternet %}
+                                        <label><input type="checkbox" checked value="1">&nbsp;&nbsp;Internet</label>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                                        {% else %}
+                                        <label><input type="checkbox" value="1">&nbsp;&nbsp;Internet</label>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                                        {% endif %}
+                                        {% if bilanModel.Bilan.ProfessionalExpectationItKnowledgeWord %}
+                                        <label><input type="checkbox" checked value="2">&nbsp;&nbsp;Word</label>
+                                        {% else %}
+                                        <label><input type="checkbox" value="2">&nbsp;&nbsp;Word</label>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+    <br />
+    <div class="condition-travail-titre"> CONDITION DE TRAVAIL</div>
+    <div class="condition-travail-container">
+        <div class="future-experience">
+            <div>
+                <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                        <th align="center" colspan="2">
+                            QU'EST-CE QUI EST IMPORTANT POUR MA FUTURE EXPERIENCE DE TRAVAIL ?
+                        </th>
+                    </tr>
+                    <tr>
+                        <td colspan="2">
+                            <span align="center">
+                                <i>
+                                    Conditions de travail, régime horaire, travail en équipe ou solitaire, etc. ?
+                                </i>
+                            </span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td wdith="50%">
+                            <div align="left" style="margin-left: 10px;font-weight:bold ">
+                                <i>Ce que je ne souhaite pas:</i>
+                            </div>
+                            <div class="future-experience-commentaire-s">
+                                {{bilanModel.Bilan.ProfessionalExpectationWorkingConditionWhatIDontWant}}
+                            </div>
+                        </td>
+                        <td wdith="50%">
+                            <div align="left" style="margin-left: 10px;font-weight:bold ;"><i>Ce que je souhaite:</i></div>
+                            <div class="future-experience-commentaire-s">
+                                {{bilanModel.Bilan.ProfessionalExpectationWorkingConditionWhatIWant}}
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <br>
+            <div>
+                <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                        <th align="center">QU'EST-CE QUI ME MOTIVE DANS LA RECHERCHE D'EMPLOI ?</th>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div align="left" style="margin-left: 10px;font-weight:bold ">
+                                <i>Quel objectif est recherché:</i>
+                            </div>
+                            <div class="future-experience-commentaire-m">
+                                {{bilanModel.Bilan.ProfessionalExpectationWorkingConditionWhatMotivatesMe}}
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <br>
+            <div>
+                <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                        <th align="center">NOTES ET REGARD DU CONSULTANT ?</th>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div align="left" style="margin-left: 10px;font-weight:bold "><i>Notes du consultant:</i></div>
+                            <div class="future-experience-commentaire-m">
+                                {{bilanModel.Bilan.ProfessionalExpectationWorkingConditionConsultantNote}}
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="metier-titre"> METIER</div>
+    <div class="metier1-container">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <th align="left" colspan="4"><u>{{bilanModel.Bilan.BilanProfessions[0].Profession.Name | upcase }}</u></th>
+            </tr>
+            <tr>
+                <th width="19%"></th>
+                <th align="center" width="27%"><b>Savoir faire</b></th>
+                <th align="center" width="27%"><b>Savoir être</b></th>
+                <th align="center" width="27%"><b>Savoirs</b></th>
+            </tr>
+            <tr>
+                <td rowspan="3"> <b>Ce que je sais (Ce qui est acquis)</b></td>
+                <td><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[0].AcquiredKnowledge}}</div></td>
+                <td><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[0].AcquiredBehaviouralKnowledge}}</div></td>
+                <td><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[0].AcquiredKnowHow}}</div></td>
+            </tr>
+        </table>
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <td width="19%"><i><b>Les compétences et savoirs à développer</b></i></td>
+                <td width="27%"><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[0].KnowledgeToDevelop}}</div></td>
+                <td width="27%"><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[0].BehaviouralKnowledgeToDevelop}}</div></td>
+                <td width="27%"><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[0].KnowHowToDevelop}}</div></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="metier2-container">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <th align="left" colspan="4"><u>{{bilanModel.Bilan.BilanProfessions[1].Profession.Name | upcase }}</u></th>
+            </tr>
+            <tr>
+                <th width="19%"></th>
+                <th align="center" width="27%"><b>Savoir faire</b></th>
+                <th align="center" width="27%"><b>Savoir être</b></th>
+                <th align="center" width="27%"><b>Savoirs</b></th>
+            </tr>
+            <tr>
+                <td rowspan="3"> <b><i>Ce que je sais (Ce qui est acquis)</i></b></td>
+                <td><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[1].AcquiredKnowledge}}</div></td>
+                <td><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[1].AcquiredBehaviouralKnowledge}}</div></td>
+                <td><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[1].AcquiredKnowHow}}</div></td>
+            </tr>
+        </table>
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <td width="19%"><b><i>Les compétences et savoirs à développer</i></b></td>
+                <td width="27%"><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[1].KnowledgeToDevelop}}</div></td>
+                <td width="27%"><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[1].BehaviouralKnowledgeToDevelop}}</div></td>
+                <td width="27%"><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[1].KnowHowToDevelop}}</div></td>
+            </tr>
+        </table>
+    </div>
+    <div class="metier3-container">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <th align="left" colspan="4"><u>{{bilanModel.Bilan.BilanProfessions[2].Profession.Name | upcase }}</u></th>
+            </tr>
+            <tr>
+                <th width="19%"></th>
+                <th align="center" width="27%"><b>Savoir faire</b></th>
+                <th align="center" width="27%"><b>Savoir être</b></th>
+                <th align="center" width="27%"><b>Savoirs</b></th>
+            </tr>
+            <tr>
+                <td rowspan="3"> <b><i>Ce que je sais (Ce qui est acquis)</i></b></td>
+                <td><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[2].AcquiredKnowledge}}</div></td>
+                <td><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[2].AcquiredBehaviouralKnowledge}}</div></td>
+                <td><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[2].AcquiredKnowHow}}</div></td>
+            </tr>
+        </table>
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <td width="19%"><b><i>Les compétences et savoirs à développer</i></b></td>
+                <td width="27%"><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[2].KnowledgeToDevelop}}</div></td>
+                <td width="27%"><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[2].BehaviouralKnowledgeToDevelop}}</div></td>
+                <td width="27%"><div class="metier-item">{{bilanModel.Bilan.BilanProfessions[2].KnowHowToDevelop}}</div></td>
+            </tr>
+        </table>
+    </div>
+</BODY>
+
+</HTML>

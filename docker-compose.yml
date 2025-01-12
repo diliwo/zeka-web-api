@@ -1,12 +1,12 @@
 version: '3.4'
 
 services:
-  adminareamanagement.api:
-    image: diliwo/adminareamanagementapi
-    container_name: zekaadminareaapi
-    build:
-      context: .
-      dockerfile: Services/AdminAreaManagement/AdminAreaManagement.API/Dockerfile
+  # adminareamanagement.api:
+  #   image: diliwo/adminareamanagementapi
+  #   container_name: zekaadminareaapi
+  #   build:
+  #     context: .
+  #     dockerfile: Services/AdminAreaManagement/AdminAreaManagement.API/Dockerfile
   
   zekaocelotgw:
      image: diliwo/ocelotapigateway
@@ -14,5 +14,5 @@ services:
       context: .
       dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile
 
-volumes:
-    postgres_data:
+# volumes:
+#     postgres_data:

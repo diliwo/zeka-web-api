@@ -1,4 +1,6 @@
-﻿using ClientManagement.API.Infrastructure;
+﻿using System.Configuration;
+using ClientManagement.API.Infrastructure;
+using ClientManagement.Application;
 using ClientManagement.Application.SchoolRegistations.Common;
 using ClientManagement.Core.Common.Dto;
 using ClientManagement.Core.Interfaces;
@@ -14,19 +16,25 @@ namespace ClientManagement.API;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddWebServices(this IServiceCollection services)
+    public static IServiceCollection AddWebServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddDatabaseDeveloperPageExceptionFilter();
 
         //services.AddScoped<IUser, CurrentUser>();
 
-        services.AddHttpContextAccessor();
+        var fluidConfigSection = configuration.GetSection("OrganizationInfos");
+        fluidConfigSection["AssessmentTemplateFilePath"] = Path.Combine("Assets", "Templates", "AssessmentReport.liquid");
+        fluidConfigSection["LogoFilePath"] = Path.Combine("Assets", "Images", "Zekalogo.png");
+        fluidConfigSection["Name"] = $"{fluidConfigSection["Name"]}";
+        fluidConfigSection["ZipCode"] = $"{fluidConfigSection["ZipCode"]}";
+        fluidConfigSection["Adress"] = $"{fluidConfigSection["Adress"]}";
+        fluidConfigSection["PhoneNumer"] = $"{fluidConfigSection["PhoneNumer"]}";
+        fluidConfigSection["Email"] = $"{fluidConfigSection["Email"]}";
 
-        services.AddExceptionHandler<CustomExceptionHandler>();
-        services.AddTransient<ISortHelper<MyConsultantSupportDto>, SortHelper<MyConsultantSupportDto>>();
-        services.AddTransient<ISortHelper<SchoolRegistrationDto>, SortHelper<SchoolRegistrationDto>>();
-        services.AddScoped<ISortHelper<MyJobCoachSupportDto>, SortHelper<MyJobCoachSupportDto>>();
-        services.AddScoped<IClientService, ClientService>();
+        services.RegisterFluidProvider(fluidConfigSection);
+
+        services.AddHttpContextAccessor();
+        //services.AddExceptionHandler<CustomExceptionHandler>();
 
         // Customise default API behaviour
         services.Configure<ApiBehaviorOptions>(options =>
@@ -53,8 +61,7 @@ public static class DependencyInjection
         services.AddControllers().AddNewtonsoftJson(options =>
             options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore);
 
-        //Register AutoMapper
-        services.AddAutoMapper(typeof(Program).Assembly);
+
         return services;
     }
 }

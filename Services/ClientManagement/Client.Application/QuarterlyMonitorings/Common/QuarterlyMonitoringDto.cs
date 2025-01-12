@@ -4,7 +4,7 @@ using ClientManagement.Core.Entities;
 
 namespace ClientManagement.Application.QuarterlyMonitorings.Common
 {
-    public class QuarterlyMonitoringDto : IMapFrom<QuarterlyMonitoring>
+    public class QuarterlyMonitoringDto : IMapFrom<MonitoringReport>
     {
         public int QMonitoringId { get; set; }
         public int ClientId { get; set; }
@@ -26,7 +26,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Common
 
         public void Mapping(Profile profile)
         {
-            profile.CreateMap<QuarterlyMonitoring, QuarterlyMonitoringDto>()
+            profile.CreateMap<MonitoringReport, QuarterlyMonitoringDto>()
                 .ForMember(d => d.QMonitoringId, 
                     opt => opt.MapFrom(q => q.Id))
                 .ForMember(d => d.ClientId, 
@@ -38,17 +38,17 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Common
                 .ForMember(d => d.ClientFirstName,
                     opt => opt.MapFrom(q => q.Client.FirstName))
                 .ForMember(d => d.ClientNiss,
-                    opt => opt.MapFrom(q => q.Client.Niss))
+                    opt => opt.MapFrom(q => q.Client.Ssn))
                 .ForMember(d => d.ClientDossier,
                     opt => opt.MapFrom(q => q.Client.ReferenceNumber))
                 .ForMember(d => d.StaffMemberId,
-                    opt => opt.MapFrom(q => q.StaffMemberId))
+                    opt => opt.MapFrom(q => q.SocialWorkerId))
                 .ForMember(d => d.StaffMemberName,
-                    opt => opt.MapFrom(q => q.StaffMember.FullName))
+                    opt => opt.MapFrom(q => q.SocialWorker.FullName))
                 .ForMember(d => d.StaffMemberLastName,
-                    opt => opt.MapFrom(q => q.StaffMember.LastName))
+                    opt => opt.MapFrom(q => q.SocialWorker.LastName))
                 .ForMember(d => d.StaffMemberFirstName,
-                    opt => opt.MapFrom(q => q.StaffMember.FirstName))
+                    opt => opt.MapFrom(q => q.SocialWorker.FirstName))
                 .ForMember(d => d.MonitoringActionId,
                     opt => opt.MapFrom(q => q.MonitoringActionId))
                 .ForMember(d => d.MonitoringActionLabel,
@@ -58,7 +58,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Common
                 .ForMember(d => d.ActionComment,
                     opt => opt.MapFrom(q => q.ActionComment))
                 .ForMember(d => d.Quarter,
-                    opt => opt.MapFrom(q => q.Quarter))
+                    opt => opt.MapFrom(q => q.Period))
                 .ForMember(d => d.Softdelete,
                     opt => opt.MapFrom(q => q.Softdelete));
         }
