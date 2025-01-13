@@ -3,8 +3,8 @@
 public interface IRepositoryManager
 {
     IClientRepository Client { get; }
-    ITrackRepository Track { get; }
-    IStaffMemberRepository StaffMember { get; }
+    ISupportRepository Support { get; }
+    ISocialWorkerRepository SocialWorker { get; }
     ISchoolRegistrationRepository SchoolRegistration { get; }
     ITrainingTypeRepository TrainingType { get; }
     IProfessionRepository Profession { get; }
@@ -12,8 +12,10 @@ public interface IRepositoryManager
     IProfessionalAssessmentRepository ProfessionalAssessment { get; }
     IAssessmentRepository Assessment { get; }
     ITrainingFieldRepository TrainingField { get; }
-    IQuarterlyMonitoringRepository QuarterlyMonitoring { get; }
+    IMonitoringReportRepository MonitoringReport { get; }
     IMonitoringActionRepository MonitoringAction { get; }
+    INatureOfContractRepository NatureOfContract { get; }
+    IProfessionnalExperienceRepository ProfessionnalExperience { get; }
     void Save();
     void SaveAsync();
 }

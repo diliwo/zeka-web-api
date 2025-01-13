@@ -33,4 +33,8 @@
     <ProjectReference Include="..\Client.Infrastructure\ClientManagement.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Assets\Images\" />
+  </ItemGroup>
+
 </Project>

@@ -12,7 +12,7 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
                 .Property(r => r.Id).HasColumnName("AssessmentId");
             builder
                 .HasOne(s => s.Client)
-                .WithMany(r => r.Bilans)
+                .WithMany(r => r.Assessments)
                 .HasForeignKey(e => e.ClientId);
             builder.Ignore(c => c.Professions);
         }

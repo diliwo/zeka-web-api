@@ -43,7 +43,7 @@ namespace ClientManagement.Application.Assessments.Commands.CreateAssessment
         public bool ProfessionalExpectationItKnowledgeEmail { get; set; }
         public bool ProfessionalExpectationItKnowledgeInternet { get; set; }
         public bool ProfessionalExpectationItKnowledgeWord { get; set; }
-        public List<ProfessionalAssessmentDto> BilanProfessions { get; set; }
+        public List<ProfessionalAssessmentDto> ClientProfessions { get; set; }
 
         public class CreateAssessmentCommandHandler : IRequestHandler<CreateAssessmentCommand, int>
         {
@@ -105,9 +105,9 @@ namespace ClientManagement.Application.Assessments.Commands.CreateAssessment
                 );
 
 
-                if (request.BilanProfessions != null)
+                if (request.ClientProfessions != null)
                 {
-                    foreach (var professionBilan in request.BilanProfessions)
+                    foreach (var professionBilan in request.ClientProfessions)
                     {
                         if (professionBilan != null && assessment.BilanProfessions != null)
                         {

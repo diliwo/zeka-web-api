@@ -8,10 +8,10 @@ namespace ClientManagement.Core.Interfaces
         IQueryable<Assessment> GetAssessments();
         IQueryable<Assessment> GetAssessments(int Client);
         void SoftDelete(Assessment assessment);
-        Assessment GetBilanById(int id);
-        Assessment GetCurrentBilan();
+        Assessment GetAssessmentById(int id);
+        Assessment GetCurrentAssessment();
         IQueryable<Assessment> GetArchivedBilans();
         Task<bool> IsBilanNotFinalizd(int bilanId);
-        Task<bool> AreAllBilansNotFinalized(int ClientId);
+        Task<bool> AreAllAssessmentsNotFinalized(int ClientId);
     }
 }

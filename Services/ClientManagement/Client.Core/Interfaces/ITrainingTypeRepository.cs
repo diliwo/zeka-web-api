@@ -1,4 +1,6 @@
-﻿namespace ClientManagement.Core.Interfaces
+﻿using ClientManagement.Core.Entities;
+
+namespace ClientManagement.Core.Interfaces
 {
     public interface ITrainingTypeRepository
     {

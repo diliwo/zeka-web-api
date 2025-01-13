@@ -14,11 +14,11 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public ApplicationDbContext(DbContextOptions options) : base(options) { }
 
-        public DbSet<ClientManagement.Core.Entities.Client> Clients { get; set; }
-        public DbSet<Track> tracks { get; set; }
+        public DbSet<Client> Clients { get; set; }
+        public DbSet<Support> Supports { get; set; }
         public DbSet<SchoolRegistration> SchoolRegistrations { get; set; }
         public DbSet<Assessment> Assessments { get; set; }
-        public DbSet<QuarterlyMonitoring> QuarterlyMonitorings { get; set; }
+        public DbSet<MonitoringReport> MonitoringReports { get; set; }
         public DbSet<MonitoringAction> MonitoringActions { get; set; }
         public DbSet<ProfessionalAssessment> ProfessionalAssessments { get; set; }
         public DbSet<Language> Languages { get; set; }

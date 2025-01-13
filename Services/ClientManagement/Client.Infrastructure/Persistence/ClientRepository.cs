@@ -29,11 +29,6 @@ namespace ClientManagement.Infrastructure.Persistence
             return FindByCondition(b => b.Id.Equals(id), trackChanges).FirstOrDefault();
         }
 
-        public Task<ClientManagement.Core.Entities.Client> GetSourceIdAsync(int sourceId, bool trackChanges = false)
-        {
-            return FindByCondition(b => b.SourceId.Equals(sourceId), trackChanges).FirstOrDefaultAsync();
-        }
-
         public Task<ClientManagement.Core.Entities.Client> GetAsync(int id, bool trackChanges = false)
         {
             return FindByCondition(b => b.Id.Equals(id), trackChanges).FirstOrDefaultAsync();
@@ -41,13 +36,13 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public ClientManagement.Core.Entities.Client GetClientByNiss(string niss, bool trackChanges = false)
         {
-            return FindByCondition(Client => Client.Niss.Equals(niss), trackChanges)
+            return FindByCondition(Client => Client.Ssn.Equals(niss), trackChanges)
                 .SingleOrDefault();
         }
 
         public Task<ClientManagement.Core.Entities.Client> GetClientByNissAsync(string niss, bool trackChanges = false)
         {
-            return FindByCondition(Client => Client.Niss.Equals(niss), trackChanges)
+            return FindByCondition(Client => Client.Ssn.Equals(niss), trackChanges)
                 .SingleOrDefaultAsync();
         }
 
@@ -58,7 +53,7 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public async Task<IEnumerable<ClientManagement.Core.Entities.Client>> GetClientsAsync(bool trackChanges) => await FindAll(trackChanges).ToListAsync();
 
-        public async Task<List<string>> GetClientNissesAsync(bool trackChanges) => await FindAll(trackChanges).Select(n => n.Niss).ToListAsync();
+        public async Task<List<string>> GetClientNissesAsync(bool trackChanges) => await FindAll(trackChanges).Select(n => n.Ssn).ToListAsync();
 
         public IQueryable<ClientManagement.Core.Entities.Client> GetClientsBySearchText(string text)
         {
@@ -70,7 +65,7 @@ namespace ClientManagement.Infrastructure.Persistence
 
                 predicate = predicate.Or(p => p.FirstName.ToLower().Contains(text.ToLower().Trim()));
                 predicate = predicate.Or(p => p.LastName.ToLower().Contains(text.ToLower().Trim()));
-                predicate = predicate.Or(p => p.Niss.ToLower().Contains(text.ToLower().Trim()));
+                predicate = predicate.Or(p => p.Ssn.ToLower().Contains(text.ToLower().Trim()));
                 predicate = predicate.Or(p => p.ReferenceNumber.ToLower().Contains(text.ToLower().Trim()));
 
                 benficiaries = benficiaries.Where(predicate);

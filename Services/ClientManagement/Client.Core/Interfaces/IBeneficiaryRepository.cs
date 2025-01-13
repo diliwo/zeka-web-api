@@ -5,8 +5,6 @@
     {
         void Persist(Entities.Client client);
         Entities.Client Get(int id, bool trackChanges = false);
-
-        Task<Entities.Client> GetSourceIdAsync(int id, bool trackChanges = false);
         Task<Entities.Client> GetAsync(int id,bool trackChanges = false);
         Entities.Client GetClientByNiss(string niss, bool trackChanges = false);
         Task<Entities.Client> GetClientByNissAsync(string niss, bool trackChanges = false);

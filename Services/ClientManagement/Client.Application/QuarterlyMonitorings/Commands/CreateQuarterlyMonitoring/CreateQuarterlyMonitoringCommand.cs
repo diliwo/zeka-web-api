@@ -33,7 +33,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.CreateQuart
             {
                 throw new NotFoundException(nameof(Client), request.ClientId);
             }
-            var StaffMember = _repository.StaffMember.Get(request.StaffMemberId);
+            var StaffMember = _repository.SocialWorker.Get(request.StaffMemberId);
             if (StaffMember == null)
             {
                 throw new NotFoundException(nameof(StaffMember), request.StaffMemberId);
@@ -43,7 +43,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.CreateQuart
             {
                 throw new NotFoundException(nameof(MonitoringAction), request.MonitoringActionId);
             }
-            return await _repository.QuarterlyMonitoring.Persist(new QuarterlyMonitoring(request.ClientId, request.StaffMemberId, request.MonitoringActionId, request.ActionDate.ToLocalTime(), request.ActionComment));
+            return await _repository.MonitoringReport.Persist(new MonitoringReport(request.ClientId, request.StaffMemberId, request.MonitoringActionId, request.ActionDate.ToLocalTime(), request.ActionComment));
         }
     }
 }
