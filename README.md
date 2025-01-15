@@ -12,5 +12,5 @@ By focusing on simplicity and functionality, Zeka aims to streamline workflows a
 
 ## Architecture
 
-![image](https://github.com/user-attachments/assets/58139f64-ddd6-428b-b2c1-0cff5dc764a0)
+![Zeka_archi](https://github.com/user-attachments/assets/1a3b1a46-727b-4530-8534-7dc5119d657b)
 
