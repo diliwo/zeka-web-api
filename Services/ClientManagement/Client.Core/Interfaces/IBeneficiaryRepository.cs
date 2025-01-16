@@ -6,7 +6,7 @@
         void Persist(Entities.Client client);
         Entities.Client Get(int id, bool trackChanges = false);
         Task<Entities.Client> GetAsync(int id,bool trackChanges = false);
-        Entities.Client GetClientByNiss(string niss, bool trackChanges = false);
+        Entities.Client GetClientBySsN(string niss, bool trackChanges = false);
         Task<Entities.Client> GetClientByNissAsync(string niss, bool trackChanges = false);
         Task<List<string>> GetClientNissesAsync(bool trackChanges = false);
         IQueryable<Entities.Client> GetClients();

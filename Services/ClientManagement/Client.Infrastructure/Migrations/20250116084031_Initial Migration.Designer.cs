@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ClientManagement.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20250111135418_Initial Migration")]
+    [Migration("20250116084031_Initial Migration")]
     partial class InitialMigration
     {
         /// <inheritdoc />
@@ -526,6 +526,79 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.ToTable("ProfessionalAssessments");
                 });
 
+            modelBuilder.Entity("ClientManagement.Core.Entities.ProfessionnalExperience", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CompanyName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ContextOfHiring")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("Created")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("EndDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Environment")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Function")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("LastModified")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastModifiedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("NatureOfContractId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ReasonEndOfContract")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Softdelete")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Task")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("TypeOfContract")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId");
+
+                    b.HasIndex("NatureOfContractId");
+
+                    b.ToTable("ProfessionnalExperience");
+                });
+
             modelBuilder.Entity("ClientManagement.Core.Entities.School", b =>
                 {
                     b.Property<int>("Id")
@@ -719,9 +792,6 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("StaffMemberId")
-                        .HasColumnType("integer");
-
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("timestamp without time zone");
 
@@ -731,7 +801,7 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.HasIndex("SocialWorkerId");
 
-                    b.ToTable("tracks");
+                    b.ToTable("Supports");
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.Training", b =>
@@ -1031,6 +1101,25 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Navigation("Profession");
                 });
 
+            modelBuilder.Entity("ClientManagement.Core.Entities.ProfessionnalExperience", b =>
+                {
+                    b.HasOne("ClientManagement.Core.Entities.Client", "Client")
+                        .WithMany("ProfessionnalExpectations")
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ClientManagement.Core.Entities.NatureOfContract", "NatureOfContract")
+                        .WithMany()
+                        .HasForeignKey("NatureOfContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+
+                    b.Navigation("NatureOfContract");
+                });
+
             modelBuilder.Entity("ClientManagement.Core.Entities.SchoolRegistration", b =>
                 {
                     b.HasOne("ClientManagement.Core.Entities.Client", "Client")
@@ -1106,6 +1195,8 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Navigation("Assessments");
 
                     b.Navigation("MonitoringReports");
+
+                    b.Navigation("ProfessionnalExpectations");
 
                     b.Navigation("SchoolRegistrations");
 

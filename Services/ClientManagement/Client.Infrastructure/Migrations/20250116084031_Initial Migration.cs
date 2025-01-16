@@ -258,6 +258,46 @@ namespace ClientManagement.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "ProfessionnalExperience",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    StartDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    EndDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    CompanyName = table.Column<string>(type: "text", nullable: false),
+                    Function = table.Column<string>(type: "text", nullable: false),
+                    Task = table.Column<string>(type: "text", nullable: false),
+                    Environment = table.Column<string>(type: "text", nullable: false),
+                    ContextOfHiring = table.Column<string>(type: "text", nullable: false),
+                    TypeOfContract = table.Column<int>(type: "integer", nullable: false),
+                    NatureOfContractId = table.Column<int>(type: "integer", nullable: false),
+                    ReasonEndOfContract = table.Column<string>(type: "text", nullable: false),
+                    ClientId = table.Column<int>(type: "integer", nullable: false),
+                    CreatedBy = table.Column<string>(type: "text", nullable: false),
+                    Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    LastModifiedBy = table.Column<string>(type: "text", nullable: false),
+                    LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ProfessionnalExperience", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_ProfessionnalExperience_Clients_ClientId",
+                        column: x => x.ClientId,
+                        principalTable: "Clients",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_ProfessionnalExperience_NatureOfContract_NatureOfContractId",
+                        column: x => x.NatureOfContractId,
+                        principalTable: "NatureOfContract",
+                        principalColumn: "NatureOfContractId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "MonitoringReports",
                 columns: table => new
                 {
@@ -299,14 +339,13 @@ namespace ClientManagement.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "tracks",
+                name: "Supports",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     StartDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     EndDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    StaffMemberId = table.Column<int>(type: "integer", nullable: false),
                     SocialWorkerId = table.Column<int>(type: "integer", nullable: false),
                     ClientId = table.Column<int>(type: "integer", nullable: false),
                     Note = table.Column<string>(type: "text", nullable: true),
@@ -319,15 +358,15 @@ namespace ClientManagement.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_tracks", x => x.Id);
+                    table.PrimaryKey("PK_Supports", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_tracks_Clients_ClientId",
+                        name: "FK_Supports_Clients_ClientId",
                         column: x => x.ClientId,
                         principalTable: "Clients",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_tracks_SocialWorker_SocialWorkerId",
+                        name: "FK_Supports_SocialWorker_SocialWorkerId",
                         column: x => x.SocialWorkerId,
                         principalTable: "SocialWorker",
                         principalColumn: "Id",
@@ -482,6 +521,16 @@ namespace ClientManagement.Infrastructure.Migrations
                 column: "ProfessionId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_ProfessionnalExperience_ClientId",
+                table: "ProfessionnalExperience",
+                column: "ClientId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ProfessionnalExperience_NatureOfContractId",
+                table: "ProfessionnalExperience",
+                column: "NatureOfContractId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_SchoolRegistrations_ClientId",
                 table: "SchoolRegistrations",
                 column: "ClientId");
@@ -502,19 +551,19 @@ namespace ClientManagement.Infrastructure.Migrations
                 column: "TrainingTypeId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Training_TrainingFieldId",
-                table: "Training",
-                column: "TrainingFieldId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_tracks_ClientId",
-                table: "tracks",
+                name: "IX_Supports_ClientId",
+                table: "Supports",
                 column: "ClientId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_tracks_SocialWorkerId",
-                table: "tracks",
+                name: "IX_Supports_SocialWorkerId",
+                table: "Supports",
                 column: "SocialWorkerId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Training_TrainingFieldId",
+                table: "Training",
+                column: "TrainingFieldId");
         }
 
         /// <inheritdoc />
@@ -527,16 +576,16 @@ namespace ClientManagement.Infrastructure.Migrations
                 name: "MonitoringReports");
 
             migrationBuilder.DropTable(
-                name: "NatureOfContract");
+                name: "ProfessionalAssessments");
 
             migrationBuilder.DropTable(
-                name: "ProfessionalAssessments");
+                name: "ProfessionnalExperience");
 
             migrationBuilder.DropTable(
                 name: "SchoolRegistrations");
 
             migrationBuilder.DropTable(
-                name: "tracks");
+                name: "Supports");
 
             migrationBuilder.DropTable(
                 name: "MonitoringActions");
@@ -546,6 +595,9 @@ namespace ClientManagement.Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "Profession");
+
+            migrationBuilder.DropTable(
+                name: "NatureOfContract");
 
             migrationBuilder.DropTable(
                 name: "School");

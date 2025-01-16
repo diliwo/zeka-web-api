@@ -22,11 +22,6 @@ namespace ClientManagement.Application.Clients.Commands.UpdateClient
 
             public async Task<int> Handle(UpdateClientCommand request, CancellationToken cancellationToken)
             {
-                if (request.ListOfNiss.Count == 0)
-                {
-                    throw new ClientBadRequestException();
-                }
-
                 return 0;
             }
         }

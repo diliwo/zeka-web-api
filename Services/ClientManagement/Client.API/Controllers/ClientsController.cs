@@ -21,39 +21,38 @@ namespace ClientManagement.API.Controllers
         [HttpGet("searchtext/{text}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult<ClientsDto>> GetBySearchText(string text)
+        public async Task<ActionResult> GetBySearchText(string text)
         {
             var vm = await Mediator.Send(new GetClientsBySearchTextQuery() { SearchText = text});
             return Ok(vm);
         }
 
-        [HttpGet("{niss}")]
+        [HttpGet("{ssn}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult<ClientsDto>> Get(string niss)
+        public async Task<ActionResult<ClientsDto>> Get(string ssn)
         {
-            var vm = await Mediator.Send(new GetClientDetailQuery() { Niss = niss });
+            var vm = await Mediator.Send(new GetClientDetailQuery() { Niss = ssn });
 
             return Ok(vm);
         }
 
-        [HttpPost()]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        //public async Task<ActionResult<BeneficiariesVm>> Import(ImportBeneficiaryCommand command)
-        public async Task<ActionResult<ClientsDto>> Add()
+        [HttpPost]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesDefaultResponseType]
+        public async Task<ActionResult> Add(AddClientCommand command)
         {
-            var vm = await Mediator.Send(new AddClientCommand());
+            var vm = await Mediator.Send(command);
 
             return Ok(vm);
         }
 
-        [HttpPost("updatelanguage/{niss}/{language?}")]
+        [HttpPost("updatelanguage/{ssn}/{language?}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult> UpdateLanguage(string niss, string language = "")
+        public async Task<ActionResult> UpdateLanguage(string ssn, string language = "")
         {
-            var vm = await Mediator.Send(new UpdateNativeLanguageCommand() { Niss = niss, Language = language });
+            var vm = await Mediator.Send(new UpdateNativeLanguageCommand() { Niss = ssn, Language = language });
 
             return Ok(vm);
         }

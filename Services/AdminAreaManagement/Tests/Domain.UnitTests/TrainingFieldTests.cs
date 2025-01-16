@@ -1,4 +1,5 @@
 ﻿using AdminAreaManagement.Core.Entities;
+using Xunit;
 
 namespace Domain.UnitTests;
 

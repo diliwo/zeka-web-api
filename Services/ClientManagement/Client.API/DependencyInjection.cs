@@ -1,5 +1,6 @@
 ﻿using System.Configuration;
 using ClientManagement.API.Infrastructure;
+using ClientManagement.API.Services;
 using ClientManagement.Application;
 using ClientManagement.Application.SchoolRegistations.Common;
 using ClientManagement.Core.Common.Dto;
@@ -19,7 +20,7 @@ public static class DependencyInjection
     public static IServiceCollection AddWebServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddDatabaseDeveloperPageExceptionFilter();
-
+        services.AddSingleton<ICurrentUserService, CurrentUserService>();
         //services.AddScoped<IUser, CurrentUser>();
 
         var fluidConfigSection = configuration.GetSection("OrganizationInfos");

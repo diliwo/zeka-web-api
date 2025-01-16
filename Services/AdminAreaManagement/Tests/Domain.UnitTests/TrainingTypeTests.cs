@@ -1,20 +1,21 @@
 ﻿using AdminAreaManagement.Core.Entities;
+using Xunit;
 
 namespace Domain.UnitTests;
 
-public class ProfessionTests
+public class TrainingTypeTests
 {
     [Fact]
     public void Constructor_ShouldInitializeName_WhenValidNameProvided()
     {
         // Arrange
-        var name = "Software Engineer";
+        var name = "Technical Training";
 
         // Act
-        var profession = new Profession(name);
+        var trainingType = new TrainingType(name);
 
         // Assert
-        Assert.Equal(name, profession.Name);
+        Assert.Equal(name, trainingType.Name);
     }
 
     [Theory]
@@ -23,31 +24,21 @@ public class ProfessionTests
     public void Constructor_ShouldThrowArgumentNullException_WhenNameIsNullOrEmpty(string invalidName)
     {
         // Act & Assert
-        var exception = Assert.Throws<ArgumentNullException>(() => new Profession(invalidName));
+        var exception = Assert.Throws<ArgumentNullException>(() => new TrainingType(invalidName));
         Assert.Equal("name", exception.ParamName);
-    }
-
-    [Fact]
-    public void DefaultConstructor_ShouldInitializeWithNullName()
-    {
-        // Act
-        var profession = new Profession();
-
-        // Assert
-        Assert.Null(profession.Name);
     }
 
     [Fact]
     public void NameProperty_ShouldAllowSettingAndGetting()
     {
         // Arrange
-        var profession = new Profession();
-        var name = "Doctor";
+        var trainingType = new TrainingType("Initial Name");
+        var newName = "Leadership Training";
 
         // Act
-        profession.Name = name;
+        trainingType.Name = newName;
 
         // Assert
-        Assert.Equal(name, profession.Name);
+        Assert.Equal(newName, trainingType.Name);
     }
 }

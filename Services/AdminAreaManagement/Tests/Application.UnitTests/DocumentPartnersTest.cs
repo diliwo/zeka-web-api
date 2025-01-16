@@ -3,6 +3,7 @@ using AdminAreaManagement.Application.DocumentPartners.Commands.Persist;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using Moq;
+using Xunit;
 
 namespace Application.UnitTests;
 

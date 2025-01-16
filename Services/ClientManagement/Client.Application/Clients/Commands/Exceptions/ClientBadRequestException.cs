@@ -4,7 +4,7 @@ namespace ClientManagement.Application.Clients.Commands.Exceptions
 {
     public class ClientBadRequestException : BadRequestException
     {
-        public ClientBadRequestException() : base("Parameter is null")
+        public ClientBadRequestException(string message) : base(message)
         {
         }
     }

@@ -20,15 +20,11 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="FluentAssertions" Version="6.12.1" />
-    <PackageReference Include="Moq" Version="4.20.72" />
-    <PackageReference Include="Shouldly" Version="4.2.1" />
-    <PackageReference Include="Respawn" Version="6.2.1" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.10" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Services\AdminAreaManagement\AdminAreaManagement.Core\AdminAreaManagement.Core.csproj" />
+    <ProjectReference Include="..\..\Client.Application\ClientManagement.Application.csproj" />
+    <ProjectReference Include="..\..\Client.Core\ClientManagement.Core.csproj" />
   </ItemGroup>
 
 </Project>
