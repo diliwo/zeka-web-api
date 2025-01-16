@@ -23,7 +23,7 @@ namespace ClientManagement.Application.Clients.Commands.UpdateNativeLanguage
             {
                 Console.WriteLine(request.Niss);
 
-                var entity = _repository.Client.GetClientByNiss(request.Niss);
+                var entity = _repository.Client.GetClientBySsN(request.Niss);
 
                 if (entity == null)
                 {

@@ -3,7 +3,7 @@ using AdminAreaManagement.Core.Enums;
 using AdminAreaManagement.Core.ValueObjects;
 using Domain.UnitTests.Common;
 using FluentAssertions;
-using Xunit.Sdk;
+using Xunit;
 
 namespace Domain.UnitTests;
 

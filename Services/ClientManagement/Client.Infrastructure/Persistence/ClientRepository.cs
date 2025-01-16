@@ -34,7 +34,7 @@ namespace ClientManagement.Infrastructure.Persistence
             return FindByCondition(b => b.Id.Equals(id), trackChanges).FirstOrDefaultAsync();
         }
 
-        public ClientManagement.Core.Entities.Client GetClientByNiss(string niss, bool trackChanges = false)
+        public ClientManagement.Core.Entities.Client GetClientBySsN(string niss, bool trackChanges = false)
         {
             return FindByCondition(Client => Client.Ssn.Equals(niss), trackChanges)
                 .SingleOrDefault();

@@ -1,6 +1,5 @@
 ﻿using AdminAreaManagement.Core.Entities;
-using FluentAssertions;
-using System.Reflection;
+using Xunit;
 
 namespace Domain.UnitTests
 {
