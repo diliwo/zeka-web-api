@@ -1,4 +1,5 @@
 using AdminAreaManagement.API;
+using AdminAreaManagement.API.Services;
 using AdminAreaManagement.Application;
 using AdminAreaManagement.Infrastructure;
 using AdminAreaManagement.Infrastructure.Persistence;
@@ -26,5 +27,15 @@ app.UseCors("CorsPolicy");
 app.UseAuthorization();
 
 app.MapControllers();
+
+
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapGrpcService<AdminareaService>();
+    endpoints.MapGet("/", async context =>
+    {
+        await context.Response.WriteAsync("Communication with grpc endpoints must be made through a grpc client");
+    });
+});
 
 app.Run();
