@@ -7,11 +7,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Persistence\Migrations\**" />
+    <Compile Remove="Persistence\Seed\**" />
+    <EmbeddedResource Remove="Persistence\Migrations\**" />
+    <EmbeddedResource Remove="Persistence\Seed\**" />
+    <None Remove="Persistence\Migrations\**" />
+    <None Remove="Persistence\Seed\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Folder Include="Migrations\" />
-    <Folder Include="Persistence\Migrations\" />
-    <Folder Include="Persistence\Migrations\" />
-    <Folder Include="Persistence\Seed\" />
-    <Folder Include="Persistence\Seed\" />
   </ItemGroup>
 
   <ItemGroup>

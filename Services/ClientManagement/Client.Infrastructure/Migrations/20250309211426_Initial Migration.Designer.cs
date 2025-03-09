@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ClientManagement.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20250116084031_Initial Migration")]
+    [Migration("20250309211426_Initial Migration")]
     partial class InitialMigration
     {
         /// <inheritdoc />
@@ -154,6 +154,10 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("TrainingConsultantLanguageLearningNote")
                         .IsRequired()
                         .HasColumnType("text");
@@ -210,18 +214,12 @@ namespace ClientManagement.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<DateTime?>("EndDate")
-                        .HasColumnType("date");
-
                     b.Property<string>("FirstName")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<int>("Gender")
                         .HasColumnType("integer");
-
-                    b.Property<bool>("HasChildren")
-                        .HasColumnType("boolean");
 
                     b.Property<DateTime?>("LastModified")
                         .HasColumnType("timestamp without time zone");
@@ -235,6 +233,9 @@ namespace ClientManagement.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Nationality")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PlaceOfBirth")
                         .IsRequired()
                         .HasColumnType("text");
 
@@ -253,8 +254,9 @@ namespace ClientManagement.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<DateTime>("StartDate")
-                        .HasColumnType("date");
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -291,6 +293,10 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -330,6 +336,10 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -382,6 +392,10 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClientId");
@@ -423,6 +437,10 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.ToTable("NatureOfContract");
@@ -456,6 +474,10 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -516,6 +538,10 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -587,6 +613,10 @@ namespace ClientManagement.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<int>("TypeOfContract")
                         .HasColumnType("integer");
 
@@ -631,6 +661,10 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -682,6 +716,10 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<int>("TrainingId")
                         .HasColumnType("integer");
@@ -743,6 +781,10 @@ namespace ClientManagement.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("UserName")
                         .IsRequired()
                         .HasColumnType("text");
@@ -795,6 +837,10 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClientId");
@@ -832,6 +878,10 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<int>("TrainingFieldId")
                         .HasColumnType("integer");
@@ -872,6 +922,10 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.ToTable("TrainingField");
@@ -905,6 +959,10 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -998,6 +1056,10 @@ namespace ClientManagement.Infrastructure.Migrations
                                 .HasColumnType("integer");
 
                             b1.Property<string>("City")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Country")
                                 .IsRequired()
                                 .HasColumnType("text");
 

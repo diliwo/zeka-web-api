@@ -15,14 +15,12 @@ namespace ClientManagement.Core.Entities
         public string FullName => $"{LastName} {FirstName}";
         public Gender Gender { get; set; }
         public DateTime BirthDate { get; set; }
-        public DateTime StartDate { get; set; }
-        public DateTime? EndDate { get; set; }
-        public string Nationality { get; set; }
+        public string PlaceOfBirth { get; set; }
+        public string? Nationality { get; set; }
         public string Ssn { get; set; }
         public Email Email { get; set; }
         public Phone Phone { get; set; }
         public Phone MobilePhone { get; set; }
-        public bool HasChildren { get; set; }
         public ValueObjects.Language NativeLanguage { get; set; }
         public ValueObjects.Language ContactLanguage { get; set; }
         public Address Address { get; set; }
@@ -48,6 +46,7 @@ namespace ClientManagement.Core.Entities
             string lastName,
             Gender gender,
             DateTime birthDate,
+            string placeOfBirth,
             string nationality,
             string ssn,
             Email email,
@@ -56,8 +55,7 @@ namespace ClientManagement.Core.Entities
             ValueObjects.Language nativeLanguage,
             ValueObjects.Language contactLanguage,
             Address address,
-            string socialWorkerName,
-            bool hasChildren = false) {
+            string socialWorkerName) {
 
             if (string.IsNullOrEmpty(firstFirstName))
             {
@@ -69,17 +67,7 @@ namespace ClientManagement.Core.Entities
                 throw new ArgumentNullException(nameof(lastName));
             }
 
-            if (string.IsNullOrEmpty(referenceNumber))
-            {
-                throw new ArgumentNullException(nameof(referenceNumber));
-            }
 
-            string nissPattern = @"^[0-9]{8,11}$";
-
-            if (!Regex.Match(ssn, nissPattern, RegexOptions.IgnoreCase).Success)
-            {
-                throw new InvalidNissFormatException(ssn);
-            }
 
             ReferenceNumber = referenceNumber;
             CivilStatus = civilStatus;
@@ -87,6 +75,7 @@ namespace ClientManagement.Core.Entities
             LastName = lastName;
             Gender = gender;
             BirthDate = birthDate;
+            PlaceOfBirth = placeOfBirth;
             Nationality = nationality;
             Ssn = ssn;
             Email = email;
@@ -96,7 +85,6 @@ namespace ClientManagement.Core.Entities
             ContactLanguage = contactLanguage;
             Address = address;
             SocialWorkerName = socialWorkerName;
-            HasChildren = hasChildren;
         }
 
         public void UpdateNativeLanguage(string nativeLanguage)
