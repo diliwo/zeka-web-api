@@ -8,7 +8,7 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
 {
     public class GetClientDetailQuery : IRequest<ClientDto>
     {
-        public string Niss { get; set; }
+        public int ClientId { get; set; }
 
         public class GetClientDetailQueryHandler : IRequestHandler<GetClientDetailQuery, ClientDto>
         {
@@ -26,7 +26,7 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
                 var vm = await _repository.Client.GetClients()
                     //.Include(b =>b.Candidacies)
                     .Include(b => b.SchoolRegistrations)
-                    .Where(b => b.Ssn == request.Niss)
+                    .Where(b => b.Id == request.ClientId)
                     .AsNoTracking()
                     .ProjectTo<ClientDto>(_mapper.ConfigurationProvider)
                     .SingleOrDefaultAsync(cancellationToken);
