@@ -24,25 +24,25 @@ namespace ClientManagement.Infrastructure.Migrations
                     LastName = table.Column<string>(type: "text", nullable: false),
                     Gender = table.Column<int>(type: "integer", nullable: false),
                     BirthDate = table.Column<DateTime>(type: "date", nullable: false),
-                    StartDate = table.Column<DateTime>(type: "date", nullable: false),
-                    EndDate = table.Column<DateTime>(type: "date", nullable: true),
-                    Nationality = table.Column<string>(type: "text", nullable: false),
+                    PlaceOfBirth = table.Column<string>(type: "text", nullable: false),
+                    Nationality = table.Column<string>(type: "text", nullable: true),
                     Ssn = table.Column<string>(type: "text", nullable: false),
                     Email_EmailAddress = table.Column<string>(type: "text", nullable: false),
                     Phone_PhoneNumber = table.Column<string>(type: "text", nullable: false),
                     MobilePhone_PhoneNumber = table.Column<string>(type: "text", nullable: false),
-                    HasChildren = table.Column<bool>(type: "boolean", nullable: false),
                     NativeLanguage_SpokenLanguage = table.Column<string>(type: "text", nullable: false),
                     ContactLanguage_SpokenLanguage = table.Column<string>(type: "text", nullable: false),
                     Address_Number = table.Column<string>(type: "text", nullable: false),
                     Address_Street = table.Column<string>(type: "text", nullable: false),
                     Address_PostalCode = table.Column<string>(type: "text", nullable: false),
                     Address_City = table.Column<string>(type: "text", nullable: false),
+                    Address_Country = table.Column<string>(type: "text", nullable: false),
                     SocialWorkerName = table.Column<string>(type: "text", nullable: false),
                     CreatedBy = table.Column<string>(type: "text", nullable: false),
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -61,6 +61,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -79,6 +80,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -97,6 +99,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -115,6 +118,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -134,6 +138,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -156,6 +161,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -174,6 +180,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -192,6 +199,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -244,6 +252,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -278,6 +287,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -313,6 +323,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -354,6 +365,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -385,6 +397,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -416,6 +429,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -453,6 +467,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>

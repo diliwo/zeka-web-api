@@ -200,7 +200,6 @@ namespace ClientManagement.Infrastructure.Persistence
                                       x.Client.ProfessionnalExpectations.OrderBy(c => c.Created).Last(c => !c.Softdelete).Created) >= 0))
                         ? $"[Training] : {x.Client.SchoolRegistrations.OrderBy(s => s.Created).Last(s => !s.Softdelete).Training.Name}"
                         : $"[Job] : {x.Client.ProfessionnalExpectations.OrderBy(c => c.Created).Last(c => !c.Softdelete).CompanyName}",
-                    HasChildren = x.Client.HasChildren,
                     ClientContactLanguage = x.Client.ContactLanguage.SpokenLanguage,
                     ClientNativeLanguage = x.Client.NativeLanguage.SpokenLanguage,
                     Comment = x.Note

@@ -30,6 +30,9 @@ public static class DependencyInjection
         //Register AutoMapper
         services.AddAutoMapper(typeof(Program).Assembly);
 
+        //Register Grpc
+        services.AddGrpc();
+
         //Add Cors
         services.AddCors(options =>
         {

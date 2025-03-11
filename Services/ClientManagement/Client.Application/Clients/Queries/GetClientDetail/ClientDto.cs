@@ -15,8 +15,7 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
         public string LastName { get; set; }
         public int Gender { get; set; }
         public DateTime BirthDate { get; set; }
-        public DateTime StartDateInCpas { get; set; }
-        public DateTime? EndDateInCpas { get; set; }
+        public string PlaceOfBirth { get; set; }
         public string Nationality { get; set; }
         public string Niss { get; set; }
         public string Email { get; set; }
@@ -43,8 +42,6 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
         public string? LastJobExperienceFunction { get; set; }
         public DateTime? LastJobExperienceStartDate { get; set; }
         public DateTime? LastJobExperienceEndDate { get; set; }
-        public DateTime? LastEvaluationDate { get; set; }
-        public string IbisNumber { get; set; }
 
         public void Mapping(Profile profile)
         {

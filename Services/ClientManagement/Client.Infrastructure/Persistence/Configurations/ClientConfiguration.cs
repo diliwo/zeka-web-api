@@ -35,10 +35,6 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
                 .Property(b => b.SocialWorkerName);
             builder
                 .Property(e => e.BirthDate).HasColumnType("date");
-            builder
-                .Property(e => e.StartDate).HasColumnType("date");
-            builder
-                .Property(e => e.EndDate).HasColumnType("date");
             //builder
             //    .Ignore(b => b.Candidates);
             builder

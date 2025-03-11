@@ -20,6 +20,7 @@ namespace Domain.UnitTests
                 "NOYCE",
                 Gender.Male,
                 new DateTime(1980, 3, 15),
+                "USA",
                 "Belge",
                 "898988740",
                 new Email("Robert@noyce.com"),
@@ -27,7 +28,7 @@ namespace Domain.UnitTests
                 new Phone("0478568912"),
                 new Language("English"),
                 new Language("Français"),
-                new Address("70", "Rue Geefs", "1030", "Schaerbeek"),
+                new Address("70", "Rue Geefs", "1030", "Schaerbeek", "Belgium"),
                 "Véronique Rivière"
             );
             _output = output;
@@ -42,6 +43,7 @@ namespace Domain.UnitTests
                     "Noyce",
                     Gender.Male,
                     new DateTime(1980, 3, 15),
+                    "RDC",
                     "Usa",
                     "89072235122",
                     new Email("Robert@noyce.com"),
@@ -49,7 +51,7 @@ namespace Domain.UnitTests
                     new Phone("0412345785"),
                     new Language("English"),
                     new Language("Français"),
-                    new Address("70", "Rue Geefs", "1030", "Schaerbeek"),
+                    new Address("70", "Rue Geefs", "1030", "Schaerbeek", "Congo"),
                     "Véronique Rivière"
                 );
             Assert.Throws<ArgumentNullException>(action);
@@ -65,6 +67,7 @@ namespace Domain.UnitTests
                     string.Empty,
                     Gender.Male,
                     new DateTime(1980, 3, 15),
+                    "France",
                     "Usa",
                     "89072235122",
                     new Email("Robert@noyce.com"),
@@ -72,7 +75,7 @@ namespace Domain.UnitTests
                     new Phone("0489602345"),
                     new Language("English"),
                     new Language("Français"),
-                    new Address("70", "Rue Geefs", "1030", "Schaerbeek"),
+                    new Address("70", "Rue Geefs", "1030", "Schaerbeek", "Thailand"),
                     "Véronique Rivière"
                 );
             Assert.Throws<ArgumentNullException>(action);
@@ -88,6 +91,7 @@ namespace Domain.UnitTests
                     "Noyce",
                     Gender.Male,
                     new DateTime(1980, 3, 15),
+                    "Mexico",
                     "Belge",
                     "89898874x",
                     new Email("Robert@noyce.com"),
@@ -95,7 +99,7 @@ namespace Domain.UnitTests
                     new Phone("0489602784"),
                     new Language("English"),
                     new Language("Français"),
-                    new Address("70", "Rue Geefs", "1030", "Schaerbeek"),
+                    new Address("70", "Rue Geefs", "1030", "Schaerbeek", "Belgium"),
                     "Véronique Rivière"
                 );
             Assert.Throws<InvalidNissFormatException>(action);

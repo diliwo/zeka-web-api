@@ -1,0 +1,20 @@
+﻿syntax = "proto3";
+
+option csharp_namespace = "Adminarea.Grpc.Protos";
+
+service AdminareaProtoService{
+	rpc GetSocialWorker(GetSocialWorkerRequest) returns (SocialWorker);
+}
+
+message GetSocialWorkerRequest {
+	int32 socialWorkerId = 1;
+}
+
+message SocialWorker {
+       int32 id = 1;
+	    string firstName = 2;
+        string lastName = 3;
+        string userName = 4;
+        string teamName = 5;
+        string teamAcronym = 6;
+}

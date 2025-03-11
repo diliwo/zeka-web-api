@@ -16,18 +16,16 @@ namespace ClientManagement.Application.Clients.Commands.AddClient
         public string LastName { get; set; }
         public Gender Gender { get; set; }
         public DateTime BirthDate { get; set; }
-        public DateTime StartDate { get; set; }
-        public DateTime? EndDate { get; set; }
+        public string PlaceOfBirth { get; set; }
         public string Nationality { get; set; }
         public string Ssn { get; set; }
-        public Email Email { get; set; }
-        public Phone Phone { get; set; }
-        public Phone MobilePhone { get; set; }
-        public bool HasChildren { get; set; }
-        public Language NativeLanguage { get; set; }
-        public Language ContactLanguage { get; set; }
+        public string Email { get; set; }
+        public string Phone { get; set; }
+        public string MobilePhone { get; set; }
+        public string NativeLanguage { get; set; }
+        public string ContactLanguage { get; set; }
         public Address Address { get; set; }
-        public int SocialWorkerId { get; set; }
+        public string SocialWorker { get; set; }
 
         public class AddClientCommandHandler : IRequestHandler<AddClientCommand, int>
         {
@@ -42,31 +40,29 @@ namespace ClientManagement.Application.Clients.Commands.AddClient
 
             public async Task<int> Handle(AddClientCommand request, CancellationToken cancellationToken)
             {
-                var foundedClient = _repository.Client.GetClientBySsN(request.Ssn);
+                var client = new Client(
+                    request.ReferenceNumber,
+                    request.CivilStatus,
+                    request.FirstName,
+                    request.LastName,
+                    request.Gender,
+                    request.BirthDate,
+                    request.PlaceOfBirth,
+                    request.Nationality,
+                    request.Ssn,
+                    new Email(request.Email),
+                    new Phone(request.Phone),
+                    new Phone(request.MobilePhone),
+                    new Language(request.NativeLanguage),
+                    new Language(request.ContactLanguage),
+                    request.Address,
+                    request.SocialWorker);
 
-                if (foundedClient is not null)
-                {
-                    throw new ClientBadRequestException("Client already exist!");
-                }
+                _repository.Client.Persist(client);
 
-                //var client = new Client(
-                //    request.ReferenceNumber,
-                //    request.CivilStatus,
-                //    request.FirstName,
-                //    request.LastName,
-                //    request.Gender,
-                //    request.BirthDate,
-                //    request.Nationality,
-                //    request.Ssn,
-                //    request.Email,
-                //    request.Phone,
-                //    request.MobilePhone,
-                //    request.NativeLanguage,
-                //    request.ContactLanguage,
-                //    request.Address,
-                //    request.)
+                _repository.Save();
 
-                return 1;
+                return client.Id;
             }
         }
     }

@@ -27,12 +27,12 @@ namespace ClientManagement.API.Controllers
             return Ok(vm);
         }
 
-        [HttpGet("{ssn}")]
+        [HttpGet("{clientid}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult<ClientsDto>> Get(string ssn)
+        public async Task<ActionResult<ClientsDto>> Get(int clientid)
         {
-            var vm = await Mediator.Send(new GetClientDetailQuery() { Niss = ssn });
+            var vm = await Mediator.Send(new GetClientDetailQuery() { ClientId = clientid });
 
             return Ok(vm);
         }

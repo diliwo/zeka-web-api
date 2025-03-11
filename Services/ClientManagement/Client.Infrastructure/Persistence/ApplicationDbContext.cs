@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Reflection.Emit;
 using ClientManagement.Core.Common;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
@@ -10,9 +11,11 @@ namespace ClientManagement.Infrastructure.Persistence
     {
         private readonly ICurrentUserService _currentUserService;
         private readonly IDateTime _dateTime;
+        private readonly ITenantService _tenantService;
         //private readonly IDomainEventService _domainEventService;
 
-        public ApplicationDbContext(DbContextOptions options) : base(options) { }
+        public ApplicationDbContext(DbContextOptions options, ITenantService service) : base(options) => _tenantService = service;
+        public string TenantName { get => _tenantService.GetTenant()?.TenantName ?? String.Empty; }
 
         public DbSet<Client> Clients { get; set; }
         public DbSet<Support> Supports { get; set; }
@@ -23,6 +26,15 @@ namespace ClientManagement.Infrastructure.Persistence
         public DbSet<ProfessionalAssessment> ProfessionalAssessments { get; set; }
         public DbSet<Language> Languages { get; set; }
 
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            var tenantConnectionString = _tenantService.GetConnectionString();
+            if (!string.IsNullOrEmpty(tenantConnectionString))
+            {
+                optionsBuilder.UseNpgsql(_tenantService.GetConnectionString());
+            }
+        }
+
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
         {
             foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Entity> entry in ChangeTracker.Entries<Entity>())
@@ -30,13 +42,15 @@ namespace ClientManagement.Infrastructure.Persistence
                 switch (entry.State)
                 {
                     case EntityState.Added:
-                        entry.Entity.CreatedBy = _currentUserService.Username;
-                        entry.Entity.Created = _dateTime.Now;
+                        entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
+                        entry.Entity.Created = DateTime.Now; ;
+                        entry.Entity.TenantName = TenantName;
                         break;
 
                     case EntityState.Modified:
-                        entry.Entity.LastModifiedBy = _currentUserService.Username;
-                        entry.Entity.LastModified = _dateTime.Now;
+                        entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
+                        entry.Entity.LastModified = DateTime.Now; ;
+                        entry.Entity.TenantName = TenantName;
                         break;
                 }
             }
@@ -56,13 +70,15 @@ namespace ClientManagement.Infrastructure.Persistence
                 switch (entry.State)
                 {
                     case EntityState.Added:
-                        entry.Entity.CreatedBy = _currentUserService.Username;
-                        entry.Entity.Created = _dateTime.Now;
+                        entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
+                        entry.Entity.Created = DateTime.Now; ;
+                        entry.Entity.TenantName = TenantName;
                         break;
 
                     case EntityState.Modified:
-                        entry.Entity.LastModifiedBy = _currentUserService.Username;
-                        entry.Entity.LastModified = _dateTime.Now;
+                        entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
+                        entry.Entity.LastModified = DateTime.Now; ;
+                        entry.Entity.TenantName = TenantName;
                         break;
                 }
             }
@@ -78,6 +94,7 @@ namespace ClientManagement.Infrastructure.Persistence
             builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
             base.OnModelCreating(builder);
+            builder.Entity<Client>().HasQueryFilter(a => a.TenantName == TenantName);
         }
 
         private async Task DispatchEvents()
