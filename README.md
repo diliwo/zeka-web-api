@@ -1,6 +1,6 @@
 # Zeka™
 
-Zeka is an original micro SaaS application developed by Hervé M'Bilo.
+Zeka is an original micro SaaS application.
 
 The API for Zeka is designed to handle client and case management via a scalable microservices architecture.
 
