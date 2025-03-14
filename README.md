@@ -1,8 +1,8 @@
-# Zeka
+# Zeka™
 
-The API for Zeka, a free and open-source tool for social workers, designed to handle client and case management via a scalable microservices architecture.
+Zeka is an original micro SaaS application developed by Hervé M'Bilo.
 
-By focusing on simplicity and functionality, Zeka aims to streamline workflows and enhance service delivery.
+The API for Zeka is designed to handle client and case management via a scalable microservices architecture.
 
 ## Features
 
