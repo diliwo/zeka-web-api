@@ -1,4 +1,4 @@
-# Zeka™
+# Zeka™ Web Api
 
 Zeka is an original micro SaaS application.
 
