@@ -49,7 +49,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Domain.UnitTests", "Service
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "AuthManagement", "AuthManagement", "{1595AA10-E066-41D3-A4C3-EFEFA501AF8C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthManagement", "Services\AuthManagement\AuthManagement\AuthManagement.csproj", "{99EDCCC4-00A8-426A-A536-104F0A0BFE4E}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AuthManagement.API", "Services\AuthManagement\AuthManagement.API\AuthManagement.API.csproj", "{99EDCCC4-00A8-426A-A536-104F0A0BFE4E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
