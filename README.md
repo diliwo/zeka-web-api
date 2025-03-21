@@ -1,6 +1,6 @@
 # Zeka™ Web Api
 
-Zeka is an original micro SaaS application.
+Zeka is a micro SaaS application.
 
 The API for Zeka is designed to handle client and case management via a scalable microservices architecture.
 
