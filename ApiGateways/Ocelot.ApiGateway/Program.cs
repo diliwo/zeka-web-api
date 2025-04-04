@@ -13,7 +13,7 @@ builder.Services.AddCors(options =>
 
 builder.Host.ConfigureAppConfiguration((env, config) =>
 {
-    config.AddJsonFile($"ocelot.{env.HostingEnvironment.EnvironmentName}.json", true, true);
+    config.AddJsonFile("ocelot.json", true, true);
 });
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

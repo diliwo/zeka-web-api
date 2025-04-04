@@ -35,3 +35,13 @@ services:
      - ASPNETCORE_ENVIRONMENT=Development
     ports:
      - "9010:8080"
+
+  authmanagement.api:
+    environment:
+        - ASPNETCORE_ENVIRONMENT=Development
+        - "ConnectionStrings__DefaultApiConnection=Server=zekaAuthdb;Port=5432;Database=zekaAuthdb;User Id=postgres;Password=admin;"
+  # depends_on:
+  #     zekaadminareadb :
+  #       condition: service_healthy
+    ports:
+      - "9011:8080"

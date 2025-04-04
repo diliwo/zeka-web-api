@@ -9,6 +9,8 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["ApiGateways/Ocelot.ApiGateway/Ocelot.ApiGateway.csproj", "ApiGateways/Ocelot.ApiGateway/"]
+COPY ["local-nuget-packages/", "ApiGateways/local-nuget-packages/"]
+COPY ["nuget.config", "ApiGateways/"]
 RUN dotnet restore "./ApiGateways/Ocelot.ApiGateway/./Ocelot.ApiGateway.csproj"
 COPY . .
 WORKDIR "/src/ApiGateways/Ocelot.ApiGateway"

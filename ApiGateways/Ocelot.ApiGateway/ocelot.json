@@ -1,6 +1,20 @@
 {
   "Routes": [
     {
+      //Authentication
+      "UpstreamPathTemplate": "/login",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "http",
+      "DownstreamPathTemplate": "/login",
+      "DangerousAcceptAnyServerCertificateValidator": true,
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5100"
+        }
+      ]
+    },
+    {
       //Clients
       "DownstreamPathTemplate": "/api/clients/{url}",
       "DownstreamScheme": "http",
