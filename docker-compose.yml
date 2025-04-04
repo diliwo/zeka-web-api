@@ -14,5 +14,12 @@ services:
       context: .
       dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile
 
+  authmanagement.api:
+    image: diliwo/authmanagementapi
+    container_name: zekaauthapi
+    build:
+        context: .
+        dockerfile: Services/AuthManagement/AuthManagement.API/Dockerfile
+
 # volumes:
 #     postgres_data:
