@@ -18,6 +18,7 @@ public sealed class RepositoryManager : IRepositoryManager
     private readonly Lazy<IPartnerRepository> _partnerRepository;
     private readonly Lazy<ISchoolRepository> _schoolRepository;
     private readonly Lazy<IDocumentPartnerRepository> _documentPartnerRepository;
+    private readonly Lazy<ICityRepository> _cityRepository;
 
     public RepositoryManager(ApplicationDbContext applicationDbContext, IFileService fileService)
     {
@@ -35,6 +36,8 @@ public sealed class RepositoryManager : IRepositoryManager
             new Lazy<ITrainingTypeRepository>(() => new TrainingTypeRepository(applicationDbContext));
         _trainingFieldRepository =
             new Lazy<ITrainingFieldRepository>(() => new TrainingFieldRepository(applicationDbContext));
+        _cityRepository =
+            new Lazy<ICityRepository>(() => new CityRepository(applicationDbContext));
     }
 
     public IStaffMemberRepository StaffMember => _StaffMemberRepository.Value;
@@ -46,6 +49,7 @@ public sealed class RepositoryManager : IRepositoryManager
     public ITeamRepository Team => _teamRepository.Value;
     public ISchoolRepository School => _schoolRepository.Value;
     public IDocumentPartnerRepository DocumentPartner => _documentPartnerRepository.Value;
+    public ICityRepository City => _cityRepository.Value;
     public void Save() => _applicationDbContext.SaveChanges();
     public async Task SaveAsync() => await _applicationDbContext.SaveChangesAsync();
 }

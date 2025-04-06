@@ -12,7 +12,7 @@ namespace ClientManagement.Application.Models
         public string Email { get; set; }
         public Assessment Assessment { get; set; }
         public Client Client { get; set; }
-        public List<Support> Supports { get; set; }
+        public List<SocialCase> Supports { get; set; }
         public List<SchoolRegistration> SchoolRegistrations { get; set; } = new List<SchoolRegistration>();
         public List<ProfessionnalExperience> ProfessionalExperiences { get; set; } = new List<ProfessionnalExperience>();
     }

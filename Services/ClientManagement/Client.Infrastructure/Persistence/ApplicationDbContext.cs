@@ -18,7 +18,7 @@ namespace ClientManagement.Infrastructure.Persistence
         public string TenantName { get => _tenantService.GetTenant()?.TenantName ?? String.Empty; }
 
         public DbSet<Client> Clients { get; set; }
-        public DbSet<Support> Supports { get; set; }
+        public DbSet<SocialCase> Supports { get; set; }
         public DbSet<SchoolRegistration> SchoolRegistrations { get; set; }
         public DbSet<Assessment> Assessments { get; set; }
         public DbSet<MonitoringReport> MonitoringReports { get; set; }

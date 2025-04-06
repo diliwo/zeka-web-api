@@ -2,7 +2,7 @@
 
 namespace ClientManagement.Core.Entities
 {
-    public class Support : Entity
+    public class SocialCase : Entity
     {
         public DateTime StartDate { get; set; }
         public DateTime? EndDate { get; set; }
@@ -15,11 +15,11 @@ namespace ClientManagement.Core.Entities
 
         public bool IsActif => !EndDate.HasValue;
 
-        public Support()
+        public SocialCase()
         {
         }
 
-        public Support(Client client,  DateTime startDate, SocialWorker socialWorker, String? note = "")
+        public SocialCase(Client client,  DateTime startDate, SocialWorker socialWorker, String? note = "")
         {
             Client = client;
             StartDate = startDate;
