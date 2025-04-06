@@ -19,52 +19,52 @@ namespace ClientManagement.Infrastructure.Persistence
             _context = context;
         }
 
-        public void Persist(Support support)
+        public void Persist(SocialCase socialCase)
         {
-            if (support.Id == default(int))
+            if (socialCase.Id == default(int))
             {
-                if (GetNumberOfClientSupports(support.Client.Id))
+                if (GetNumberOfClientSupports(socialCase.Client.Id))
                 {
-                    var previousSupport = GetLastSupportForClient(support.Client.Id);
+                    var previousSupport = GetLastSupportForClient(socialCase.Client.Id);
 
                     if (!previousSupport.EndDate.HasValue)
                     {
-                        previousSupport.EndDate = support.StartDate.AddDays(-1);
+                        previousSupport.EndDate = socialCase.StartDate.AddDays(-1);
 
                         _context.Supports.Update(previousSupport);
                     }
                 }
-                _context.Supports.Add(support);
+                _context.Supports.Add(socialCase);
             }
             else
             {
-                _context.Supports.Update(support);
+                _context.Supports.Update(socialCase);
             }
 
             _context.SaveChanges();
         }
 
-        public Support Get(int id)
+        public SocialCase Get(int id)
         {
             return _context.Supports.FirstOrDefault(s => s.Id == id);
         }
 
-        public async Task<Support> GetAsync(int id)
+        public async Task<SocialCase> GetAsync(int id)
         {
             return await _context.Supports.FirstOrDefaultAsync(s => s.Id == id);
         }
 
-        public Support GetLastSupportForClient(int id)
+        public SocialCase GetLastSupportForClient(int id)
         {
             return _context.Supports.Where(b =>b.ClientId == id && b.Softdelete != true).OrderBy(s => s.StartDate).Last();
         }
 
-        public async Task<Support> GetLastSupportForClientAsync(int id)
+        public async Task<SocialCase> GetLastSupportForClientAsync(int id)
         {
             return await _context.Supports.Where(b => b.ClientId == id && b.Softdelete != true).OrderBy(s => s.StartDate).LastAsync();
         }
 
-        public IQueryable<Support> GetSupports()
+        public IQueryable<SocialCase> GetSupports()
         {
             return _context.Supports.Where(s => s.Softdelete != true);
         }
@@ -74,7 +74,7 @@ namespace ClientManagement.Infrastructure.Persistence
             return _context.Supports.Where(s => s.ClientId == id && s.Softdelete != true);
         }
 
-        public IEnumerable<Support> GetSupportsByClient(int id)
+        public IEnumerable<SocialCase> GetSupportsByClient(int id)
         {
             return _context.Supports.Where(s => s.ClientId == id && s.Softdelete != true)
                 .Include(s => s.SocialWorker);
@@ -94,18 +94,18 @@ namespace ClientManagement.Infrastructure.Persistence
             return result;
         }
 
-        public void SoftDelete(Support support)
+        public void SoftDelete(SocialCase socialCase)
         {
-            if (support.Softdelete)
+            if (socialCase.Softdelete)
             {
-                support.Softdelete = false;
+                socialCase.Softdelete = false;
             }
             else
             {
-                support.Softdelete = true;
+                socialCase.Softdelete = true;
             }
 
-            _context.Supports.Update(support);
+            _context.Supports.Update(socialCase);
 
             _context.SaveChanges();
         }
@@ -150,7 +150,7 @@ namespace ClientManagement.Infrastructure.Persistence
             return await AreDateConsistent(benefSupports, date);
         }
 
-        private async Task<bool> AreDateConsistent(List<Support> supports, DateTime date)
+        private async Task<bool> AreDateConsistent(List<SocialCase> supports, DateTime date)
         {
             bool result = false;
 
@@ -228,7 +228,7 @@ namespace ClientManagement.Infrastructure.Persistence
             }
             return result;
         }
-        public Support GetWithDetails(int id)
+        public SocialCase GetWithDetails(int id)
         {
             return _context.Supports.
                 Include(s => s.Client)

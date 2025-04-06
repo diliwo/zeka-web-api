@@ -29,7 +29,7 @@ namespace ClientManagement.Application.Supports.Commands.UpsertSupport
 
             public async Task<int> Handle(UpsertSupportCommand request, CancellationToken cancellationToken)
             {
-                Support entity;
+                SocialCase entity;
 
                 if (request.SupportId.HasValue)
                 {
@@ -55,7 +55,7 @@ namespace ClientManagement.Application.Supports.Commands.UpsertSupport
                         throw new NotFoundException(nameof(entity), request.SupportId);
                     }
 
-                    entity = new Support(Client,request.StartDate, SocialWorker, request.Note);
+                    entity = new SocialCase(Client,request.StartDate, SocialWorker, request.Note);
                 }
 
                 _repository.Support.Persist(entity);

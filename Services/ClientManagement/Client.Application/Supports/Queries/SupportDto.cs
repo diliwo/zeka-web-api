@@ -5,7 +5,7 @@ using ClientManagement.Core.Entities;
 
 namespace ClientManagement.Application.Supports.Queries
 {
-    public class SupportDto : IMapFrom<Support>
+    public class SupportDto : IMapFrom<SocialCase>
     {
         public int SupportId { get; set; }
         public DateTime StartDate { get; set; }
@@ -21,7 +21,7 @@ namespace ClientManagement.Application.Supports.Queries
         public bool IsLastSupport { get; set; }
         public void Mapping(Profile profile)
         {
-            profile.CreateMap<Core.Entities.Support, SupportDto>()
+            profile.CreateMap<Core.Entities.SocialCase, SupportDto>()
                 .ForMember(b => b.SupportId,
                     opt => opt.MapFrom(e => e.Id))
                 .ForMember(b => b.StaffMemberInfo,

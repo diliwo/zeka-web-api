@@ -43,7 +43,7 @@ namespace ClientManagement.Application.Supports.Commands.DeleteSupport
                 }
                 else
                 {
-                    throw new NotFoundException(nameof(Support), request.Id);
+                    throw new NotFoundException(nameof(SocialCase), request.Id);
                 }
             }
         }

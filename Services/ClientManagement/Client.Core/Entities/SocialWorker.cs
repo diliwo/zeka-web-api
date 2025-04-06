@@ -11,7 +11,7 @@ namespace ClientManagement.Core.Entities
         public string UserName { get; set; }
         public string TeamName { get; set; }
         public string TeamAcronym { get; set; }
-        public IList<Support> Supports { get; set; } = new List<Support>();
+        public IList<SocialCase> Supports { get; set; } = new List<SocialCase>();
         public virtual IList<MonitoringReport> MonitoringReports { get; private set; } = new List<MonitoringReport>();
         public  SocialWorker()
         {
@@ -64,7 +64,7 @@ namespace ClientManagement.Core.Entities
             {
                 throw new InvalidOperationException("A support already exists for this client");
             }
-            Supports.Add(new Support(client, startDate, this, note));
+            Supports.Add(new SocialCase(client, startDate, this, note));
         }
     }
 }

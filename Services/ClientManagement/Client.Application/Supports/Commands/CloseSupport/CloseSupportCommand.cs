@@ -23,11 +23,11 @@ namespace ClientManagement.Application.Supports.Commands.CloseTrack
 
             public async Task<int> Handle(CloseSupportCommand request, CancellationToken cancellationToken)
             {
-                Support entity;
+                SocialCase entity;
 
                 if (!request.SupportId.HasValue)
                 {
-                    throw new InvalidOperationException(nameof(Support));
+                    throw new InvalidOperationException(nameof(SocialCase));
                 }
                
                 entity = _repository.Support.Get(request.SupportId.Value);
