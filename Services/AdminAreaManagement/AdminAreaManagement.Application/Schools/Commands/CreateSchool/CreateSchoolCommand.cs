@@ -19,13 +19,19 @@ namespace AdminAreaManagement.Application.Schools.Commands.CreateSchool
             }
             public async Task<int> Handle(CreateSchoolCommand request, CancellationToken cancellationToken)
             {
-                School entity = new School(request.Name, request.Locality);
+                try
+                {
+                    School entity = new School(request.Name, request.Locality);
 
-                _repository.School.Persist(entity);
+                    _repository.School.Persist(entity);
 
-                _repository.Save();
-
-                return entity.Id;
+                    _repository.Save();
+                    return entity.Id;
+                }
+                catch (Exception ex)
+                {
+                    throw ex;
+                }
             }
         }
 

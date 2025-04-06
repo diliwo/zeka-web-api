@@ -25,6 +25,11 @@ namespace AdminAreaManagement.Application.Professions.Commands.UpsertProfession
                 if (request.Id.HasValue)
                 {
                     entity = _repository.Profession.Get(request.Id.Value);
+
+                    if (entity is null)
+                    {
+                        throw new ArgumentException("Profession not found.");
+                    }
                     entity.Name = request.Name.Trim();
                 }
                 else
