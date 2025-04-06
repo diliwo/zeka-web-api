@@ -15,7 +15,7 @@ namespace AdminAreaManagement.Core.Entities
                 throw new ArgumentNullException(nameof(name));
             }
 
-            Name = name;
+            Name = name.Trim();
         }
     }
 }
