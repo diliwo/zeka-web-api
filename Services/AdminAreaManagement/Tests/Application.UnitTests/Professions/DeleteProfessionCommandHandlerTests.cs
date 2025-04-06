@@ -1,14 +1,13 @@
-using AdminAreaManagement.Application.Professions.Commands.UpsertProfession;
+using System.Reflection;
+using AdminAreaManagement.Application.Common.Exceptions;
+using AdminAreaManagement.Application.Professions.Commands.DeleteProfession;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using FluentAssertions;
 using Moq;
-using System.Reflection;
-using AdminAreaManagement.Application.Common.Exceptions;
-using AdminAreaManagement.Application.Professions.Commands.DeleteProfession;
 using Xunit;
 
-namespace Application.UnitTests
+namespace Application.UnitTests.Professions
 {
     public class DeleteProfessionCommandHandlerTests
     {
@@ -28,8 +27,8 @@ namespace Application.UnitTests
         public async Task Handle_ShouldSoftDeleteProfession_WhenProfessionExistsAndIsNotSoftDeleted()
         {
             // Arrange
-            var profession = new Profession("Kitchen assistant");
-            var professionType = typeof(Profession);
+            var profession = new AdminAreaManagement.Core.Entities.Profession("Kitchen assistant");
+            var professionType = typeof(AdminAreaManagement.Core.Entities.Profession);
             var idProperty = professionType.GetProperty("Id", BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
             if (idProperty != null && idProperty.CanWrite)
             {
@@ -52,8 +51,8 @@ namespace Application.UnitTests
         public async Task Handle_ShouldRestoreProfession_WhenProfessionExistsAndIsSoftDeleted()
         {
             // Arrange
-            var profession = new Profession("Kitchen assistant");
-            var professionType = typeof(Profession);
+            var profession = new AdminAreaManagement.Core.Entities.Profession("Kitchen assistant");
+            var professionType = typeof(AdminAreaManagement.Core.Entities.Profession);
             var idProperty = professionType.GetProperty("Id", BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
             if (idProperty != null && idProperty.CanWrite)
             {

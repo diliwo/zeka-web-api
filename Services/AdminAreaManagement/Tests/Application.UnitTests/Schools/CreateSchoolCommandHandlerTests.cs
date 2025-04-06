@@ -8,7 +8,7 @@ using Moq;
 using System.Reflection;
 using Xunit;
 
-namespace Application.UnitTests;
+namespace Application.UnitTests.Schools;
 
 public class CreateSchoolCommandHandlerTests
 {

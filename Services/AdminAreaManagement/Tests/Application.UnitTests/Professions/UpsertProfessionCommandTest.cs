@@ -1,12 +1,12 @@
+using System.Reflection;
 using AdminAreaManagement.Application.Professions.Commands.UpsertProfession;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using FluentAssertions;
 using Moq;
-using System.Reflection;
 using Xunit;
 
-namespace Application.UnitTests
+namespace Application.UnitTests.Professions
 {
     public class UpsertProfessionCommandTest
     {
@@ -27,7 +27,7 @@ namespace Application.UnitTests
         {
             // Arrange
             var professionName = "Engineer";
-            var command = new UpsertProfessionCommand { Name = professionName  };
+            var command = new UpsertProfessionCommand { Name = professionName };
             _professionRepositoryMock.Setup(r => r.Persist(It.IsAny<Profession>()));
 
             _professionRepositoryMock
@@ -86,7 +86,7 @@ namespace Application.UnitTests
         {
             // Arrange
             var command = new UpsertProfessionCommand { Id = 99, Name = "Astronaut" };
-            _professionRepositoryMock.Setup(r => r.Get(99)).Returns((Profession)null);
+            _professionRepositoryMock.Setup(r => r.Get(99)).Returns((AdminAreaManagement.Core.Entities.Profession)null);
 
             // Act
             Func<Task> act = async () => await _handler.Handle(command, CancellationToken.None);
@@ -100,13 +100,13 @@ namespace Application.UnitTests
         {
             // Arrange
             var command = new UpsertProfessionCommand { Name = "  Trimmed Profession  " };
-            _professionRepositoryMock.Setup(r => r.Persist(It.IsAny<Profession>()));
+            _professionRepositoryMock.Setup(r => r.Persist(It.IsAny<AdminAreaManagement.Core.Entities.Profession>()));
 
             // Act
             var result = await _handler.Handle(command, CancellationToken.None);
 
             // Assert
-            _professionRepositoryMock.Verify(r => r.Persist(It.Is<Profession>(p => p.Name == "Trimmed Profession")), Times.Once);
+            _professionRepositoryMock.Verify(r => r.Persist(It.Is<AdminAreaManagement.Core.Entities.Profession>(p => p.Name == "Trimmed Profession")), Times.Once);
         }
     }
 }
