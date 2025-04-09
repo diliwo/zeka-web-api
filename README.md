@@ -4,12 +4,19 @@ Zeka is an open source micro SaaS application.
 
 The API for Zeka is designed to handle client and case management via a scalable microservices architecture.
 
-## Features
+## Tech stack
 
-- RESTful APIs for managing clients and cases.
-- Secure authentication and authorization.
-- Scalable microservices architecture.
-
+- .NET Core - .NET Framework and .NET Core, including ASP.NET and ASP.NET Core
+- IdentityModel.Tokens  - Responsible for handling token-related operations for .NET Core
+- Authentication.JwtBearer - Integrates JWT authentication directly into the ASP.NET Core middleware pipeline
+- Ocelot - A toolkit for developing high-performance HTTP reverse proxy applications
+- FluentValidation - Popular .NET validation library for building strongly-typed validation rules
+- MediatR - Simple, unambitious mediator implementation in .NET
+- EF Core - Modern object-database mapper for .NET. It supports LINQ queries, change tracking, updates, and schema migrations
+- Serilog - Simple .NET logging with fully-structured events
+- helm - Best package manager to find, share, and use software built for Kubernetes
+- Kubernetes / AKS - The app is designed to run on Kubernetes (both locally on "Rancher Desktop" as well as on the cloud with AKS)
+  
 ## Architecture
 
 ![Zeka_archi](https://github.com/user-attachments/assets/30ff9b7a-72d5-4766-a4fe-3d37f1f94fff)
