@@ -16,6 +16,9 @@ The API for Zeka is designed to handle client and case management via a scalable
 - Serilog - Simple .NET logging with fully-structured events
 - helm - Best package manager to find, share, and use software built for Kubernetes
 - Kubernetes / AKS - The app is designed to run on Kubernetes (both locally on "Rancher Desktop" as well as on the cloud with AKS)
+- Istio - An open-source service mesh that provides traffic management, security, and observability for microservices in a Kubernetes environment.
+- RabbitMQ - An open-source message broker that enables applications to communicate asynchronously by sending and receiving messages through queues.
+- PostgreSQL - A powerful open-source relational database system known for its reliability, feature richness, and support for complex queries and data types.
   
 ## Architecture
 
