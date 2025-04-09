@@ -19,7 +19,8 @@ The API for Zeka is designed to handle client and case management via a scalable
 - Istio - An open-source service mesh that provides traffic management, security, and observability for microservices in a Kubernetes environment.
 - RabbitMQ - An open-source message broker that enables applications to communicate asynchronously by sending and receiving messages through queues.
 - PostgreSQL - A powerful open-source relational database system known for its reliability, feature richness, and support for complex queries and data types.
-  
+- Ocelot - An open-source API gateway for .NET that routes requests, handles authentication, and manages cross-cutting concerns in microservice architectures.  
+
 ## Architecture
 
 ![Zeka_archi](https://github.com/user-attachments/assets/30ff9b7a-72d5-4766-a4fe-3d37f1f94fff)
