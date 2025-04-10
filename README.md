@@ -6,20 +6,20 @@ The API for Zeka is designed to handle client and case management via a scalable
 
 ## Tech stack
 
-- .NET Core - .NET Framework and .NET Core, including ASP.NET and ASP.NET Core
-- IdentityModel.Tokens  - Responsible for handling token-related operations for .NET Core
-- Authentication.JwtBearer - Integrates JWT authentication directly into the ASP.NET Core middleware pipeline
-- Ocelot - A toolkit for developing high-performance HTTP reverse proxy applications
-- FluentValidation - Popular .NET validation library for building strongly-typed validation rules
-- MediatR - Simple, unambitious mediator implementation in .NET
-- EF Core - Modern object-database mapper for .NET. It supports LINQ queries, change tracking, updates, and schema migrations
-- Serilog - Simple .NET logging with fully-structured events
-- helm - Best package manager to find, share, and use software built for Kubernetes
-- Kubernetes / AKS - The app is designed to run on Kubernetes (both locally on "Rancher Desktop" as well as on the cloud with AKS)
-- Istio - An open-source service mesh that provides traffic management, security, and observability for microservices in a Kubernetes environment.
-- RabbitMQ - An open-source message broker that enables applications to communicate asynchronously by sending and receiving messages through queues.
-- PostgreSQL - A powerful open-source relational database system known for its reliability, feature richness, and support for complex queries and data types.
-- Ocelot - An open-source API gateway for .NET that routes requests, handles authentication, and manages cross-cutting concerns in microservice architectures.  
+- <strong>.NET Core</strong> - .NET Framework and .NET Core, including ASP.NET and ASP.NET Core
+- <strong>IdentityModel.Tokens</strong>  - Responsible for handling token-related operations for .NET Core
+- <strong>Authentication.JwtBearer</strong> - Integrates JWT authentication directly into the ASP.NET Core middleware pipeline
+- <strong>Ocelot</strong> - A toolkit for developing high-performance HTTP reverse proxy applications
+- <strong>FluentValidation</strong> - Popular .NET validation library for building strongly-typed validation rules
+- <strong>MediatR</strong> - Simple, unambitious mediator implementation in .NET
+- <strong>EF Core</strong> - Modern object-database mapper for .NET. It supports LINQ queries, change tracking, updates, and schema migrations
+- <strong>Serilog</strong> - Simple .NET logging with fully-structured events
+- <strong>helm</strong> - Best package manager to find, share, and use software built for Kubernetes
+- <strong>Kubernetes / AKS</strong> - The app is designed to run on Kubernetes (both locally on "Rancher Desktop" as well as on the cloud with AKS)
+- <strong>Istio</strong> - An open-source service mesh that provides traffic management, security, and observability for microservices in a Kubernetes environment.
+- <strong>RabbitMQ</strong> - An open-source message broker that enables applications to communicate asynchronously by sending and receiving messages through queues.
+- <strong>PostgreSQL</strong> - A powerful open-source relational database system known for its reliability, feature richness, and support for complex queries and data types.
+- <strong>Ocelot</strong> - An open-source API gateway for .NET that routes requests, handles authentication, and manages cross-cutting concerns in microservice architectures.  
 
 ## Architecture
 
