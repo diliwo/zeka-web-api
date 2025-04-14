@@ -25,6 +25,7 @@ namespace AdminAreaManagement.Infrastructure.Persistence
         public DbSet<TrainingType> TrainingTypes { get; set; }
         public DbSet<TrainingField> TrainingFields { get; set; }
         public DbSet<City> Cities { get; set; }
+        public DbSet<Nationality> Nationalities { get; set; }
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
         {

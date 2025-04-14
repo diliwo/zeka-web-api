@@ -5,7 +5,7 @@ using AdminAreaManagement.Core.Interfaces;
 using Moq;
 using Xunit;
 
-namespace Application.UnitTests;
+namespace Application.UnitTests.DocumentPartner;
 
 public class DocumentPartnersTest
 {
@@ -43,7 +43,7 @@ public class DocumentPartnersTest
 
         mockPartnerRepository.Setup(repo => repo.Get(1)).Returns(partner);
         mockDocumentPartnerRepository
-            .Setup(repo => repo.Persist(It.IsAny<DocumentPartner>()))
+            .Setup(repo => repo.Persist(It.IsAny<AdminAreaManagement.Core.Entities.DocumentPartner>()))
             .Throws(new Exception("Persistence Error"));
 
         mockRepositoryManager.Setup(repo => repo.Partner).Returns(mockPartnerRepository.Object);

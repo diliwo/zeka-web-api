@@ -1,8 +1,10 @@
 ﻿using System.Reflection;
+using AdminAreaManagement.Application.Cities.Queries;
 using AdminAreaManagement.Application.Common.Behaviours;
 using AdminAreaManagement.Application.Common.Helpers;
 using AdminAreaManagement.Application.Common.Services;
 using AdminAreaManagement.Application.Formations.Common;
+using AdminAreaManagement.Application.Nationalities.Queries;
 using AdminAreaManagement.Application.Partners.Queries.Common;
 using AdminAreaManagement.Application.Professions.Queries;
 using AdminAreaManagement.Application.Schools.Common;
@@ -30,7 +32,9 @@ namespace AdminAreaManagement.Application
             services.AddScoped<ISortHelper<TrainingDto>, SortHelper<TrainingDto>>();
             services.AddScoped<ISortHelper<SchoolDto>, SortHelper<SchoolDto>>();
             services.AddScoped<ISortHelper<ProfessionDto>, SortHelper<ProfessionDto>>();
-            services.AddScoped<ISortHelper<PartnerDto>, SortHelper<PartnerDto>>(); 
+            services.AddScoped<ISortHelper<PartnerDto>, SortHelper<PartnerDto>>();
+            services.AddScoped<ISortHelper<CityDto>, SortHelper<CityDto>>();
+            services.AddScoped<ISortHelper<NationalityDto>, SortHelper<NationalityDto>>();
             services.AddScoped<ISortHelper<PartnerSelectionListDto>, SortHelper<PartnerSelectionListDto>>();
             services.AddAutoMapper(Assembly.GetExecutingAssembly());
             services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());

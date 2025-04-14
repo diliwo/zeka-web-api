@@ -34,6 +34,12 @@
   </ItemGroup>
 
 	<ItemGroup>
+		<None Update="Persistence\Seed\Cities.json">
+		  <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Persistence\Seed\Nationalities.json">
+		  <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
 		<None Update="Persistence\Seed\Teams.json">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</None>
