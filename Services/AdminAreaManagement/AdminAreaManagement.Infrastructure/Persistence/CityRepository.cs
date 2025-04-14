@@ -14,15 +14,15 @@ public class CityRepository : ICityRepository
         _context = context;
     }
 
-    public void Persist(City places)
+    public void Persist(City city)
     {
-        if (places.Id == default)
+        if (city.Id == default)
         {
-            _context.Cities.Add(places);
+            _context.Cities.Add(city);
         }
         else
         {
-            _context.Cities.Update(places);
+            _context.Cities.Update(city);
         }
         _context.SaveChanges();
     }
@@ -32,7 +32,7 @@ public class CityRepository : ICityRepository
         return _context.Cities.FirstOrDefault(s => s.Id == id);
     }
 
-    public IQueryable<City> GetPlaces(string filter = "")
+    public IQueryable<City> GetCities(string filter = "")
     {
         var fields = _context.Cities.AsNoTracking().AsExpandable().Where(p => p.Softdelete != true);
 
@@ -43,8 +43,6 @@ public class CityRepository : ICityRepository
             predicate = predicate.Or(p => p.Country.ToLower().Contains(filter.ToLower().Trim()));
 
             predicate = predicate.Or(p => p.Name.ToLower().Contains(filter.ToLower().Trim()));
-
-            predicate = predicate.Or(p => p.CountryDemonym.ToLower().Contains(filter.ToLower().Trim()));
 
             fields = fields.Where(predicate);
         }

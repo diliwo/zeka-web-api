@@ -11,6 +11,8 @@ public interface IRepositoryManager
     IProfessionRepository Profession { get; }
     ITrainingsRepository Trainings { get; }
     ITrainingFieldRepository TrainingField { get; }
+    ICityRepository City { get; }
+    INationalityRepository Nationality { get; }
     void Save();
     Task SaveAsync();
 }

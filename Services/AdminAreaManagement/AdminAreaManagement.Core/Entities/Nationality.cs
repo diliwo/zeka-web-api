@@ -2,20 +2,15 @@
 
 namespace AdminAreaManagement.Core.Entities;
 
-public class City : Entity
+public class Nationality : Entity
 {
     public string Name { get; set; }
-    public string Country { get; set; }
 
-    public City() { }
-    public City(string name, string country)
+    public Nationality(string name)
     {
-        if (string.IsNullOrEmpty(name))
-        {
+        if(name == null) 
             throw new ArgumentNullException(nameof(Name));
-        }
 
         Name = name;
-        Country = country;
     }
 }
