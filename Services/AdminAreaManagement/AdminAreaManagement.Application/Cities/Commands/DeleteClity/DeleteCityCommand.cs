@@ -7,7 +7,7 @@ namespace AdminAreaManagement.Application.Cities.Commands.DeleteClity
 {
     public class DeleteCityCommand : IRequest<Unit>
     {
-        public int CityId { get; set; }
+        public int Id { get; set; }
 
         public class DeleteCityCommandHandler : IRequestHandler<DeleteCityCommand, Unit>
         {
@@ -19,7 +19,7 @@ namespace AdminAreaManagement.Application.Cities.Commands.DeleteClity
             }
             public async Task<Unit> Handle(DeleteCityCommand request, CancellationToken cancellationToken)
             {
-                City entity = _repository.City.GetById(request.CityId);
+                City entity = _repository.City.GetById(request.Id);
 
                 if (entity != null)
                 {
@@ -36,7 +36,7 @@ namespace AdminAreaManagement.Application.Cities.Commands.DeleteClity
                 }
                 else
                 {
-                    throw new NotFoundException(nameof(City), request.CityId);
+                    throw new NotFoundException(nameof(City), request.Id);
                 }
 
                 return Unit.Value;

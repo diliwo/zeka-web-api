@@ -12,7 +12,7 @@ namespace AdminAreaManagement.Application.Nationalities.Commands.DeleteNationali
         {
             _repository = repository;
 
-            RuleFor(v => v.NationalityId)
+            RuleFor(v => v.Id)
                 .NotEmpty().WithMessage("NationalityId is required.");
         }
     }

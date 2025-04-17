@@ -7,7 +7,7 @@ namespace AdminAreaManagement.Application.Nationalities.Commands.DeleteNationali
 {
     public class DeleteNationalityCommand : IRequest<Unit>
     {
-        public int NationalityId { get; set; }
+        public int Id{ get; set; }
 
         public class DeleteCityCommandHandler : IRequestHandler<DeleteNationalityCommand, Unit>
         {
@@ -19,7 +19,7 @@ namespace AdminAreaManagement.Application.Nationalities.Commands.DeleteNationali
             }
             public async Task<Unit> Handle(DeleteNationalityCommand request, CancellationToken cancellationToken)
             {
-                Nationality entity = _repository.Nationality.GetById(request.NationalityId);
+                Nationality entity = _repository.Nationality.GetById(request.Id);
 
                 if (entity != null)
                 {
@@ -36,7 +36,7 @@ namespace AdminAreaManagement.Application.Nationalities.Commands.DeleteNationali
                 }
                 else
                 {
-                    throw new NotFoundException(nameof(City), request.NationalityId);
+                    throw new NotFoundException(nameof(City), request.Id);
                 }
 
                 return Unit.Value;
