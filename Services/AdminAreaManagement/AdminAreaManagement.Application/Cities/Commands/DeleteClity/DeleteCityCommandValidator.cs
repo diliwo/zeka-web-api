@@ -12,7 +12,7 @@ namespace AdminAreaManagement.Application.Cities.Commands.DeleteClity
         {
             _repository = repository;
 
-            RuleFor(v => v.CityId)
+            RuleFor(v => v.Id)
                 .NotEmpty().WithMessage("CityId is required.");
         }
     }

@@ -8,7 +8,6 @@ namespace AdminAreaManagement.Application.Cities.Queries
     {
         public string Name { get; set; }
         public string Country { get; set; }
-        public string CountryDemonym { get; set; }
 
         public void Mapping(Profile profile)
         {
