@@ -330,6 +330,34 @@
       ],
       "UpstreamPathTemplate": "/partners/{id}",
       "UpstreamHttpMethod": [ "DELETE" ]
+    },
+    {
+      //Cities
+      "DownstreamPathTemplate": "/api/cities?{url}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5102"
+        }
+      ],
+      "UpstreamPathTemplate": "/cities?{url}",
+      "UpstreamHttpMethod": [ "GET" ],
+      "FileCacheOptions": { "TtlSeconds": 30 }
+    },
+    {
+      //Nationalities
+      "DownstreamPathTemplate": "/api/nationalities?{url}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "host.docker.internal",
+          "Port": "5102"
+        }
+      ],
+      "UpstreamPathTemplate": "/nationalities?{url}",
+      "UpstreamHttpMethod": [ "GET" ],
+      "FileCacheOptions": { "TtlSeconds": 30 }
     }
   ],
   "GlobalConfiguration": {

@@ -22,10 +22,7 @@ namespace ClientManagement.Application.Clients.Commands.AddClient
         public string Email { get; set; }
         public string Phone { get; set; }
         public string MobilePhone { get; set; }
-        public string NativeLanguage { get; set; }
-        public string ContactLanguage { get; set; }
         public Address Address { get; set; }
-        public string SocialWorker { get; set; }
 
         public class AddClientCommandHandler : IRequestHandler<AddClientCommand, int>
         {
@@ -53,10 +50,10 @@ namespace ClientManagement.Application.Clients.Commands.AddClient
                     new Email(request.Email),
                     new Phone(request.Phone),
                     new Phone(request.MobilePhone),
-                    new Language(request.NativeLanguage),
-                    new Language(request.ContactLanguage),
+                    new Language("English"),
+                    new Language("English"),
                     request.Address,
-                    request.SocialWorker);
+                   "Helen");
 
                 _repository.Client.Persist(client);
 

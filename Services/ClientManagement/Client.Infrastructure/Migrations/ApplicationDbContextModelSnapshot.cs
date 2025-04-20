@@ -230,6 +230,7 @@ namespace ClientManagement.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Nationality")
+                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("PlaceOfBirth")
@@ -737,61 +738,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.ToTable("SchoolRegistrations");
                 });
 
-            modelBuilder.Entity("ClientManagement.Core.Entities.SocialWorker", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("Created")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("FirstName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("LastModified")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("LastModifiedBy")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("LastName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<bool>("Softdelete")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("TeamAcronym")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("TeamName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("TenantName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("SocialWorker");
-                });
-
-            modelBuilder.Entity("ClientManagement.Core.Entities.Support", b =>
+            modelBuilder.Entity("ClientManagement.Core.Entities.SocialCase", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -845,6 +792,60 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.HasIndex("SocialWorkerId");
 
                     b.ToTable("Supports");
+                });
+
+            modelBuilder.Entity("ClientManagement.Core.Entities.SocialWorker", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("Created")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("LastModified")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastModifiedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Softdelete")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("TeamAcronym")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TeamName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SocialWorker");
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.Training", b =>
@@ -1097,23 +1098,17 @@ namespace ClientManagement.Infrastructure.Migrations
                                 .HasForeignKey("ClientId");
                         });
 
-                    b.Navigation("Address")
-                        .IsRequired();
+                    b.Navigation("Address");
 
-                    b.Navigation("ContactLanguage")
-                        .IsRequired();
+                    b.Navigation("ContactLanguage");
 
-                    b.Navigation("Email")
-                        .IsRequired();
+                    b.Navigation("Email");
 
-                    b.Navigation("MobilePhone")
-                        .IsRequired();
+                    b.Navigation("MobilePhone");
 
-                    b.Navigation("NativeLanguage")
-                        .IsRequired();
+                    b.Navigation("NativeLanguage");
 
-                    b.Navigation("Phone")
-                        .IsRequired();
+                    b.Navigation("Phone");
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.MonitoringReport", b =>
@@ -1214,7 +1209,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Navigation("TrainingType");
                 });
 
-            modelBuilder.Entity("ClientManagement.Core.Entities.Support", b =>
+            modelBuilder.Entity("ClientManagement.Core.Entities.SocialCase", b =>
                 {
                     b.HasOne("ClientManagement.Core.Entities.Client", "Client")
                         .WithMany("Supports")
