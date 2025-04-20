@@ -3,6 +3,7 @@ using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.Supports.Queries;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Enums;
+using ClientManagement.Core.ValueObjects;
 
 namespace ClientManagement.Application.Clients.Queries.GetClientDetail
 {
@@ -27,7 +28,7 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
         public DateTime? SupportEndDate { get; set; }
         public string NativeLanguage { get; set; }
         public string ContactLanguage { get; set; }
-        public string Address { get; set; }
+        public Address Address { get; set; }
         public int Age { get; set; }
         public string SocialWorkerName { get; set; }
         public IList<SupportDto> Supports { get; set; } = new List<SupportDto>();
@@ -49,14 +50,6 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
                 .ForMember(b => b.CivilStatus, opt => opt.MapFrom(s => (int)s.CivilStatus))
                 .ForMember(b => b.Gender, opt => opt.MapFrom(e => (int)e.Gender))
                 .ForMember(b => b.ClientId, opt => opt.MapFrom(e => e.Id))
-                .ForMember(b => b.Address,
-                    opt =>
-                        opt.MapFrom(e =>
-                            !String.IsNullOrEmpty(e.Address.Street)
-                                ? e.Address.Street + (e.Address.Number != "0" ? " " + e.Address.Number + ", " : "") +
-                                  (e.Address.PostalCode != "0" ? e.Address.PostalCode + " " : "") +
-                                  e.Address.City
-                                : "Néant"))
                 .ForMember(b => b.NativeLanguage, opt => opt.MapFrom(e => e.NativeLanguage.SpokenLanguage))
                 .ForMember(b => b.ContactLanguage, opt => opt.MapFrom(e => e.ContactLanguage.SpokenLanguage))
                 .ForMember(b => b.SupportStaffMemberName,

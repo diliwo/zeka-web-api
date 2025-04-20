@@ -16,14 +16,14 @@ namespace ClientManagement.Core.Entities
         public Gender Gender { get; set; }
         public DateTime BirthDate { get; set; }
         public string PlaceOfBirth { get; set; }
-        public string? Nationality { get; set; }
+        public string Nationality { get; set; }
         public string Ssn { get; set; }
-        public Email Email { get; set; }
-        public Phone Phone { get; set; }
-        public Phone MobilePhone { get; set; }
-        public ValueObjects.Language NativeLanguage { get; set; }
-        public ValueObjects.Language ContactLanguage { get; set; }
-        public Address Address { get; set; }
+        public Email? Email { get; set; }
+        public Phone? Phone { get; set; }
+        public Phone? MobilePhone { get; set; }
+        public ValueObjects.Language? NativeLanguage { get; set; }
+        public ValueObjects.Language? ContactLanguage { get; set; }
+        public Address? Address { get; set; }
         public string SocialWorkerName { get; set; }
         public virtual IList<SocialCase> Supports { get; set; } = new List<SocialCase>();
         public virtual IList<SchoolRegistration> SchoolRegistrations { get; set; } = new List<SchoolRegistration>();

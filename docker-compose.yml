@@ -1,5 +1,3 @@
-version: '3.4'
-
 services:
   # adminareamanagement.api:
   #   image: diliwo/adminareamanagementapi
@@ -14,12 +12,12 @@ services:
       context: .
       dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile
 
-  authmanagement.api:
-    image: diliwo/authmanagementapi
-    container_name: zekaauthapi
-    build:
-        context: .
-        dockerfile: Services/AuthManagement/AuthManagement.API/Dockerfile
+  # authmanagement.api:
+  #   image: diliwo/authmanagementapi
+  #   container_name: zekaauthapi
+  #   build:
+  #       context: .
+  #       dockerfile: Services/AuthManagement/AuthManagement.API/Dockerfile
 
 # volumes:
 #     postgres_data:

@@ -6,6 +6,7 @@ namespace AdminAreaManagement.Application.Cities.Queries
 {
     public class CityDto : IMapFrom<City>
     {
+        public int Id { get; set; }
         public string Name { get; set; }
         public string Country { get; set; }
 
