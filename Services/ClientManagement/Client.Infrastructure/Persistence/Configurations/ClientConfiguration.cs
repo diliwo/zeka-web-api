@@ -39,6 +39,8 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
             //    .Ignore(b => b.Candidates);
             builder
                 .Ignore(b => b.Registrations);
+            builder
+                .HasQueryFilter(c => c.Softdelete);
         }
     }
 }

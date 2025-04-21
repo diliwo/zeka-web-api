@@ -14,6 +14,7 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
             builder.Property(m => m.Action)
                 .IsRequired()
                 .HasMaxLength(30);
+
         }
     }
 }

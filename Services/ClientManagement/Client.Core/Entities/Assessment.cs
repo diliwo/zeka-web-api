@@ -6,8 +6,6 @@ namespace ClientManagement.Core.Entities
     public class Assessment : Entity
     {
         public Boolean IsFinalized { get; set; } = false;
-        public int ClientId { get; set; }
-        public Client Client { get; set; }
         public string UserName { get; set; }
         public string PersonalSituationFamily { get; set; }
         public string PersonalSituationHousing { get; set; }
@@ -84,7 +82,6 @@ namespace ClientManagement.Core.Entities
         )
         {
             IsFinalized = isFinalized;
-            Client = client;
             UserName = userName;
             PersonalSituationFamily = personalSituationFamily;
             PersonalSituationHousing = personalSituationHousing;

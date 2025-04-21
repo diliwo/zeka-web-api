@@ -119,9 +119,9 @@ namespace Domain.UnitTests
         }
 
         [Fact]
-        public void ListOfSupportshouldNotBeNull()
+        public void ListOfCaseshouldNotBeNull()
         {
-            Assert.NotNull(clientTest.Supports);
+            Assert.NotNull(clientTest.SocialCases);
         }
 
         [Fact]

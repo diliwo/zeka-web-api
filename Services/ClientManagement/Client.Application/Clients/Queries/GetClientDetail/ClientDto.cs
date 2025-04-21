@@ -54,22 +54,22 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
                 .ForMember(b => b.ContactLanguage, opt => opt.MapFrom(e => e.ContactLanguage.SpokenLanguage))
                 .ForMember(b => b.SupportStaffMemberName,
                     opt => opt.MapFrom(e =>
-                        e.Supports.Where(b => b.Softdelete != true).Count() > 0
-                            ? e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().SocialWorker
+                        e.SocialCases.Where(b => b.Softdelete != true).Count() > 0
+                            ? e.SocialCases.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().SocialWorker
                                 .FullName
                             : string.Empty))
                 .ForMember(b => b.SupportStaffMemberService,
                     opt => opt.MapFrom(e =>
-                        e.Supports.Where(b => b.Softdelete != true).Count() > 0
-                            ? ("(" + e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().SocialWorker
+                        e.SocialCases.Where(b => b.Softdelete != true).Count() > 0
+                            ? ("(" + e.SocialCases.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().SocialWorker
                                 .TeamAcronym + ")")
                             : string.Empty))
                 .ForMember(b => b.SupportStartDate,
                     opt => opt.MapFrom(
-                        e => e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).First().StartDate))
+                        e => e.SocialCases.Where(b => b.Softdelete != true).OrderBy(d => d.Created).First().StartDate))
                 .ForMember(b => b.SupportEndDate,
                     opt => opt.MapFrom(e =>
-                        e.Supports.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().EndDate))
+                        e.SocialCases.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().EndDate))
                 //.ForMember(c => c.Candidacies,
                 //    opt => opt.MapFrom(e => e.Candidacies.Where(c => c.Softdelete != true)))
                 .ForMember(b => b.Phone,

@@ -37,7 +37,7 @@ namespace ClientManagement.Infrastructure.Persistence
         public IQueryable<Assessment> GetAssessments(int ClientId)
         {
             return from assessments in _context.Assessments 
-                where (assessments.ClientId == ClientId && assessments.Softdelete != true) select assessments;
+                where (assessments.Id == ClientId && assessments.Softdelete != true) select assessments;
         }
 
         public Assessment GetAssessmentById(int id)
@@ -89,7 +89,7 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public async Task<bool> AreAllAssessmentsNotFinalized(int ClientId)
         {
-            var bilans = _context.Assessments.Where(b => b.ClientId == ClientId && b.Softdelete != true);
+            var bilans = _context.Assessments.Where(b => b.Id == ClientId && b.Softdelete != true);
 
             if (bilans == null)
             {

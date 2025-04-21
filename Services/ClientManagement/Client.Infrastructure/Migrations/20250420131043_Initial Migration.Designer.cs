@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ClientManagement.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20250420073010_Initial Migration")]
+    [Migration("20250420131043_Initial Migration")]
     partial class InitialMigration
     {
         /// <inheritdoc />
@@ -33,9 +33,6 @@ namespace ClientManagement.Infrastructure.Migrations
                         .HasColumnName("AssessmentId");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ClientId")
-                        .HasColumnType("integer");
 
                     b.Property<DateTime>("Created")
                         .HasColumnType("timestamp without time zone");
@@ -187,8 +184,6 @@ namespace ClientManagement.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ClientId");
 
                     b.ToTable("Assessments");
                 });
@@ -557,7 +552,8 @@ namespace ClientManagement.Infrastructure.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("ProfessionnalExperienceId");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
@@ -676,7 +672,8 @@ namespace ClientManagement.Infrastructure.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("SchoolRegistrationId");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
@@ -745,7 +742,8 @@ namespace ClientManagement.Infrastructure.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("SchoolRegistrationId");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
@@ -968,17 +966,6 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("TrainingType");
-                });
-
-            modelBuilder.Entity("ClientManagement.Core.Entities.Assessment", b =>
-                {
-                    b.HasOne("ClientManagement.Core.Entities.Client", "Client")
-                        .WithMany("Assessments")
-                        .HasForeignKey("ClientId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Client");
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.Client", b =>
@@ -1215,7 +1202,7 @@ namespace ClientManagement.Infrastructure.Migrations
             modelBuilder.Entity("ClientManagement.Core.Entities.SocialCase", b =>
                 {
                     b.HasOne("ClientManagement.Core.Entities.Client", "Client")
-                        .WithMany("Supports")
+                        .WithMany("SocialCases")
                         .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -1249,15 +1236,13 @@ namespace ClientManagement.Infrastructure.Migrations
 
             modelBuilder.Entity("ClientManagement.Core.Entities.Client", b =>
                 {
-                    b.Navigation("Assessments");
-
                     b.Navigation("MonitoringReports");
 
                     b.Navigation("ProfessionnalExpectations");
 
                     b.Navigation("SchoolRegistrations");
 
-                    b.Navigation("Supports");
+                    b.Navigation("SocialCases");
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.MonitoringAction", b =>

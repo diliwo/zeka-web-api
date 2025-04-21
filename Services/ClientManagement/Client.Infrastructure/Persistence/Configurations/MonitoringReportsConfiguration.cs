@@ -31,7 +31,10 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
                 .UsePropertyAccessMode(PropertyAccessMode.Property)
                 .HasMaxLength(6);
 
-            builder.Property(q => q.ActionComment);
+            builder
+                .Property(q => q.ActionComment);
+            builder
+                .HasQueryFilter(a => !a.Client.Softdelete);
         }
     }
 }
