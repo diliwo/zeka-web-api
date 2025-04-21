@@ -195,7 +195,6 @@ namespace ClientManagement.Infrastructure.Persistence
                     ClientFirstName = x.Client.FirstName,
                     ClientNiss = x.Client.Ssn,
                     ClientPhoneNumber = x.Client.Phone.PhoneNumber,
-                    Projects = x.Client.Assessments.OrderBy(b => b.Created).Last(b => !b.Softdelete).BilanProfessions.Select(p => p.Profession.Name),
                     LastAction = ((DateTime.Compare(x.Client.SchoolRegistrations.OrderBy(s => s.Created).Last(s => !s.Softdelete).Created,
                                       x.Client.ProfessionnalExpectations.OrderBy(c => c.Created).Last(c => !c.Softdelete).Created) >= 0))
                         ? $"[Training] : {x.Client.SchoolRegistrations.OrderBy(s => s.Created).Last(s => !s.Softdelete).Training.Name}"

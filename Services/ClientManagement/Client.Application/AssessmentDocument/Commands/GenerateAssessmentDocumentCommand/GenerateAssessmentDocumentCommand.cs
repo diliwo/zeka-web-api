@@ -59,7 +59,7 @@ namespace ClientManagement.Application.AssessmentDocument.Commands.GenerateAsses
                         throw new NotFoundException(nameof(Assessment), request.AssessmentId);
                     AssessmentReportModel.Assessment = Assessment;
 
-                    Core.Entities.Client client = _repository.Client.Get(Assessment.ClientId,true);
+                    Core.Entities.Client client = _repository.Client.Get(15,true);
                     if (client == null)
                         throw new NotFoundException(nameof(Client), request.AssessmentId);
                     AssessmentReportModel.Client = client;

@@ -14,6 +14,8 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
                 .HasOne(s => s.Assessment)
                 .WithMany(r => r.BilanProfessions)
                 .HasForeignKey(e => e.AssessmentId);
+            builder
+                .HasQueryFilter(a => !a.Assessment.Softdelete);
         }
     }
 }

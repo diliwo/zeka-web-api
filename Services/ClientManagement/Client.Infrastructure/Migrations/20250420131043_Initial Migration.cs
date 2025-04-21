@@ -13,6 +13,58 @@ namespace ClientManagement.Infrastructure.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
+                name: "Assessments",
+                columns: table => new
+                {
+                    AssessmentId = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    IsFinalized = table.Column<bool>(type: "boolean", nullable: false),
+                    UserName = table.Column<string>(type: "text", nullable: false),
+                    PersonalSituationFamily = table.Column<string>(type: "text", nullable: false),
+                    PersonalSituationHousing = table.Column<string>(type: "text", nullable: false),
+                    PersonalSituationHealth = table.Column<string>(type: "text", nullable: false),
+                    PersonalSituationFinancialSituation = table.Column<string>(type: "text", nullable: false),
+                    PersonalSituationAdministrativeStatus = table.Column<string>(type: "text", nullable: false),
+                    LanguageTrainingNote = table.Column<string>(type: "text", nullable: false),
+                    TrainingDifficulty = table.Column<string>(type: "text", nullable: false),
+                    TrainingOpinion = table.Column<string>(type: "text", nullable: false),
+                    TrainingFacilitiesAndStrengths = table.Column<string>(type: "text", nullable: false),
+                    TrainingPersonalImprovments = table.Column<string>(type: "text", nullable: false),
+                    TrainingConsultantNote = table.Column<string>(type: "text", nullable: false),
+                    TrainingConsultantLanguageLearningNote = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExperienceProblemEncountered = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExperienceWhatsRewarding = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExperienceKnowledge = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExperiencePointToImprove = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExperienceNote = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExpectationWorkingConditionWhatIWant = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExpectationWorkingConditionWhatIDontWant = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExpectationWorkingConditionWhatMotivatesMe = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExpectationWorkingConditionConsultantNote = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExpectationShortTermA = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExpectationShortTermB = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExpectationMediumTerm = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExpectationLongTerm = table.Column<string>(type: "text", nullable: false),
+                    ProfessionalExpectationNlOralLanguageScore = table.Column<int>(type: "integer", nullable: false),
+                    ProfessionalExpectationNlWrittentLanguageScore = table.Column<int>(type: "integer", nullable: false),
+                    ProfessionalExpectationFrOralLanguageScore = table.Column<int>(type: "integer", nullable: false),
+                    ProfessionalExpectationFrWrittenLanguageScore = table.Column<int>(type: "integer", nullable: false),
+                    ProfessionalExpectationItKnowledgeEmail = table.Column<bool>(type: "boolean", nullable: false),
+                    ProfessionalExpectationItKnowledgeInternet = table.Column<bool>(type: "boolean", nullable: false),
+                    ProfessionalExpectationItKnowledgeWord = table.Column<bool>(type: "boolean", nullable: false),
+                    CreatedBy = table.Column<string>(type: "text", nullable: false),
+                    Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    LastModifiedBy = table.Column<string>(type: "text", nullable: false),
+                    LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Assessments", x => x.AssessmentId);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Clients",
                 columns: table => new
                 {
@@ -208,69 +260,10 @@ namespace ClientManagement.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Assessments",
-                columns: table => new
-                {
-                    AssessmentId = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    IsFinalized = table.Column<bool>(type: "boolean", nullable: false),
-                    ClientId = table.Column<int>(type: "integer", nullable: false),
-                    UserName = table.Column<string>(type: "text", nullable: false),
-                    PersonalSituationFamily = table.Column<string>(type: "text", nullable: false),
-                    PersonalSituationHousing = table.Column<string>(type: "text", nullable: false),
-                    PersonalSituationHealth = table.Column<string>(type: "text", nullable: false),
-                    PersonalSituationFinancialSituation = table.Column<string>(type: "text", nullable: false),
-                    PersonalSituationAdministrativeStatus = table.Column<string>(type: "text", nullable: false),
-                    LanguageTrainingNote = table.Column<string>(type: "text", nullable: false),
-                    TrainingDifficulty = table.Column<string>(type: "text", nullable: false),
-                    TrainingOpinion = table.Column<string>(type: "text", nullable: false),
-                    TrainingFacilitiesAndStrengths = table.Column<string>(type: "text", nullable: false),
-                    TrainingPersonalImprovments = table.Column<string>(type: "text", nullable: false),
-                    TrainingConsultantNote = table.Column<string>(type: "text", nullable: false),
-                    TrainingConsultantLanguageLearningNote = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExperienceProblemEncountered = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExperienceWhatsRewarding = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExperienceKnowledge = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExperiencePointToImprove = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExperienceNote = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExpectationWorkingConditionWhatIWant = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExpectationWorkingConditionWhatIDontWant = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExpectationWorkingConditionWhatMotivatesMe = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExpectationWorkingConditionConsultantNote = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExpectationShortTermA = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExpectationShortTermB = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExpectationMediumTerm = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExpectationLongTerm = table.Column<string>(type: "text", nullable: false),
-                    ProfessionalExpectationNlOralLanguageScore = table.Column<int>(type: "integer", nullable: false),
-                    ProfessionalExpectationNlWrittentLanguageScore = table.Column<int>(type: "integer", nullable: false),
-                    ProfessionalExpectationFrOralLanguageScore = table.Column<int>(type: "integer", nullable: false),
-                    ProfessionalExpectationFrWrittenLanguageScore = table.Column<int>(type: "integer", nullable: false),
-                    ProfessionalExpectationItKnowledgeEmail = table.Column<bool>(type: "boolean", nullable: false),
-                    ProfessionalExpectationItKnowledgeInternet = table.Column<bool>(type: "boolean", nullable: false),
-                    ProfessionalExpectationItKnowledgeWord = table.Column<bool>(type: "boolean", nullable: false),
-                    CreatedBy = table.Column<string>(type: "text", nullable: false),
-                    Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    LastModifiedBy = table.Column<string>(type: "text", nullable: false),
-                    LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    TenantName = table.Column<string>(type: "text", nullable: false),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Assessments", x => x.AssessmentId);
-                    table.ForeignKey(
-                        name: "FK_Assessments_Clients_ClientId",
-                        column: x => x.ClientId,
-                        principalTable: "Clients",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "ProfessionnalExperience",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "integer", nullable: false)
+                    ProfessionnalExperienceId = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     StartDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     EndDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
@@ -292,7 +285,7 @@ namespace ClientManagement.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_ProfessionnalExperience", x => x.Id);
+                    table.PrimaryKey("PK_ProfessionnalExperience", x => x.ProfessionnalExperienceId);
                     table.ForeignKey(
                         name: "FK_ProfessionnalExperience_Clients_ClientId",
                         column: x => x.ClientId,
@@ -305,6 +298,43 @@ namespace ClientManagement.Infrastructure.Migrations
                         principalTable: "NatureOfContract",
                         principalColumn: "NatureOfContractId",
                         onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ProfessionalAssessments",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    AssessmentId = table.Column<int>(type: "integer", nullable: false),
+                    ProfessionId = table.Column<int>(type: "integer", nullable: true),
+                    AcquiredKnowledge = table.Column<string>(type: "text", nullable: false),
+                    AcquiredBehaviouralKnowledge = table.Column<string>(type: "text", nullable: false),
+                    AcquiredKnowHow = table.Column<string>(type: "text", nullable: false),
+                    KnowledgeToDevelop = table.Column<string>(type: "text", nullable: false),
+                    BehaviouralKnowledgeToDevelop = table.Column<string>(type: "text", nullable: false),
+                    KnowHowToDevelop = table.Column<string>(type: "text", nullable: false),
+                    CreatedBy = table.Column<string>(type: "text", nullable: false),
+                    Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    LastModifiedBy = table.Column<string>(type: "text", nullable: false),
+                    LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ProfessionalAssessments", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_ProfessionalAssessments_Assessments_AssessmentId",
+                        column: x => x.AssessmentId,
+                        principalTable: "Assessments",
+                        principalColumn: "AssessmentId",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_ProfessionalAssessments_Profession_ProfessionId",
+                        column: x => x.ProfessionId,
+                        principalTable: "Profession",
+                        principalColumn: "Id");
                 });
 
             migrationBuilder.CreateTable(
@@ -353,7 +383,7 @@ namespace ClientManagement.Infrastructure.Migrations
                 name: "Supports",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "integer", nullable: false)
+                    SchoolRegistrationId = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     StartDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     EndDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
@@ -370,7 +400,7 @@ namespace ClientManagement.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Supports", x => x.Id);
+                    table.PrimaryKey("PK_Supports", x => x.SchoolRegistrationId);
                     table.ForeignKey(
                         name: "FK_Supports_Clients_ClientId",
                         column: x => x.ClientId,
@@ -412,47 +442,10 @@ namespace ClientManagement.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "ProfessionalAssessments",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    AssessmentId = table.Column<int>(type: "integer", nullable: false),
-                    ProfessionId = table.Column<int>(type: "integer", nullable: true),
-                    AcquiredKnowledge = table.Column<string>(type: "text", nullable: false),
-                    AcquiredBehaviouralKnowledge = table.Column<string>(type: "text", nullable: false),
-                    AcquiredKnowHow = table.Column<string>(type: "text", nullable: false),
-                    KnowledgeToDevelop = table.Column<string>(type: "text", nullable: false),
-                    BehaviouralKnowledgeToDevelop = table.Column<string>(type: "text", nullable: false),
-                    KnowHowToDevelop = table.Column<string>(type: "text", nullable: false),
-                    CreatedBy = table.Column<string>(type: "text", nullable: false),
-                    Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    LastModifiedBy = table.Column<string>(type: "text", nullable: false),
-                    LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    TenantName = table.Column<string>(type: "text", nullable: false),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ProfessionalAssessments", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_ProfessionalAssessments_Assessments_AssessmentId",
-                        column: x => x.AssessmentId,
-                        principalTable: "Assessments",
-                        principalColumn: "AssessmentId",
-                        onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_ProfessionalAssessments_Profession_ProfessionId",
-                        column: x => x.ProfessionId,
-                        principalTable: "Profession",
-                        principalColumn: "Id");
-                });
-
-            migrationBuilder.CreateTable(
                 name: "SchoolRegistrations",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "integer", nullable: false)
+                    SchoolRegistrationId = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     TrainingId = table.Column<int>(type: "integer", nullable: false),
                     SchoolId = table.Column<int>(type: "integer", nullable: false),
@@ -472,7 +465,7 @@ namespace ClientManagement.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_SchoolRegistrations", x => x.Id);
+                    table.PrimaryKey("PK_SchoolRegistrations", x => x.SchoolRegistrationId);
                     table.ForeignKey(
                         name: "FK_SchoolRegistrations_Clients_ClientId",
                         column: x => x.ClientId,
@@ -498,11 +491,6 @@ namespace ClientManagement.Infrastructure.Migrations
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Assessments_ClientId",
-                table: "Assessments",
-                column: "ClientId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Languages_Name",
@@ -624,10 +612,10 @@ namespace ClientManagement.Infrastructure.Migrations
                 name: "Training");
 
             migrationBuilder.DropTable(
-                name: "SocialWorker");
+                name: "Clients");
 
             migrationBuilder.DropTable(
-                name: "Clients");
+                name: "SocialWorker");
 
             migrationBuilder.DropTable(
                 name: "TrainingField");

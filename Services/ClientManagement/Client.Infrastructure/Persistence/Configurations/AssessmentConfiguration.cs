@@ -10,10 +10,6 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
         {
             builder
                 .Property(r => r.Id).HasColumnName("AssessmentId");
-            builder
-                .HasOne(s => s.Client)
-                .WithMany(r => r.Assessments)
-                .HasForeignKey(e => e.ClientId);
             builder.Ignore(c => c.Professions);
         }
     }

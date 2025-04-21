@@ -35,7 +35,7 @@ namespace ClientManagement.Application.Supports.Queries
                         opt.MapFrom(e =>  e.Note.Length > 0 ? true : false))
                 .ForMember(l => l.IsLastSupport,
                     opt =>
-                        opt.MapFrom(s => (s.Client.Supports.Where(s => s.Softdelete != true).OrderBy(c => c.Id).Last().Id == s.Id) ? true : false))
+                        opt.MapFrom(s => (s.Client.SocialCases.Where(s => s.Softdelete != true).OrderBy(c => c.Id).Last().Id == s.Id) ? true : false))
                 .ForMember(r => r.ReasonOfClosure,
                     opt => opt.MapFrom(e => e.ReasonOfClosure));
         }

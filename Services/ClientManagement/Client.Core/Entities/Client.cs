@@ -25,10 +25,9 @@ namespace ClientManagement.Core.Entities
         public ValueObjects.Language? ContactLanguage { get; set; }
         public Address? Address { get; set; }
         public string SocialWorkerName { get; set; }
-        public virtual IList<SocialCase> Supports { get; set; } = new List<SocialCase>();
+        public virtual IList<SocialCase> SocialCases { get; set; } = new List<SocialCase>();
         public virtual IList<SchoolRegistration> SchoolRegistrations { get; set; } = new List<SchoolRegistration>();
         public virtual IList<ProfessionnalExperience> ProfessionnalExpectations { get; set; } = new List<ProfessionnalExperience>();
-        public virtual IList<Assessment> Assessments { get; set; } = new List<Assessment>();
         public virtual IList<MonitoringReport> MonitoringReports { get; set; } = new List<MonitoringReport>();
         public IEnumerable<SchoolRegistration> Registrations
         {

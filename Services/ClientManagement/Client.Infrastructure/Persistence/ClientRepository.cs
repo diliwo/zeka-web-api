@@ -1,4 +1,5 @@
-﻿using ClientManagement.Core.Interfaces;
+﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 using LinqKit;
 using Microsoft.EntityFrameworkCore;
 
@@ -55,23 +56,23 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public async Task<List<string>> GetClientNissesAsync(bool trackChanges) => await FindAll(trackChanges).Select(n => n.Ssn).ToListAsync();
 
-        public IQueryable<ClientManagement.Core.Entities.Client> GetClientsBySearchText(string text)
+        public IQueryable<Client> GetClientsBySearchText(string text)
         {
-            var benficiaries = FindByCondition(p => p.Softdelete != true, false).AsExpandable();
+            var clients = FindAll( false).AsExpandable();
 
             if (!string.IsNullOrEmpty(text))
             {
-                var predicate = PredicateBuilder.New<ClientManagement.Core.Entities.Client>();
+                var predicate = PredicateBuilder.New<Client>();
 
                 predicate = predicate.Or(p => p.FirstName.ToLower().Contains(text.ToLower().Trim()));
                 predicate = predicate.Or(p => p.LastName.ToLower().Contains(text.ToLower().Trim()));
                 predicate = predicate.Or(p => p.Ssn.ToLower().Contains(text.ToLower().Trim()));
                 predicate = predicate.Or(p => p.ReferenceNumber.ToLower().Contains(text.ToLower().Trim()));
 
-                benficiaries = benficiaries.Where(predicate);
+                clients = clients.Where(predicate);
             }
 
-            return benficiaries;
+            return clients;
         }
     }
 }
