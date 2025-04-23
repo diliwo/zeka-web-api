@@ -2,6 +2,7 @@ using ClientManagement.API;
 using ClientManagement.Application;
 using ClientManagement.Infrastructure;
 using Zeka.Extensions.Authentication;
+using Zeka.Extensions.EventBus.RabbitMq;
 
 var builder = WebApplication.CreateBuilder(args);
 

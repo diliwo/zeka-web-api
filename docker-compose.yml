@@ -11,6 +11,14 @@ services:
      build:
       context: .
       dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile
+  
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq-host
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
 
   # authmanagement.api:
   #   image: diliwo/authmanagementapi

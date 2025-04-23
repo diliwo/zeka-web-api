@@ -1,7 +1,9 @@
 ﻿using AdminAreaManagement.Application.Common.Exceptions;
+using AdminAreaManagement.Application.Staffs.Commands.UpsertStaff.IntegrationEvents.Events;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
+using Zeka.Extensions.EventBus.Abstractions;
 
 namespace AdminAreaManagement.Application.Staffs.Commands.UpsertStaff
 {
@@ -16,11 +18,13 @@ namespace AdminAreaManagement.Application.Staffs.Commands.UpsertStaff
         public class UpsertStaffMemberCommandHandler : IRequestHandler<UpsertStaffMemberCommand, int>
         {
             private readonly IRepositoryManager _repository;
+            private readonly IEventBus _eventBus;
 
 
-            public UpsertStaffMemberCommandHandler(IRepositoryManager repository)
+            public UpsertStaffMemberCommandHandler(IRepositoryManager repository, IEventBus eventBus)
             {
                 _repository = repository;
+                _eventBus = eventBus;
             }
 
             public async Task<int> Handle(UpsertStaffMemberCommand request, CancellationToken cancellationToken)
@@ -52,6 +56,9 @@ namespace AdminAreaManagement.Application.Staffs.Commands.UpsertStaff
                 _repository.StaffMember.Persist(entity);
 
                 _repository.Save();
+
+                //We send an event to the message broker
+                _eventBus.PublishAsync(new StaffMemberUpsertEvent($"{entity.FirstName} {entity.LastName}"));
 
                 return entity.Id;
             }
