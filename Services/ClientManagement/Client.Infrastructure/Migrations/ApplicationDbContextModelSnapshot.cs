@@ -789,14 +789,15 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.HasIndex("SocialWorkerId");
 
-                    b.ToTable("Supports");
+                    b.ToTable("SocialCases");
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.SocialWorker", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("SocialWorkerId");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
@@ -809,7 +810,8 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<string>("FirstName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<DateTime?>("LastModified")
                         .HasColumnType("timestamp without time zone");
@@ -820,7 +822,8 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<string>("LastName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
@@ -839,11 +842,12 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<string>("UserName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
 
                     b.HasKey("Id");
 
-                    b.ToTable("SocialWorker");
+                    b.ToTable("SocialWorkers");
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.Training", b =>
@@ -1205,7 +1209,7 @@ namespace ClientManagement.Infrastructure.Migrations
                         .IsRequired();
 
                     b.HasOne("ClientManagement.Core.Entities.SocialWorker", "SocialWorker")
-                        .WithMany("Supports")
+                        .WithMany("SocialCases")
                         .HasForeignKey("SocialWorkerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -1251,7 +1255,7 @@ namespace ClientManagement.Infrastructure.Migrations
                 {
                     b.Navigation("MonitoringReports");
 
-                    b.Navigation("Supports");
+                    b.Navigation("SocialCases");
                 });
 #pragma warning restore 612, 618
         }

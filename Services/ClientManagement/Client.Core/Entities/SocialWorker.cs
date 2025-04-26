@@ -11,7 +11,7 @@ namespace ClientManagement.Core.Entities
         public string UserName { get; set; }
         public string TeamName { get; set; }
         public string TeamAcronym { get; set; }
-        public IList<SocialCase> Supports { get; set; } = new List<SocialCase>();
+        public IList<SocialCase> SocialCases { get; set; } = new List<SocialCase>();
         public virtual IList<MonitoringReport> MonitoringReports { get; private set; } = new List<MonitoringReport>();
         public  SocialWorker()
         {
@@ -25,7 +25,7 @@ namespace ClientManagement.Core.Entities
                 throw new ArgumentNullException(nameof(firstName));
             }
 
-            if (string.IsNullOrEmpty(teamName))
+            if (string.IsNullOrEmpty(lastName))
             {
                 throw new ArgumentNullException(nameof(lastName));
             }
@@ -33,11 +33,6 @@ namespace ClientManagement.Core.Entities
             if (string.IsNullOrEmpty(teamName))
             {
                 throw new ArgumentNullException(nameof(teamName));
-            }
-
-            if (string.IsNullOrEmpty(teamAcronym))
-            {
-                throw new ArgumentNullException(nameof(teamAcronym));
             }
 
             if (string.IsNullOrEmpty(teamAcronym))
@@ -53,18 +48,18 @@ namespace ClientManagement.Core.Entities
             FirstName = firstName ;
             LastName = lastName;
             UserName = userName;
-            TeamName = teamAcronym;
-            TeamName = teamAcronym;
+            TeamName = teamName;
+            TeamAcronym = teamAcronym;
 
         }
 
-        public void AddSupport(Client client, DateTime startDate, string? note = "")
+        public void AddSocialCase(Client client, DateTime startDate, string? note = "")
         {
-            if (Supports.Any(x => x.ClientId.Equals(client.Id) && x.IsActif))
+            if (SocialCases.Any(x => x.ClientId.Equals(client.Id) && x.IsActif))
             {
                 throw new InvalidOperationException("A support already exists for this client");
             }
-            Supports.Add(new SocialCase(client, startDate, this, note));
+            SocialCases.Add(new SocialCase(client, startDate, this, note));
         }
     }
 }

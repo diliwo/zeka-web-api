@@ -1,10 +1,10 @@
-﻿using ClientManagement.Core.Entities;
+﻿using ClientManagement.Application.Common.Helpers;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
-using ClientManagement.Infrastructure.Persistence.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
-namespace ClientManagement.Infrastructure.Services;
+namespace ClientManagement.Application.Common.Services;
 
 public class TenantService : ITenantService
 {

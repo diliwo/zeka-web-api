@@ -7,7 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!--<PackageReference Include="AutoMapper" Version="13.0.1" />-->
+	  <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.3.0" />
+	  <PackageReference Include="Zeka.Extensions.EventBus" Version="1.0.0" />
 	<PackageReference Include="AutoMapper" Version="13.0.1" />
     <PackageReference Include="DinkToPdf" Version="1.0.8" />
     <PackageReference Include="DinkToPdfCopyDependencies" Version="1.0.8" />
@@ -34,10 +35,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Client.Core\ClientManagement.Core.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Common\Helpers\" />
   </ItemGroup>
 
   <ItemGroup>

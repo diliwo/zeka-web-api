@@ -1,4 +1,5 @@
 ﻿using ClientManagement.Application.Common.Helpers;
+using ClientManagement.Application.Common.Services;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using ClientManagement.Core.ValueObjects;
