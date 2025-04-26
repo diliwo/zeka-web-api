@@ -19,7 +19,7 @@ namespace AdminAreaManagement.Application.Teams.Commands.DeleteTeam
                 {
                     bool exist = await _repository.Team.TeamHasStaffMembers(id);
                     return !exist;
-                }).OverridePropertyName("Property").WithMessage("Action impossible, des référents sont attachés à ce service !");
+                }).OverridePropertyName("Property").WithMessage("Action not allowed, cannot deleted a team that contains members");
         }
 
         //public async Task<bool> HasReferent(int id, CancellationToken cancellationToken)

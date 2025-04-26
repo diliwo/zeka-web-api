@@ -18,13 +18,14 @@ namespace ClientManagement.Infrastructure.Persistence
         public string TenantName { get => _tenantService.GetTenant()?.TenantName ?? String.Empty; }
 
         public DbSet<Client> Clients { get; set; }
-        public DbSet<SocialCase> Supports { get; set; }
+        public DbSet<SocialCase> SocialCases { get; set; }
         public DbSet<SchoolRegistration> SchoolRegistrations { get; set; }
         public DbSet<Assessment> Assessments { get; set; }
         public DbSet<MonitoringReport> MonitoringReports { get; set; }
         public DbSet<MonitoringAction> MonitoringActions { get; set; }
         public DbSet<ProfessionalAssessment> ProfessionalAssessments { get; set; }
         public DbSet<Language> Languages { get; set; }
+        public DbSet<SocialWorker> SocialWorkers { get; set; }
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
@@ -37,6 +38,9 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
         {
+            var conn = this.Database.GetDbConnection().ConnectionString;
+            Console.WriteLine($"Connection string: {conn}");
+
             foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Entity> entry in ChangeTracker.Entries<Entity>())
             {
                 switch (entry.State)

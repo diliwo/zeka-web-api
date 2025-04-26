@@ -1,4 +1,5 @@
-﻿using ClientManagement.Core.Interfaces;
+﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Interfaces;
 
 namespace ClientManagement.Infrastructure.Persistence;
 /**
@@ -39,6 +40,8 @@ public sealed class RepositoryManager : IRepositoryManager
         _professionnalExperienceRepository =
             new Lazy<IProfessionnalExperienceRepository>(() =>
                 new ProfessionnalExperienceRepository(applicationDbContext));
+        _socialWorkerRepository = 
+            new Lazy<ISocialWorkerRepository>(() => new SocialWorkerRepository(applicationDbContext));
     }
 
     public IClientRepository Client => _clientRepository.Value;

@@ -7,7 +7,7 @@ namespace ClientManagement.Application.Common.Interfaces
     {
         public DbSet<Client> Clients { get; set; }
         public DbSet<SocialCase> Supports { get; set; }
-        public DbSet<SocialWorker> SocialWorkers { get; set; }
+        public DbSet<Core.Entities.SocialWorker> SocialWorkers { get; set; }
 
         Task<int> SaveChangesAsync(CancellationToken cancellationToken);
     }

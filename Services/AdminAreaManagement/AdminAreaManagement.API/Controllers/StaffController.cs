@@ -1,6 +1,7 @@
 ﻿using AdminAreaManagement.Application.Common.Models;
+using AdminAreaManagement.Application.Staffs.Commands.CreateStaffmember;
 using AdminAreaManagement.Application.Staffs.Commands.DeleteStaff;
-using AdminAreaManagement.Application.Staffs.Commands.UpsertStaff;
+using AdminAreaManagement.Application.Staffs.Commands.UpdateStaffmember;
 using AdminAreaManagement.Application.Staffs.Queries;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,14 +18,24 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
-        public async Task<IActionResult> Upsert(UpsertStaffMemberCommand command)
+        public async Task<IActionResult> Upsert(CreateStaffMemberCommand command)
         {
             var id = await Mediator.Send(command);
 
             return Ok(id);
         }
 
-        
+        [HttpPut]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesDefaultResponseType]
+        public async Task<IActionResult> Upsert(UpdateStaffMemberCommand command)
+        {
+            var id = await Mediator.Send(command);
+
+            return Ok(id);
+        }
+
+
         [HttpDelete("{id}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]

@@ -1,6 +1,6 @@
 ﻿using ClientManagement.Core.Entities;
 
-namespace ClientManagement.Infrastructure.Persistence.Helpers;
+namespace ClientManagement.Application.Common.Helpers;
 
 public class TenantSettings
 {

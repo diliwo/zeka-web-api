@@ -13,7 +13,7 @@ namespace ClientManagement.Application.Common.Services
             _adminareaProtoServiceClient = adminareaProtoServiceClient;
         }
 
-        public async Task<SocialWorker> GetSocialWorkerAsync(int socialWorkerId)
+        public async Task<Adminarea.Grpc.Protos.SocialWorker> GetSocialWorkerAsync(int socialWorkerId)
         {
             var socialWorkerRequest = new GetSocialWorkerRequest { SocialWorkerId = socialWorkerId };
             return await _adminareaProtoServiceClient.GetSocialWorkerAsync(socialWorkerRequest);

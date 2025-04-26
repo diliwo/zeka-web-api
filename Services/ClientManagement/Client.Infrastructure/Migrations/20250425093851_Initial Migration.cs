@@ -199,14 +199,14 @@ namespace ClientManagement.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "SocialWorker",
+                name: "SocialWorkers",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "integer", nullable: false)
+                    SocialWorkerId = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    FirstName = table.Column<string>(type: "text", nullable: false),
-                    LastName = table.Column<string>(type: "text", nullable: false),
-                    UserName = table.Column<string>(type: "text", nullable: false),
+                    FirstName = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    LastName = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    UserName = table.Column<string>(type: "character varying(60)", maxLength: 60, nullable: false),
                     TeamName = table.Column<string>(type: "text", nullable: false),
                     TeamAcronym = table.Column<string>(type: "text", nullable: false),
                     CreatedBy = table.Column<string>(type: "text", nullable: false),
@@ -218,7 +218,7 @@ namespace ClientManagement.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_SocialWorker", x => x.Id);
+                    table.PrimaryKey("PK_SocialWorkers", x => x.SocialWorkerId);
                 });
 
             migrationBuilder.CreateTable(
@@ -372,15 +372,15 @@ namespace ClientManagement.Infrastructure.Migrations
                         principalColumn: "ActionId",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_MonitoringReports_SocialWorker_SocialWorkerId",
+                        name: "FK_MonitoringReports_SocialWorkers_SocialWorkerId",
                         column: x => x.SocialWorkerId,
-                        principalTable: "SocialWorker",
-                        principalColumn: "Id",
+                        principalTable: "SocialWorkers",
+                        principalColumn: "SocialWorkerId",
                         onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
-                name: "Supports",
+                name: "SocialCases",
                 columns: table => new
                 {
                     SchoolRegistrationId = table.Column<int>(type: "integer", nullable: false)
@@ -400,18 +400,18 @@ namespace ClientManagement.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Supports", x => x.SchoolRegistrationId);
+                    table.PrimaryKey("PK_SocialCases", x => x.SchoolRegistrationId);
                     table.ForeignKey(
-                        name: "FK_Supports_Clients_ClientId",
+                        name: "FK_SocialCases_Clients_ClientId",
                         column: x => x.ClientId,
                         principalTable: "Clients",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_Supports_SocialWorker_SocialWorkerId",
+                        name: "FK_SocialCases_SocialWorkers_SocialWorkerId",
                         column: x => x.SocialWorkerId,
-                        principalTable: "SocialWorker",
-                        principalColumn: "Id",
+                        principalTable: "SocialWorkers",
+                        principalColumn: "SocialWorkerId",
                         onDelete: ReferentialAction.Cascade);
                 });
 
@@ -554,13 +554,13 @@ namespace ClientManagement.Infrastructure.Migrations
                 column: "TrainingTypeId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Supports_ClientId",
-                table: "Supports",
+                name: "IX_SocialCases_ClientId",
+                table: "SocialCases",
                 column: "ClientId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Supports_SocialWorkerId",
-                table: "Supports",
+                name: "IX_SocialCases_SocialWorkerId",
+                table: "SocialCases",
                 column: "SocialWorkerId");
 
             migrationBuilder.CreateIndex(
@@ -588,7 +588,7 @@ namespace ClientManagement.Infrastructure.Migrations
                 name: "SchoolRegistrations");
 
             migrationBuilder.DropTable(
-                name: "Supports");
+                name: "SocialCases");
 
             migrationBuilder.DropTable(
                 name: "MonitoringActions");
@@ -615,7 +615,7 @@ namespace ClientManagement.Infrastructure.Migrations
                 name: "Clients");
 
             migrationBuilder.DropTable(
-                name: "SocialWorker");
+                name: "SocialWorkers");
 
             migrationBuilder.DropTable(
                 name: "TrainingField");

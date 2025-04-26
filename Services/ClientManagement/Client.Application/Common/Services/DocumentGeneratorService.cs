@@ -31,7 +31,7 @@ namespace ClientManagement.Application.Common.Services
             Context.Options.MemberAccessStrategy.Register<Email>();
             Context.Options.MemberAccessStrategy.Register<Assessment>();
             Context.Options.MemberAccessStrategy.Register<SocialCase>();
-            Context.Options.MemberAccessStrategy.Register<SocialWorker>();
+            Context.Options.MemberAccessStrategy.Register<Core.Entities.SocialWorker>();
             Context.Options.MemberAccessStrategy.Register<Training>();
             Context.Options.MemberAccessStrategy.Register<School>();
             Context.Options.MemberAccessStrategy.Register<SchoolRegistration>();
