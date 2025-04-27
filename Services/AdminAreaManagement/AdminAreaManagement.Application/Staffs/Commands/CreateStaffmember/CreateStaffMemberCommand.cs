@@ -5,6 +5,7 @@ using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 using Zeka.Extensions.EventBus.Abstractions;
 using Microsoft.AspNetCore.Http;
+using Tenant;
 
 namespace AdminAreaManagement.Application.Staffs.Commands.CreateStaffmember
 {
@@ -19,11 +20,15 @@ namespace AdminAreaManagement.Application.Staffs.Commands.CreateStaffmember
         {
             private readonly IRepositoryManager _repository;
             private readonly IEventBus _eventBus;
+            private readonly ITenantService _tenantService;
 
-            public CreateStaffMemberCommandHandler(IRepositoryManager repository, IEventBus eventBus)
+            public string TenantName { get => _tenantService.GetTenant()?.TenantName ?? String.Empty; }
+
+            public CreateStaffMemberCommandHandler(IRepositoryManager repository, IEventBus eventBus, ITenantService tenantService)
             {
                 _repository = repository;
                 _eventBus = eventBus;
+                _tenantService = tenantService;
             }
 
             public async Task<int> Handle(CreateStaffMemberCommand request, CancellationToken cancellationToken)
@@ -48,7 +53,7 @@ namespace AdminAreaManagement.Application.Staffs.Commands.CreateStaffmember
                 }
 
                 //We send an event to the message broker
-                _eventBus.PublishAsync(new SocialWorkerCreatedEvent(entity.FirstName, entity.LastName, entity.UserName, team.Name, team.Acronym, "Lasynsec"));
+                _eventBus.PublishAsync(new SocialWorkerCreatedEvent(entity.FirstName, entity.LastName, entity.UserName, team.Name, team.Acronym, TenantName));
 
                 return entity.Id;
             }

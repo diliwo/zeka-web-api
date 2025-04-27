@@ -19,7 +19,7 @@ builder.Services.AddControllers();
 
 var app = builder.Build();
 
-app.UseMigrationsAndSeed();
+//app.UseMigrationsAndSeed();
 
 if (app.Environment.IsDevelopment())
 {

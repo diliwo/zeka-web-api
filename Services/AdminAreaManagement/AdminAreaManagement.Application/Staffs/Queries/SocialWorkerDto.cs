@@ -5,7 +5,7 @@ using System;
 
 namespace AdminAreaManagement.Application.Staffs.Queries
 {
-    public class SocialWorker : IMapFrom<StaffMember>
+    public class SocialWorkerDto : IMapFrom<StaffMember>
     {
         public int Id { get; set; }
         public string FirstName { get; set; }
@@ -16,7 +16,7 @@ namespace AdminAreaManagement.Application.Staffs.Queries
 
         public void Mapping(Profile profile)
         {
-            profile.CreateMap<StaffMember, SocialWorker>()
+            profile.CreateMap<StaffMember, SocialWorkerDto>()
                 .ForMember(b => b.Id,
                     opt => opt.MapFrom(e => e.Id))
                 .ForMember(b => b.TeamAcronym, 

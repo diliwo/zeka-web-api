@@ -7,6 +7,7 @@ namespace AdminAreaManagement.Core.Entities
         public string Name { get; set; }
         public string Locality { get; set; }
 
+        public School() { }
         public School(string name, string locality)
         {
             if (string.IsNullOrEmpty(name))

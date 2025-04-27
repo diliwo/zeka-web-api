@@ -4,6 +4,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
+#pragma warning disable CA1814 // Prefer jagged arrays over multidimensional
+
 namespace AdminAreaManagement.Infrastructure.Migrations
 {
     /// <inheritdoc />
@@ -24,7 +26,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -42,7 +45,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -60,7 +64,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -79,7 +84,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -98,7 +104,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -116,7 +123,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -134,7 +142,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -155,7 +164,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -180,7 +190,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -217,7 +228,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     Created = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    Softdelete = table.Column<bool>(type: "boolean", nullable: false)
+                    Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -263,6 +275,7 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     LastModifiedBy = table.Column<string>(type: "text", nullable: false),
                     LastModified = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     Softdelete = table.Column<bool>(type: "boolean", nullable: false),
+                    TenantName = table.Column<string>(type: "text", nullable: false),
                     Name = table.Column<string>(type: "text", nullable: false),
                     ContentType = table.Column<string>(type: "text", nullable: false),
                     Description = table.Column<string>(type: "text", nullable: false)
@@ -296,6 +309,96 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                         principalTable: "Partners",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.InsertData(
+                table: "Cities",
+                columns: new[] { "CityId", "Country", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
+                values: new object[,]
+                {
+                    { 1, "Belgium", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Brussels", false, "Zeka" },
+                    { 2, "Norway", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Oslo", false, "Zeka" },
+                    { 3, "South Africa", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Cape Town", false, "Zeka" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "Nationalities",
+                columns: new[] { "NationalityId", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
+                values: new object[,]
+                {
+                    { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Belgian", false, "Zeka" },
+                    { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Norway", false, "Zeka" },
+                    { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "South African", false, "Zeka" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "Professions",
+                columns: new[] { "Id", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
+                values: new object[,]
+                {
+                    { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Kitchen, assistant", false, "Zeka" },
+                    { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Baker", false, "Zeka" },
+                    { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Computer repair technicien", false, "Zeka" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "Schools",
+                columns: new[] { "Id", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Locality", "Name", "Softdelete", "TenantName" },
+                values: new object[,]
+                {
+                    { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Cambridge", "Massachusetts Institute Of Technology", false, "Zeka" },
+                    { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Stanford", "Stanford University", false, "Zeka" },
+                    { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Berlin", "International University of Applied Science", false, "Zeka" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "Teams",
+                columns: new[] { "Id", "Acronym", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
+                values: new object[,]
+                {
+                    { 1, "SES", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "School & Education Service", false, "Zeka" },
+                    { 2, "IS", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Imigration Service", false, "Zeka" },
+                    { 3, "SPI", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Socio-Professional Integration Service", false, "Zeka" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "TrainingFields",
+                columns: new[] { "TrainingFieldId", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
+                values: new object[,]
+                {
+                    { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Political Sociology", false, "Zeka" },
+                    { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Information Technology", false, "Zeka" },
+                    { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Languages", false, "Zeka" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "TrainingTypes",
+                columns: new[] { "TrainingTypeId", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
+                values: new object[,]
+                {
+                    { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Bachelor", false, "Zeka" },
+                    { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Master", false, "Zeka" },
+                    { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Master of Business Administration", false, "Zeka" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "StaffMembers",
+                columns: new[] { "Id", "Created", "CreatedBy", "FirstName", "LastModified", "LastModifiedBy", "LastName", "Softdelete", "TeamId", "TenantName", "UserName" },
+                values: new object[,]
+                {
+                    { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", "John", null, "", "Doe", false, 1, "Zeka", "Cambridge" },
+                    { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", "Helen", null, "", "Ripley", false, 3, "Zeka", "hripley" },
+                    { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", "Adama", null, "", "Rezegova", false, 2, "Zeka", "Cambridge" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "Trainings",
+                columns: new[] { "Id", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName", "TrainingFieldId" },
+                values: new object[,]
+                {
+                    { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Software Developement", false, "Zeka", 2 },
+                    { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "English", false, "Zeka", 3 },
+                    { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Deutch", false, "Zeka", 3 }
                 });
 
             migrationBuilder.CreateIndex(
