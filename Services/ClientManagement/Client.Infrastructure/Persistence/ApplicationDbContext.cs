@@ -4,6 +4,7 @@ using ClientManagement.Core.Common;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Tenant;
 
 namespace ClientManagement.Infrastructure.Persistence
 {
@@ -34,13 +35,14 @@ namespace ClientManagement.Infrastructure.Persistence
             {
                 optionsBuilder.UseNpgsql(_tenantService.GetConnectionString());
             }
+            else
+            {
+                optionsBuilder.UseNpgsql(_tenantService.GetDefaultConnectionString());
+            }
         }
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
         {
-            var conn = this.Database.GetDbConnection().ConnectionString;
-            Console.WriteLine($"Connection string: {conn}");
-
             foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Entity> entry in ChangeTracker.Entries<Entity>())
             {
                 switch (entry.State)
@@ -48,13 +50,13 @@ namespace ClientManagement.Infrastructure.Persistence
                     case EntityState.Added:
                         entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
                         entry.Entity.Created = DateTime.Now; ;
-                        entry.Entity.TenantName = TenantName;
+                        if (!string.IsNullOrEmpty(TenantName)) entry.Entity.TenantName = TenantName;
                         break;
 
                     case EntityState.Modified:
                         entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
                         entry.Entity.LastModified = DateTime.Now; ;
-                        entry.Entity.TenantName = TenantName;
+                        if (!string.IsNullOrEmpty(TenantName)) entry.Entity.TenantName = TenantName;
                         break;
                 }
             }
@@ -76,13 +78,13 @@ namespace ClientManagement.Infrastructure.Persistence
                     case EntityState.Added:
                         entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
                         entry.Entity.Created = DateTime.Now; ;
-                        entry.Entity.TenantName = TenantName;
+                        if(!string.IsNullOrEmpty(TenantName)) entry.Entity.TenantName = TenantName;
                         break;
 
                     case EntityState.Modified:
                         entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
                         entry.Entity.LastModified = DateTime.Now; ;
-                        entry.Entity.TenantName = TenantName;
+                        if (!string.IsNullOrEmpty(TenantName)) entry.Entity.TenantName = TenantName;
                         break;
                 }
             }

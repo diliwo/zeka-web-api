@@ -1,9 +1,12 @@
 ﻿using System.Reflection;
+using AdminAreaManagement.Application.Staffs.Queries;
 using AdminAreaManagement.Core.Common;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
+using AdminAreaManagement.Infrastructure.Persistence.Seed;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualBasic;
+using Tenant;
 
 namespace AdminAreaManagement.Infrastructure.Persistence
 {
@@ -11,9 +14,12 @@ namespace AdminAreaManagement.Infrastructure.Persistence
     {
         private readonly ICurrentUserService _currentUserService;
         private readonly IDateTime _dateTime;
+        private readonly ITenantService _tenantService;
+
         //private readonly IDomainEventService _domainEventService;
 
-        public ApplicationDbContext(DbContextOptions options) : base(options) { }
+        public ApplicationDbContext(DbContextOptions options, ITenantService service) : base(options) => _tenantService = service;
+        public string TenantName { get => _tenantService.GetTenant()?.TenantName ?? String.Empty; }
 
         public DbSet<StaffMember> StaffMembers { get; set; }
         public DbSet<Team> Teams { get; set; }
@@ -27,6 +33,15 @@ namespace AdminAreaManagement.Infrastructure.Persistence
         public DbSet<City> Cities { get; set; }
         public DbSet<Nationality> Nationalities { get; set; }
 
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            var tenantConnectionString = _tenantService.GetConnectionString();
+            if (!string.IsNullOrEmpty(tenantConnectionString))
+            {
+                optionsBuilder.UseNpgsql(_tenantService.GetConnectionString());
+            }
+        }
+
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
         {
             foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Entity> entry in ChangeTracker.Entries<Entity>())
@@ -36,11 +51,13 @@ namespace AdminAreaManagement.Infrastructure.Persistence
                     case EntityState.Added:
                         entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
                         entry.Entity.Created = DateTime.Now;
+                        entry.Entity.TenantName = TenantName;
                         break;
 
                     case EntityState.Modified:
                         entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
                         entry.Entity.LastModified = DateTime.Now;
+                        entry.Entity.TenantName = TenantName;
                         break;
                 }
             }
@@ -62,11 +79,13 @@ namespace AdminAreaManagement.Infrastructure.Persistence
                     case EntityState.Added:
                         entry.Entity.CreatedBy = "ZeKa"; //TODO: This will be replaced by Identity Server
                         entry.Entity.Created = DateTime.Now;
+                        entry.Entity.TenantName = TenantName;
                         break;
 
                     case EntityState.Modified:
                         entry.Entity.LastModifiedBy = "ZeKa"; //TODO: This will be replaced by Identity Server
                         entry.Entity.LastModified = DateTime.Now;
+                        entry.Entity.TenantName = TenantName;
                         break;
                 }
             }
@@ -82,6 +101,9 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
             base.OnModelCreating(builder);
+
+            builder.Entity<StaffMember>().HasQueryFilter(a => a.TenantName == TenantName);
+            SeedData.Seed(builder);
         }
 
         private async Task DispatchEvents()

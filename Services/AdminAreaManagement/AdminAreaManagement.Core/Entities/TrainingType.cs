@@ -6,6 +6,7 @@ namespace AdminAreaManagement.Core.Entities
     {
         public string Name { get; set; }
 
+        public TrainingType() { }
         public TrainingType(string name)
         {
             if (string.IsNullOrEmpty(name))

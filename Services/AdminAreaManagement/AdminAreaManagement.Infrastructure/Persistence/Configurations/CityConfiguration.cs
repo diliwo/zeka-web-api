@@ -12,6 +12,7 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
                 .Property(s => s.Id).HasColumnName("CityId");
             builder
                 .HasKey(r => new { r.Id });
+
         }
     }
 }

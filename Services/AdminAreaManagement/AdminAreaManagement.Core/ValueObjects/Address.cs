@@ -9,6 +9,7 @@ namespace AdminAreaManagement.Core.ValueObjects
         public string PostalCode { get; set; }
         public string City { get; set; }
 
+        public Address(){}
         public Address(string number, string street, string postalCode, string city)
         {
             Number = number;

@@ -56,9 +56,48 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.ToTable("Cities");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Country = "Belgium",
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Brussels",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Country = "Norway",
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Oslo",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Country = "South Africa",
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Cape Town",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.DocumentPartner", b =>
@@ -101,6 +140,10 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("PartnerId");
@@ -138,9 +181,45 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.ToTable("Nationalities");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Belgian",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Norway",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "South African",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.Partner", b =>
@@ -200,6 +279,10 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<int>("StatusOfPartner")
                         .HasColumnType("integer");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("StaffMemberId");
@@ -237,9 +320,45 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.ToTable("Professions");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Kitchen, assistant",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Baker",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Computer repair technicien",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.School", b =>
@@ -275,9 +394,48 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.ToTable("Schools");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Locality = "Cambridge",
+                            Name = "Massachusetts Institute Of Technology",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Locality = "Stanford",
+                            Name = "Stanford University",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Locality = "Berlin",
+                            Name = "International University of Applied Science",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.StaffMember", b =>
@@ -318,6 +476,10 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<int>("TeamId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("UserName")
                         .IsRequired()
                         .HasMaxLength(60)
@@ -328,6 +490,47 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.HasIndex("TeamId");
 
                     b.ToTable("StaffMembers");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            FirstName = "John",
+                            LastModifiedBy = "",
+                            LastName = "Doe",
+                            Softdelete = false,
+                            TeamId = 1,
+                            TenantName = "Zeka",
+                            UserName = "Cambridge"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            FirstName = "Helen",
+                            LastModifiedBy = "",
+                            LastName = "Ripley",
+                            Softdelete = false,
+                            TeamId = 3,
+                            TenantName = "Zeka",
+                            UserName = "hripley"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            FirstName = "Adama",
+                            LastModifiedBy = "",
+                            LastName = "Rezegova",
+                            Softdelete = false,
+                            TeamId = 2,
+                            TenantName = "Zeka",
+                            UserName = "Cambridge"
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.Team", b =>
@@ -365,9 +568,48 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.ToTable("Teams");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Acronym = "SES",
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "School & Education Service",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Acronym = "IS",
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Imigration Service",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Acronym = "SPI",
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Socio-Professional Integration Service",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.Training", b =>
@@ -399,6 +641,10 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<int>("TrainingFieldId")
                         .HasColumnType("integer");
 
@@ -407,6 +653,41 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.HasIndex("TrainingFieldId");
 
                     b.ToTable("Trainings");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Software Developement",
+                            Softdelete = false,
+                            TenantName = "Zeka",
+                            TrainingFieldId = 2
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "English",
+                            Softdelete = false,
+                            TenantName = "Zeka",
+                            TrainingFieldId = 3
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Deutch",
+                            Softdelete = false,
+                            TenantName = "Zeka",
+                            TrainingFieldId = 3
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.TrainingField", b =>
@@ -439,9 +720,45 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.ToTable("TrainingFields");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Political Sociology",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Information Technology",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Languages",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.TrainingType", b =>
@@ -474,9 +791,45 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("TenantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.ToTable("TrainingTypes");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Bachelor",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Master",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedBy = "",
+                            LastModifiedBy = "",
+                            Name = "Master of Business Administration",
+                            Softdelete = false,
+                            TenantName = "Zeka"
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.DocumentPartner", b =>
