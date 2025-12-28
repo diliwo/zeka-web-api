@@ -8,6 +8,7 @@
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <DockerfileContext>..\..\..</DockerfileContext>
     <DockerComposeProjectPath>..\..\..\docker-compose.dcproj</DockerComposeProjectPath>
+    <UserSecretsId>397b3a36-8f03-4504-b53f-adf3eb735a06</UserSecretsId>
   </PropertyGroup>
 
 	<ItemGroup>
@@ -21,6 +22,7 @@
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
 		</PackageReference>
+		<PackageReference Include="Zeka.Extensions.Observability" Version="1.2.0" />
 	</ItemGroup>
 
   <ItemGroup>
