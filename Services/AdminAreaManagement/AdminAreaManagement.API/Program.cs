@@ -20,7 +20,7 @@ builder.Services.AddWebServices();
 builder.Services.AddRabbitMqEventBus(builder.Configuration)
     .AddRabbitMqEventPublisher();
 
-builder.Services.AddOpenTelemetryTracing("Adminapi", (traceBuiler) => traceBuiler.WithSqlInstrumentation());
+//builder.Services.AddOpenTelemetryTracing("Adminapi", (traceBuiler) => traceBuiler.WithSqlInstrumentation());
 builder.Services.AddControllers();
 
 
