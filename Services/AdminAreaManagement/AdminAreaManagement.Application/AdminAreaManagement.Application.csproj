@@ -33,7 +33,6 @@
 	</ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\..\Libs\eventbus-dotnet-lib\Eventbus\Eventbus.csproj" />
     <ProjectReference Include="..\AdminAreaManagement.Core\AdminAreaManagement.Core.csproj" />
   </ItemGroup>
 

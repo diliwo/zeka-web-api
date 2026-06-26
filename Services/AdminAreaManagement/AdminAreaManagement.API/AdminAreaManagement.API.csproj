@@ -22,7 +22,7 @@
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="Zeka.Extensions.Observability" Version="1.2.0" />
+		<PackageReference Include="Zeka.Extensions.Observability" Version="1.2.1" />
 	</ItemGroup>
 
   <ItemGroup>
