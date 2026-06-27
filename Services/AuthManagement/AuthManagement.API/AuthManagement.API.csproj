@@ -19,7 +19,6 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.4" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="7.6.3" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.6.3" />
-    <PackageReference Include="Zeka.Extensions.Authentication" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,6 +28,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\..\..\auth-dotnet-lib\Authentication\Authentication.csproj" />
     <ProjectReference Include="..\..\ClientManagement\Client.Application\ClientManagement.Application.csproj" />
   </ItemGroup>
 

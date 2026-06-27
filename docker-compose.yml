@@ -20,12 +20,12 @@ services:
       - "5672:5672"
       - "15672:15672"
 
-  # authmanagement.api:
-  #   image: diliwo/authmanagementapi
-  #   container_name: zekaauthapi
-  #   build:
-  #       context: .
-  #       dockerfile: Services/AuthManagement/AuthManagement.API/Dockerfile
+  authmanagement.api:
+    image: diliwo/authmanagementapi
+    container_name: zekaauthapi
+    build:
+      context: ..
+      dockerfile: zeka-web-api/Services/AuthManagement/AuthManagement.API/Dockerfile
 
 # volumes:
 #     postgres_data:
