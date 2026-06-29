@@ -11,6 +11,8 @@ services:
      build:
       context: .
       dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile
+      secrets:
+        - github_token
   
   rabbitmq:
     image: rabbitmq:3-management
@@ -20,12 +22,18 @@ services:
       - "5672:5672"
       - "15672:15672"
 
-  # authmanagement.api:
-  #   image: diliwo/authmanagementapi
-  #   container_name: zekaauthapi
-  #   build:
-  #       context: .
-  #       dockerfile: Services/AuthManagement/AuthManagement.API/Dockerfile
+  authmanagement.api:
+    image: diliwo/authmanagementapi
+    container_name: zekaauthapi
+    build:
+        context: .
+        dockerfile: Services/AuthManagement/AuthManagement.API/Dockerfile
+        secrets:
+          - github_token
+
+secrets:
+  github_token:
+    environment: GITHUB_TOKEN
 
 # volumes:
 #     postgres_data:

@@ -8,10 +8,20 @@ EXPOSE 8080
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
+COPY nuget.config .
 COPY ["ApiGateways/Ocelot.ApiGateway/Ocelot.ApiGateway.csproj", "ApiGateways/Ocelot.ApiGateway/"]
 COPY ["local-nuget-packages/", "ApiGateways/local-nuget-packages/"]
 COPY ["nuget.config", "ApiGateways/"]
-RUN dotnet restore "./ApiGateways/Ocelot.ApiGateway/./Ocelot.ApiGateway.csproj"
+
+RUN --mount=type=secret,id=github_token \
+    dotnet nuget update source github \
+      --username diliwo \
+      --password "$(cat /run/secrets/github_token)" \
+      --store-password-in-clear-text \
+      --configfile nuget.config && \
+    dotnet restore "./ApiGateways/Ocelot.ApiGateway/./Ocelot.ApiGateway.csproj" \
+      --configfile nuget.config
+
 COPY . .
 WORKDIR "/src/ApiGateways/Ocelot.ApiGateway"
 RUN dotnet build "./Ocelot.ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/build

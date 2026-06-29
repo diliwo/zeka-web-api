@@ -9,8 +9,18 @@ EXPOSE 8081
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
+COPY nuget.config .
 COPY ["Services/ClientManagement/Client.API/Client.API.csproj", "Services/ClientManagement/Client.API/"]
-RUN dotnet restore "./Services/ClientManagement/Client.API/./Client.API.csproj"
+
+RUN --mount=type=secret,id=github_token \
+    dotnet nuget update source github \
+      --username diliwo \
+      --password "$(cat /run/secrets/github_token)" \
+      --store-password-in-clear-text \
+      --configfile nuget.config && \
+    dotnet restore "./Services/ClientManagement/Client.API/./Client.API.csproj" \
+      --configfile nuget.config
+
 COPY . .
 WORKDIR "/src/Services/ClientManagement/Client.API"
 RUN dotnet build "./Client.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
