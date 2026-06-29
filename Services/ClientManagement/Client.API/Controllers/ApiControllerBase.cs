@@ -6,7 +6,7 @@ namespace ClientManagement.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    //[Authorize] Uncomment after the implementation of the security
+    [Authorize]
     public class ApiControllerBase : ControllerBase
     {
         private ISender _mediator;

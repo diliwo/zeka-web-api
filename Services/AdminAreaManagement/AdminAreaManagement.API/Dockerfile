@@ -8,11 +8,21 @@ EXPOSE 8080
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
+COPY nuget.config .
 COPY ["Services/AdminAreaManagement/AdminAreaManagement.API/AdminAreaManagement.API.csproj", "Services/AdminAreaManagement/AdminAreaManagement.API/"]
 COPY ["Services/AdminAreaManagement/AdminAreaManagement.Application/AdminAreaManagement.Application.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Application/"]
 COPY ["Services/AdminAreaManagement/AdminAreaManagement.Core/AdminAreaManagement.Core.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Core/"]
 COPY ["Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/"]
-RUN dotnet restore "./Services/AdminAreaManagement/AdminAreaManagement.API/./AdminAreaManagement.API.csproj"
+
+RUN --mount=type=secret,id=github_token \
+    dotnet nuget update source github \
+      --username diliwo \
+      --password "$(cat /run/secrets/github_token)" \
+      --store-password-in-clear-text \
+      --configfile nuget.config && \
+    dotnet restore s"./Services/AdminAreaManagement/AdminAreaManagement.API/./AdminAreaManagement.API.csproj" \
+      --configfile nuget.config
+
 COPY . .
 WORKDIR "/src/Services/AdminAreaManagement/AdminAreaManagement.API"
 RUN dotnet build "./AdminAreaManagement.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
