@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zekadb-deployment
+  labels:
+    app: zekadb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zekadb
+  template:
+    metadata:
+      name: zekadb-pod
+      labels:
+        app: zekadb
+    spec:
+      containers:
+        - name: zekadb
+          image: postgres:17
+          ports:
+            - containerPort: 5432
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "500m"
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: zekadb-secret
+                  key: zekadb-root-user                  
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zekadb-secret
+                  key: zekadb-root-pwd
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: zekadb-secret
+                  key: zekadb-root-db
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 15
+            timeoutSeconds: 2
+          livenessProbe:
+            exec:
+              command: 
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 45
+            timeoutSeconds: 2
+          volumeMounts:
+            - name: postgres-init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+      - name: postgres-init
+        configMap:
+          name: zekadb-configmap
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zekadb-external-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: zekadb
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zekadb-service
+spec:
+  type: ClusterIP
+  selector:
+    app: zekadb
+  ports:
+  - port: 5432
+    targetPort: 5432
