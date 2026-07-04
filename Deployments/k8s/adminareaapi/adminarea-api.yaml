@@ -17,40 +17,56 @@ spec:
     spec:
       containers:
         - name: adminareaapi
-          image: diliwo/adminareamanagementapi:latest
+          image: diliwo/adminareamanapi:1.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           env:
             - name: ASPNETCORE_ENVIRONMENT
               value: Development
-            - name: ConnectionStrings__DefaultApiConnection
+            - name: TenantSettings__DefaultConnectionString
               valueFrom:
                   configMapKeyRef:
-                    name: zekadb-configmap
-                    key: connection_string 
+                    name: adminarea-configmap
+                    key: connection_string
+            - name: RabbitMq__HostName
+              valueFrom:
+                  configMapKeyRef:
+                    name: adminarea-configmap
+                    key: rabbitmq_host
           resources:
             requests:
-              memory: "64Mi"
+              memory: "256Mi"
               cpu: "250m"
             limits:
-              memory: "128Mi"
+              memory: "512Mi"
               cpu: "500m"
       initContainers:
         - name: wait-for-db
           image: busybox
-          command: ['sh', '-c', 'until nc -z adminareadb-service 5432; do echo waiting for database; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z zekadb-service 5432; do echo waiting for database; sleep 2; done;']
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: adminareaapi-service
+  name: adminareaapi-external-service
 spec:
-  type: NodePort
+  type: LoadBalancer
   selector:
     app: adminareaapi
   ports:
     - protocol: TCP
       port: 8000
       targetPort: 8080
-      nodePort: 31000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: adminareaapi-service
+spec:
+  type: ClusterIP
+  selector:
+    app: adminareaapi
+  ports:
+  - port: 8080
+    targetPort: 8080

@@ -4,3 +4,4 @@ metadata:
   name: adminarea-configmap
 data:
   connection_string: Server=zekadb-service;Port=5432;Database=zekaAdminAreadb;User Id=postgres;Password=admin
+  rabbitmq_host: rabbitmq-service

@@ -22,10 +22,10 @@ spec:
             - containerPort: 5432
           resources:
             requests:
-              memory: "2Gi"
-              cpu: "500m"
+              memory: "512Mi"
+              cpu: "250m"
             limits:
-              memory: "2Gi"
+              memory: "1Gi"
               cpu: "500m"
           env:
             - name: POSTGRES_USER
@@ -63,11 +63,26 @@ spec:
             - name: postgres-init
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
       volumes:
       - name: postgres-init
         configMap:
           name: zekadb-configmap
-
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: postgres-claim
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 200Mi
 ---
 apiVersion: v1
 kind: Service
