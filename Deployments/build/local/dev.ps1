@@ -5,20 +5,25 @@ param(
     [string]$Service
 )
 
-$env:GITHUB_TOKEN = op read "op://Diliwo Vault/Github Zeka Packages PAT/credential"
+# $env:GITHUB_TOKEN = op read "op://Diliwo Vault/Github Zeka Packages PAT/credential"
 
 switch ($Command)
 {
     "build" {
-        op run -- docker compose build
+        op run --env-file .op/local.env -- docker compose build
     }
 
     "up" {
+        #op run -- docker compose up
         op run -- docker compose up
     }
 
+    "start" {
+        op run -- docker compose up $Service
+    }
+
     "down" {
-        docker compose down
+        docker compose down -v
     }
 
     "logs" {
@@ -26,7 +31,7 @@ switch ($Command)
     }
 
     "rebuild" {
-        op run -- docker compose build $Service
+        op run --env-file .op/local.env -- docker compose build $Service
 
         docker compose up -d $Service
     }

@@ -10,9 +10,9 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY nuget.config .
 COPY ["Services/AdminAreaManagement/AdminAreaManagement.API/AdminAreaManagement.API.csproj", "Services/AdminAreaManagement/AdminAreaManagement.API/"]
-COPY ["Services/AdminAreaManagement/AdminAreaManagement.Application/AdminAreaManagement.Application.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Application/"]
-COPY ["Services/AdminAreaManagement/AdminAreaManagement.Core/AdminAreaManagement.Core.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Core/"]
-COPY ["Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/"]
+#COPY ["Services/AdminAreaManagement/AdminAreaManagement.Application/AdminAreaManagement.Application.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Application/"]
+#COPY ["Services/AdminAreaManagement/AdminAreaManagement.Core/AdminAreaManagement.Core.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Core/"]
+#COPY ["Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/"]
 
 RUN --mount=type=secret,id=github_token \
     dotnet nuget update source github \
@@ -20,7 +20,7 @@ RUN --mount=type=secret,id=github_token \
       --password "$(cat /run/secrets/github_token)" \
       --store-password-in-clear-text \
       --configfile nuget.config && \
-    dotnet restore s"./Services/AdminAreaManagement/AdminAreaManagement.API/./AdminAreaManagement.API.csproj" \
+    dotnet restore "./Services/AdminAreaManagement/AdminAreaManagement.API/./AdminAreaManagement.API.csproj" \
       --configfile nuget.config
 
 COPY . .

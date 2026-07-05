@@ -31,4 +31,4 @@ RUN dotnet publish "./AuthManagement.API.csproj" -c $BUILD_CONFIGURATION -o /app
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "AuthManagement.dll"]
+ENTRYPOINT ["dotnet", "AuthManagement.API.dll"]
