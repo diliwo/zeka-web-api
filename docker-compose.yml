@@ -53,7 +53,7 @@ services:
     container_name: zekaauthapi
     build:
         context: .
-        dockerfile: Services/AuthManagement/AuthManagement.API/Dockerfile
+        dockerfile: Services/AuthManager/AuthManager.API/Dockerfile
         secrets:
           - github_token
     depends_on:
