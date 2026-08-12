@@ -6,6 +6,7 @@ public class User : IdentityUser
 {
     public required string FirstName { get; set; }
     public required string LastName { get; set; }
-    public string? RefreshToken { get; set; }
-    public DateTime RefreshTokenExpiresOn { get; set; }
+    public UserStatus Status { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? UpdatedAtUct { get; set; }
 }

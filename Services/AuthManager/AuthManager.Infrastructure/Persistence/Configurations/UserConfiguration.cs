@@ -8,12 +8,6 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 {
     public void Configure(EntityTypeBuilder<User> builder)
     {
-        builder.Property(x => x.RefreshToken)
-            .HasMaxLength(150);
-
-        builder.HasIndex(x => x.RefreshToken)
-            .IsUnique();
-
         //builder.HasData(
         //    new User
         //    {

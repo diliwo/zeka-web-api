@@ -1,4 +1,5 @@
-﻿using AuthManager.Application.Common.Interfaces;
+﻿using AuthManager.API.Infrastructure;
+using AuthManager.Application.Common.Interfaces;
 using AuthManager.Core.Models.Users;
 using AuthManager.Infrastructure.Persistence;
 using AuthManager.Infrastructure.Services;
@@ -37,6 +38,12 @@ public static class DependencyInjection
         services.AddSingleton(authOptions);
 
         services.AddScoped<IJwtService, JwtTokenService>();
+
+        services.Configure<DataProtectionTokenProviderOptions>(opt =>
+            opt.TokenLifespan = TimeSpan.FromHours(2));
+
+        services.Configure<EmailConfirmationTokenProviderOptions>(opt =>
+            opt.TokenLifespan = TimeSpan.FromDays(3));
     }
 
     public static WebApplicationBuilder ConfigureMicrosoftIdentity(this WebApplicationBuilder builder)
@@ -48,11 +55,14 @@ public static class DependencyInjection
             options.Password.RequireLowercase = true;
             options.Password.RequireUppercase = true;
             options.Password.RequireNonAlphanumeric = true;
-
             options.User.RequireUniqueEmail = true;
+            options.SignIn.RequireConfirmedEmail = true;
+            options.Tokens.EmailConfirmationTokenProvider = "emailconfirmation";
+            options.Lockout.MaxFailedAccessAttempts = 3;
         })
         .AddEntityFrameworkStores<AuthDbContext>()
-        .AddDefaultTokenProviders();
+        .AddDefaultTokenProviders()
+        .AddTokenProvider<EmailConfirmationTokenProvider<User>>("emailconfirmation");
 
         return builder;
     }

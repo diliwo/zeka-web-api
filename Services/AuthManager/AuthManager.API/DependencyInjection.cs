@@ -10,7 +10,7 @@ namespace AuthManager.API
 
             var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
 
-            var roles = new[] { "Administrator", "User" };
+            var roles = new[] { "Administrator", "Owner", "Viewer" };
 
             foreach (var role in roles)
             {
