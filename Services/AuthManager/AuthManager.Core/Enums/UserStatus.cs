@@ -1,3 +1,5 @@
+namespace AuthManager.Core.Enums;
+
 public enum UserStatus
 {
 	PendingVerification = 1,

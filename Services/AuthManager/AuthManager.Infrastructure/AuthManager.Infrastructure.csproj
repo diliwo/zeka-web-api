@@ -8,12 +8,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AuthManager.Application\AuthManager.Application.csproj" />
+    <ProjectReference Include="..\AuthManager.Core\AuthManager.Core.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.8" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.8" />
-    <PackageReference Include="Zeka.Extensions.Authentication" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Migrations\" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
 </Project>

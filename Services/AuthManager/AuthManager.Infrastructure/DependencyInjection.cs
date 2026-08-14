@@ -1,14 +1,13 @@
-﻿using AuthManager.API.Infrastructure;
+﻿using AuthManager.Infrastructure.CustomTokenProviders;
 using AuthManager.Application.Common.Interfaces;
-using AuthManager.Core.Models.Users;
+using AuthManager.Infrastructure.Identity;
+using AuthManager.Infrastructure.Identity.Models;
 using AuthManager.Infrastructure.Persistence;
-using AuthManager.Infrastructure.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Zeka.Extensions.Authentication;
 
 namespace AuthManager.Infrastructure;
 
@@ -31,24 +30,9 @@ public static class DependencyInjection
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
     }
 
-    public static void RegisterTokenService(this IServiceCollection services, IConfigurationManager configuration)
-    {
-        var authOptions = new AuthOptions();
-        configuration.GetSection(AuthOptions.AuthenticationSectionName).Bind(authOptions);
-        services.AddSingleton(authOptions);
-
-        services.AddScoped<IJwtService, JwtTokenService>();
-
-        services.Configure<DataProtectionTokenProviderOptions>(opt =>
-            opt.TokenLifespan = TimeSpan.FromHours(2));
-
-        services.Configure<EmailConfirmationTokenProviderOptions>(opt =>
-            opt.TokenLifespan = TimeSpan.FromDays(3));
-    }
-
     public static WebApplicationBuilder ConfigureMicrosoftIdentity(this WebApplicationBuilder builder)
     {
-        builder.Services.AddIdentity<User, Role>(options =>
+        builder.Services.AddIdentity<User, IdentityRole<Guid>>(options =>
         {
             options.Password.RequiredLength = 8;
             options.Password.RequireDigit = true;
@@ -63,6 +47,15 @@ public static class DependencyInjection
         .AddEntityFrameworkStores<AuthDbContext>()
         .AddDefaultTokenProviders()
         .AddTokenProvider<EmailConfirmationTokenProvider<User>>("emailconfirmation");
+
+        builder.Services.Configure<DataProtectionTokenProviderOptions>(options =>
+            options.TokenLifespan = TimeSpan.FromHours(2));
+
+        builder.Services.Configure<EmailConfirmationTokenProviderOptions>(options =>
+            options.TokenLifespan = TimeSpan.FromDays(3));
+
+        builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddScoped<IAuthenticationService, IdentityAuthenticationService>();
 
         return builder;
     }

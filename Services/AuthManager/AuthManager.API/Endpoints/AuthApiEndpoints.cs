@@ -1,6 +1,6 @@
 ﻿using AuthManager.API.Filters;
+using AuthManager.Application.Authentication.Models;
 using AuthManager.Application.Common.Interfaces;
-using AuthManager.Core.Models.Users;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AuthManager.API.Endpoints;
@@ -15,10 +15,11 @@ public static class AuthApiEndpoints
 
         group.MapPost("register", async (
             [FromBody] RegisterUserRequest request,
-            [FromServices] IServiceManager serviceManager) =>
+            [FromServices] IServiceManager serviceManager,
+            CancellationToken cancellationToken) =>
         {
             var result = await serviceManager.AuthenticationService
-                .RegisterUserAsync(request);
+                .RegisterUserAsync(request, cancellationToken);
 
             if (!result.Succeeded)
             {
@@ -26,7 +27,7 @@ public static class AuthApiEndpoints
                 {
                     {
                         "user-validation errors",
-                        result.Errors.Select(x => x.Description).ToArray()
+                        result.Errors.ToArray()
                     }
                 };
 
@@ -38,13 +39,6 @@ public static class AuthApiEndpoints
         .AddEndpointFilter<ValidationFilter<RegisterUserRequest>>()
         .Produces(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status400BadRequest)
-        .ProducesValidationProblem(StatusCodes.Status422UnprocessableEntity); ;
-
-        //routeBuilder.MapPost("/login", async Task<IResult> ([FromServices] ITokenService tokenService, LoginRequest loginRequest) =>
-        //{
-        //    var loginResult = await tokenService.GenerateAuthenticationToken(loginRequest.Email, loginRequest.Password);
-
-        //    return loginResult is null ? TypedResults.Unauthorized() : TypedResults.Ok(loginResult);
-        //});
+        .ProducesValidationProblem(StatusCodes.Status422UnprocessableEntity);
     }
 }

@@ -8,25 +8,21 @@ EXPOSE 8080
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY nuget.config .
 COPY ["Services/AuthManager/AuthManager.API/AuthManager.API.csproj", "Services/AuthManager/AuthManager.API/"]
+COPY ["Services/AuthManager/AuthManager.Application/AuthManager.Application.csproj", "Services/AuthManager/AuthManager.Application/"]
+COPY ["Services/AuthManager/AuthManager.Core/AuthManager.Core.csproj", "Services/AuthManager/AuthManager.Core/"]
+COPY ["Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj", "Services/AuthManager/AuthManager.Infrastructure/"]
 
-RUN --mount=type=secret,id=github_token \
-    dotnet nuget update source github \
-      --username diliwo \
-      --password "$(cat /run/secrets/github_token)" \
-      --store-password-in-clear-text \
-      --configfile nuget.config && \
-    dotnet restore "./Services/AuthManager/AuthManager.API/./AuthManager.API.csproj" \
-      --configfile nuget.config
+RUN dotnet restore "Services/AuthManager/AuthManager.API/AuthManager.API.csproj" \
+    --source https://api.nuget.org/v3/index.json
 
 COPY . .
 WORKDIR "/src/Services/AuthManager/AuthManager.API"
-RUN dotnet build "./AuthManager.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
+RUN dotnet build "./AuthManager.API.csproj" -c $BUILD_CONFIGURATION -o /app/build --no-restore
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./AuthManager.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "./AuthManager.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false --no-build
 
 FROM base AS final
 WORKDIR /app
