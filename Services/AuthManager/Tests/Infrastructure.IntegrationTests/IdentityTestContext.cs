@@ -4,9 +4,11 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Moq;
 
-namespace AuthManager.Tests;
+namespace Infrastructure.IntegrationTests;
 
 internal sealed class IdentityTestContext : IAsyncDisposable
 {
@@ -20,7 +22,7 @@ internal sealed class IdentityTestContext : IAsyncDisposable
 
     public ServiceProvider Services { get; }
 
-    public static async Task<IdentityTestContext> CreateAsync()
+    public static async Task<IdentityTestContext> CreateAsync(DateTimeOffset? utcNow = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -29,6 +31,14 @@ internal sealed class IdentityTestContext : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.Services.AddDbContext<AuthDbContext>(options => options.UseSqlite(connection));
         builder.ConfigureMicrosoftIdentity();
+
+        if (utcNow is not null)
+        {
+            var timeProvider = new Mock<TimeProvider>();
+            timeProvider.Setup(provider => provider.GetUtcNow()).Returns(utcNow.Value);
+            builder.Services.RemoveAll<TimeProvider>();
+            builder.Services.AddSingleton(timeProvider.Object);
+        }
 
         var services = builder.Services.BuildServiceProvider();
 
