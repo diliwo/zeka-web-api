@@ -24,7 +24,7 @@ public class JwtTokenService(AuthOptions options) : IJwtService
 
         var claims = new List<Claim>
         {
-            new(JwtRegisteredClaimNames.Sub, user.Id),
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString("D")),
             new(JwtRegisteredClaimNames.Email, user.Email!)
         };
 

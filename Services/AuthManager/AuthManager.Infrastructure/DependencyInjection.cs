@@ -48,7 +48,7 @@ public static class DependencyInjection
 
     public static WebApplicationBuilder ConfigureMicrosoftIdentity(this WebApplicationBuilder builder)
     {
-        builder.Services.AddIdentity<User, IdentityRole>(options =>
+        builder.Services.AddIdentity<User, Role>(options =>
         {
             options.Password.RequiredLength = 8;
             options.Password.RequireDigit = true;

@@ -70,11 +70,6 @@ public class AuthenticationService(UserManager<User> userManager, IMapper mapper
 
 		var result = await userManager.CreateAsync(user, request.Password);
 
-		if (result.Succeeded)
-		{
-			await userManager.AddToRolesAsync(user, request.Roles);
-		}
-
 		return result;
 	}
 }

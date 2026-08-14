@@ -8,13 +8,9 @@
 /// <param name="FirstName"></param>
 /// <param name="LastName"></param>
 /// <param name="Password"></param>
-/// <param name="PhoneNumber"></param>
-/// <param name="Roles"></param>
 public record RegisterUserRequest(
 	string Email,
 	string UserName,
 	string FirstName,
 	string LastName,
-	string Password,
-	string? PhoneNumber,
-	IEnumerable<string> Roles);
+	string Password);
