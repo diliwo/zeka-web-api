@@ -1,14 +1,10 @@
-﻿using AuthManager.Core.Models.Tokens;
-using AuthManager.Core.Models.Users;
-using Microsoft.AspNetCore.Identity;
+﻿using AuthManager.Application.Authentication.Models;
 
 namespace AuthManager.Application.Common.Interfaces;
 
 public interface IAuthenticationService
 {
-	Task<TokenResponse> LoginUserAsync(LoginUserRequest request);
-	Task<IdentityResult> RegisterUserAsync(RegisterUserRequest request);
-	Task<TokenResponse> RefreshAccessTokenAsync(
-		RefreshTokenRequest request,
+	Task<UserRegistrationResult> RegisterUserAsync(
+		RegisterUserRequest request,
 		CancellationToken cancellationToken = default);
 }

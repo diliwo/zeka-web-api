@@ -1,4 +1,4 @@
-﻿using AuthManager.Core.Models.Users;
+﻿using AuthManager.Infrastructure.Identity.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -8,19 +8,23 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 {
     public void Configure(EntityTypeBuilder<User> builder)
     {
-        builder.Property(x => x.RefreshToken)
-            .HasMaxLength(150);
+        builder.Property(user => user.FirstName)
+            .HasMaxLength(100)
+            .IsRequired();
 
-        builder.HasIndex(x => x.RefreshToken)
+        builder.Property(user => user.LastName)
+            .HasMaxLength(100)
+            .IsRequired();
+
+        builder.Property(user => user.Status)
+            .IsRequired();
+
+        builder.Property(user => user.CreatedAtUtc)
+            .IsRequired();
+
+        builder
+            .HasIndex(x => x.NormalizedEmail)
+            .HasDatabaseName("EmailIndex")
             .IsUnique();
-
-        //builder.HasData(
-        //    new User
-        //    {
-        //        Id = Guid.NewGuid().ToString(),
-        //        UserName = "jhon@zeka.com",
-        //        PasswordHash = "oKNrqkO7iC#G",
-        //        R = "Administrator"
-        //    });
     }
 }
