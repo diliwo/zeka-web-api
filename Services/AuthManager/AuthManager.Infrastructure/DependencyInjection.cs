@@ -8,6 +8,12 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using AuthManager.Application.Common.Auditing;
+using AuthManager.Application.Common.Idempotency;
+using AuthManager.Application.Common.Outbox;
+using AuthManager.Infrastructure.Outbox;
+using AuthManager.Infrastructure.Persistence.Services;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace AuthManager.Infrastructure;
 
@@ -28,6 +34,26 @@ public static class DependencyInjection
 
         // to revert to the pre-6.0 behavior to avoid the timeZone mapping
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
+        services.AddOnboardingPersistenceFoundations(configuration);
+
+        if (configuration.GetValue<bool>($"{OutboxDispatcherOptions.SectionName}:Enabled"))
+            services.AddHostedService<OutboxBackgroundService>();
+    }
+
+    public static IServiceCollection AddOnboardingPersistenceFoundations(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<IIdempotencyStore, IdempotencyStore>();
+        services.AddScoped<IAuditWriter, AuditWriter>();
+        services.AddScoped<IOutboxWriter, OutboxWriter>();
+        services.TryAddScoped<IOutboxMessagePublisher, UnconfiguredOutboxMessagePublisher>();
+        services.AddScoped<IOutboxDispatcher, OutboxDispatcher>();
+        services.Configure<OutboxDispatcherOptions>(
+            configuration.GetSection(OutboxDispatcherOptions.SectionName));
+        return services;
     }
 
     public static WebApplicationBuilder ConfigureMicrosoftIdentity(this WebApplicationBuilder builder)
@@ -54,7 +80,7 @@ public static class DependencyInjection
         builder.Services.Configure<EmailConfirmationTokenProviderOptions>(options =>
             options.TokenLifespan = TimeSpan.FromDays(3));
 
-        builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddScoped<IAuthenticationService, IdentityAuthenticationService>();
 
         return builder;

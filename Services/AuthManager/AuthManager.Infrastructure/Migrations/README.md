@@ -44,3 +44,9 @@ dotnet ef database update 0 \
 ```
 
 Once any persistent environment applies this migration, never delete, rename, or regenerate it. All subsequent schema changes must use additive migrations with an explicit data transition and rollback assessment.
+
+## Onboarding operational foundations
+
+`OnboardingOperationalFoundations` is an additive migration that creates the idempotency, audit, and outbox tables used by secure onboarding. It does not modify the Identity tables.
+
+Outbox dispatch is disabled until a transport-specific `IOutboxMessagePublisher` is registered and `Outbox:Enabled` is set to `true`. Enabling dispatch without a real publisher deliberately fails delivery so messages remain retryable and become operationally visible rather than being silently discarded.

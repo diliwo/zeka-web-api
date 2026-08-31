@@ -22,14 +22,19 @@ internal sealed class IdentityTestContext : IAsyncDisposable
 
     public ServiceProvider Services { get; }
 
-    public static async Task<IdentityTestContext> CreateAsync(DateTimeOffset? utcNow = null)
+    public static async Task<IdentityTestContext> CreateAsync(
+        DateTimeOffset? utcNow = null,
+        Action<IServiceCollection>? configureServices = null)
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
+        var databaseName = $"auth-tests-{Guid.NewGuid():N}";
+        var connectionString = $"Data Source={databaseName};Mode=Memory;Cache=Shared";
+        var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
 
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
-        builder.Services.AddDbContext<AuthDbContext>(options => options.UseSqlite(connection));
+        builder.Services.AddDbContext<AuthDbContext>(options => options.UseSqlite(connectionString));
+        builder.Services.AddOnboardingPersistenceFoundations(builder.Configuration);
         builder.ConfigureMicrosoftIdentity();
 
         if (utcNow is not null)
@@ -39,6 +44,8 @@ internal sealed class IdentityTestContext : IAsyncDisposable
             builder.Services.RemoveAll<TimeProvider>();
             builder.Services.AddSingleton(timeProvider.Object);
         }
+
+        configureServices?.Invoke(builder.Services);
 
         var services = builder.Services.BuildServiceProvider();
 
