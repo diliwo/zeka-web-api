@@ -1,5 +1,6 @@
 ﻿using AuthManager.Infrastructure.Identity.Models;
 using AuthManager.Infrastructure.Persistence.Configurations;
+using AuthManager.Core.Organisations;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +14,9 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<Organisation> Organisations => Set<Organisation>();
+    public DbSet<OrganisationMembership> OrganisationMemberships => Set<OrganisationMembership>();
+    public DbSet<PermissionSet> PermissionSets => Set<PermissionSet>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -21,5 +25,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
         modelBuilder.ApplyConfiguration(new IdempotencyRecordConfiguration());
         modelBuilder.ApplyConfiguration(new AuditEntryConfiguration());
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
+        modelBuilder.ApplyConfiguration(new OrganisationConfiguration());
+        modelBuilder.ApplyConfiguration(new OrganisationMembershipConfiguration());
+        modelBuilder.ApplyConfiguration(new PermissionSetConfiguration());
     }
 }
