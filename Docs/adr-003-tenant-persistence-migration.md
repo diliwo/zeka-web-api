@@ -40,6 +40,23 @@ CREATE TABLE "__OrganisationTenantMap" (
 
 Every distinct legacy `TenantName` on a tenant-owned table must map to exactly one AuthManagement organisation. Stop remediation when a name is blank, maps ambiguously, has no corresponding organisation, or when multiple names are proposed for one organisation without explicit approval. Keep the reviewed mapping export with the deployment evidence.
 
+Before migration, detect natural-key collisions:
+
+```sql
+SELECT "TenantName", "UserName", count(*) FROM "StaffMembers"
+WHERE "UserName" IS NOT NULL GROUP BY "TenantName", "UserName" HAVING count(*) > 1;
+SELECT "TenantName", "Acronym", count(*) FROM "Teams"
+GROUP BY "TenantName", "Acronym" HAVING count(*) > 1;
+SELECT "TenantName", "PartnerNumber", count(*) FROM "Partners"
+GROUP BY "TenantName", "PartnerNumber" HAVING count(*) > 1;
+SELECT "TenantName", "ReferenceNumber", count(*) FROM "Clients"
+WHERE "ReferenceNumber" IS NOT NULL GROUP BY "TenantName", "ReferenceNumber" HAVING count(*) > 1;
+SELECT "TenantName", "UserName", count(*) FROM "SocialWorkers"
+WHERE "UserName" IS NOT NULL GROUP BY "TenantName", "UserName" HAVING count(*) > 1;
+```
+
+The migrations fail before changing schema when these collisions exist. Resolve each result through reviewed business input that identifies the record to rename or merge, the replacement natural key, the approving owner, and the corresponding `OrganisationId`. Record that input as a deployment artifact and execute it as a distinct remediation step; never hide it in generic migration setup.
+
 ## Compatibility and forward rollout
 
 1. Back up each service database and record the applied EF migration.

@@ -13,6 +13,30 @@ namespace AdminAreaManagement.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql("""
+                DO $$ BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM "StaffMembers"
+                        WHERE "UserName" IS NOT NULL
+                        GROUP BY "TenantName", "UserName" HAVING count(*) > 1
+                    ) THEN
+                        RAISE EXCEPTION 'Duplicate StaffMembers (TenantName, UserName) values must be resolved using reviewed remediation input before migration.';
+                    END IF;
+                    IF EXISTS (
+                        SELECT 1 FROM "Teams"
+                        GROUP BY "TenantName", "Acronym" HAVING count(*) > 1
+                    ) THEN
+                        RAISE EXCEPTION 'Duplicate Teams (TenantName, Acronym) values must be resolved using reviewed remediation input before migration.';
+                    END IF;
+                    IF EXISTS (
+                        SELECT 1 FROM "Partners"
+                        GROUP BY "TenantName", "PartnerNumber" HAVING count(*) > 1
+                    ) THEN
+                        RAISE EXCEPTION 'Duplicate Partners (TenantName, PartnerNumber) values must be resolved using reviewed remediation input before migration.';
+                    END IF;
+                END $$;
+                """);
+
             migrationBuilder.DropForeignKey(
                 name: "FK_ContactPersons_Partners_PartnerId",
                 table: "ContactPersons");

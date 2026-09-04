@@ -9,7 +9,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
-using Tenant;
 
 namespace ClientManagement.Infrastructure;
 
@@ -19,10 +18,6 @@ public static class DependencyInjection
     {
         services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
 
-        // Retain the legacy tenant service registration for integration-message compatibility
-        // until issue #30 replaces that boundary. The final DbContext registration below is
-        // deliberately shared and does not select a connection per tenant.
-        services.AddMultiTenantDbContext<ApplicationDbContext>(configuration);
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(
                 configuration.GetConnectionString("ClientApiConnection"),

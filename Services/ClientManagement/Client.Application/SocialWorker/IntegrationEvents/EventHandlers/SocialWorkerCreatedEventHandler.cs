@@ -1,5 +1,4 @@
 ﻿using ClientManagement.Core.Interfaces;
-using Tenant;
 using Zeka.Extensions.EventBus.Abstractions;
 
 namespace ClientManagement.Application.SocialWorker.IntegrationEvents.EventHandlers;
@@ -7,7 +6,7 @@ namespace ClientManagement.Application.SocialWorker.IntegrationEvents.EventHandl
 public class SocialWorkerCreatedEventHandler : IEventHandler<SocialWorkerCreatedEvent>
 {
     private readonly IRepositoryManager _repository;
-    public SocialWorkerCreatedEventHandler(IRepositoryManager repository, ITenantService service)
+    public SocialWorkerCreatedEventHandler(IRepositoryManager repository)
     {
         _repository = repository;
     }

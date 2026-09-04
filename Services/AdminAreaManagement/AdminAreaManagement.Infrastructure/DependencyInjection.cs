@@ -12,6 +12,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Tenant;
+using Tenant.Models;
 
 namespace AdminAreaManagement.Infrastructure;
 
@@ -21,7 +22,16 @@ public static class DependencyInjection
     {
         services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
 
-        services.AddMultiTenantDbContext<ApplicationDbContext>(configuration);
+        services.AddDbContext<ApplicationDbContext>(options =>
+            options.UseNpgsql(
+                configuration.GetConnectionString("ClientApiConnection"),
+                builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
+
+        // Compatibility for the legacy integration-event payload only. This does not
+        // participate in DbContext registration or connection selection.
+        services.Configure<TenantSettings>(configuration.GetSection("TenantSettings"));
+        services.AddHttpContextAccessor();
+        services.AddScoped<ITenantService, TenantService>();
 
         services.AddTransient<IDateTime, DateTimeService>();
         services.AddScoped<IRepositoryManager, RepositoryManager>();

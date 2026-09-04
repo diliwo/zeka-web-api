@@ -11,6 +11,25 @@ namespace ClientManagement.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql("""
+                DO $$ BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM "Clients"
+                        WHERE "ReferenceNumber" IS NOT NULL
+                        GROUP BY "TenantName", "ReferenceNumber" HAVING count(*) > 1
+                    ) THEN
+                        RAISE EXCEPTION 'Duplicate Clients (TenantName, ReferenceNumber) values must be resolved using reviewed remediation input before migration.';
+                    END IF;
+                    IF EXISTS (
+                        SELECT 1 FROM "SocialWorkers"
+                        WHERE "UserName" IS NOT NULL
+                        GROUP BY "TenantName", "UserName" HAVING count(*) > 1
+                    ) THEN
+                        RAISE EXCEPTION 'Duplicate SocialWorkers (TenantName, UserName) values must be resolved using reviewed remediation input before migration.';
+                    END IF;
+                END $$;
+                """);
+
             migrationBuilder.DropForeignKey(
                 name: "FK_MonitoringReports_Clients_ClientId",
                 table: "MonitoringReports");
