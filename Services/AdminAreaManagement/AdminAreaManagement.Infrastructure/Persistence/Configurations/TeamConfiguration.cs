@@ -12,6 +12,7 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
             builder.Property(e => e.Name).IsRequired().HasMaxLength(40);
 
             builder.Property(e => e.Acronym).IsRequired().HasMaxLength(7);
+            builder.HasIndex(e => new { e.OrganisationId, e.Acronym }).IsUnique();
         }
     }
 }

@@ -2,7 +2,7 @@
 
 namespace ClientManagement.Core.Entities
 {
-    public class ProfessionalAssessment : Entity
+    public class ProfessionalAssessment : TenantOwnedEntity
     {
         public int AssessmentId { get; set; }
         public virtual Assessment Assessment { get; set; }

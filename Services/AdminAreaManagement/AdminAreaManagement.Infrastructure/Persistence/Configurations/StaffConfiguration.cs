@@ -19,6 +19,11 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
 
             builder.Property(r => r.UserName)
                 .HasMaxLength(60);
+            builder.HasIndex(r => new { r.OrganisationId, r.UserName }).IsUnique();
+            builder.HasOne(r => r.Team)
+                .WithMany(r => r.StaffMembers)
+                .HasForeignKey(r => new { r.TeamId, r.OrganisationId })
+                .HasPrincipalKey(r => new { r.Id, r.OrganisationId });
         }
     }
 }

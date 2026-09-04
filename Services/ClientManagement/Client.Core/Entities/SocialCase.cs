@@ -2,7 +2,7 @@
 
 namespace ClientManagement.Core.Entities
 {
-    public class SocialCase : Entity
+    public class SocialCase : TenantOwnedEntity
     {
         public DateTime StartDate { get; set; }
         public DateTime? EndDate { get; set; }

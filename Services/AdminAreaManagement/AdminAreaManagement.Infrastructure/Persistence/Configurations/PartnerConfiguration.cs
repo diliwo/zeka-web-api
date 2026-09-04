@@ -12,6 +12,11 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
             builder.HasKey(r => new { r.Id });
             builder
                 .Property(p => p.Name).IsRequired();
+            builder.HasIndex(p => new { p.OrganisationId, p.PartnerNumber }).IsUnique();
+            builder.HasOne(p => p.StaffMember)
+                .WithMany()
+                .HasForeignKey(p => new { p.StaffMemberId, p.OrganisationId })
+                .HasPrincipalKey(p => new { p.Id, p.OrganisationId });
             builder
                 .HasKey(r => new { r.Id });
             builder
@@ -19,20 +24,26 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
             builder
                 .OwnsMany<ContactPerson>("ContactPersons", t =>
                 {
-                    t.WithOwner().HasForeignKey("PartnerId");
+                    t.Property<Guid>("OrganisationId");
+                    t.WithOwner()
+                        .HasForeignKey("PartnerId", "OrganisationId")
+                        .HasPrincipalKey(nameof(Partner.Id), nameof(Partner.OrganisationId));
                     t.Property(p => p.ContactDetails);
                     t.Property(p => p.ContactName);
                     t.Property(p => p.Gender);
                     t.Property(p => p.ToDelete);
-                    t.HasKey("PartnerId","ContactDetails","Gender", "ToDelete");
+                    t.HasKey("PartnerId", "OrganisationId", "ContactDetails", "Gender", "ToDelete");
                     t.ToTable("ContactPersons");
                 });
             builder
                 .OwnsMany<Email>(e => e.Emails, a =>
                 {
-                    a.WithOwner().HasForeignKey("PartnerId");
+                    a.Property<Guid>("OrganisationId");
+                    a.WithOwner()
+                        .HasForeignKey("PartnerId", "OrganisationId")
+                        .HasPrincipalKey(nameof(Partner.Id), nameof(Partner.OrganisationId));
                     a.Property(e => e.EmailAddress);
-                    a.HasKey("PartnerId","Id");
+                    a.HasKey("PartnerId", "OrganisationId", "Id");
                     a.ToTable("Emails");
                 });            
             builder

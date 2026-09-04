@@ -13,7 +13,8 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
             builder
                 .HasOne(s => s.Client)
                 .WithMany(r => r.ProfessionnalExpectations)
-                .HasForeignKey(e => e.ClientId);
+                .HasForeignKey(e => new { e.ClientId, e.OrganisationId })
+                .HasPrincipalKey(e => new { e.Id, e.OrganisationId });
             builder
                 .HasQueryFilter(c => c.Softdelete);
             builder

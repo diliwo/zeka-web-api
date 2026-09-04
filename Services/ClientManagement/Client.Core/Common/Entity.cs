@@ -2,7 +2,7 @@
 
 namespace ClientManagement.Core.Common
 {
-    public abstract class Entity : IHasTenant
+    public abstract class Entity
     {
         public virtual int Id { get; protected set; }
         public string CreatedBy { get; set; } = String.Empty;
@@ -10,6 +10,22 @@ namespace ClientManagement.Core.Common
         public string LastModifiedBy { get; set; } = String.Empty;
         public DateTime? LastModified { get; set; }
         public Boolean Softdelete { get; set; } = false;
-        public string TenantName { get; set; }
+        [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+        public string TenantName { get; set; } = string.Empty;
+    }
+
+    public abstract class TenantOwnedEntity : Entity
+    {
+        public Guid OrganisationId { get; private set; }
+
+        public void AssignToOrganisation(Guid organisationId)
+        {
+            if (organisationId == Guid.Empty)
+                throw new ArgumentException("Organisation ID cannot be empty.", nameof(organisationId));
+            if (OrganisationId != Guid.Empty && OrganisationId != organisationId)
+                throw new InvalidOperationException("Organisation ID is immutable once assigned.");
+
+            OrganisationId = organisationId;
+        }
     }
 }

@@ -13,11 +13,13 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
 
             builder.HasOne(q => q.Client)
                 .WithMany(b => b.MonitoringReports)
-                .HasForeignKey(q => q.ClientId);
+                .HasForeignKey(q => new { q.ClientId, q.OrganisationId })
+                .HasPrincipalKey(q => new { q.Id, q.OrganisationId });
 
             builder.HasOne(q => q.SocialWorker)
                 .WithMany(r => r.MonitoringReports)
-                .HasForeignKey(q => q.SocialWorkerId);
+                .HasForeignKey(q => new { q.SocialWorkerId, q.OrganisationId })
+                .HasPrincipalKey(q => new { q.Id, q.OrganisationId });
 
             builder.HasOne(q => q.MonitoringAction)
                 .WithMany(a => a.MonitoringReports)

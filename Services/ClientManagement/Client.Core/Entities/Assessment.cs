@@ -3,7 +3,7 @@ using ClientManagement.Core.Enums;
 
 namespace ClientManagement.Core.Entities
 {
-    public class Assessment : Entity
+    public class Assessment : TenantOwnedEntity
     {
         public Boolean IsFinalized { get; set; } = false;
         public string UserName { get; set; }

@@ -19,6 +19,7 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
                 .Ignore(b => b.FullName);
             builder.Property(b => b.ReferenceNumber)
                 .IsRequired();
+            builder.HasIndex(b => new { b.OrganisationId, b.ReferenceNumber }).IsUnique();
             builder
                 .OwnsOne(b => b.Address);
             builder

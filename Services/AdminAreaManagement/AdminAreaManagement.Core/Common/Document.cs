@@ -1,6 +1,6 @@
 ﻿namespace AdminAreaManagement.Core.Common
 {
-    public abstract class Document : Entity
+    public abstract class Document : TenantOwnedEntity
     {
         public string Name { get; set; }
         public string ContentType { get; set; }

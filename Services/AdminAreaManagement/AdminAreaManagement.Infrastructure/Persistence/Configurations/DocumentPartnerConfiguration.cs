@@ -12,7 +12,8 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
             builder
                 .HasOne(d => d.Partner)
                 .WithMany(j => j.Documents)
-                .HasForeignKey(f => f.PartnerId);
+                .HasForeignKey(f => new { f.PartnerId, f.OrganisationId })
+                .HasPrincipalKey(p => new { p.Id, p.OrganisationId });
             builder
                 .Ignore(d => d.ContentFile);
         }
