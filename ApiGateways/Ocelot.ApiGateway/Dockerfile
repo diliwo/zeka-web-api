@@ -10,7 +10,6 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY nuget.config .
 COPY ["ApiGateways/Ocelot.ApiGateway/Ocelot.ApiGateway.csproj", "ApiGateways/Ocelot.ApiGateway/"]
-COPY ["local-nuget-packages/", "ApiGateways/local-nuget-packages/"]
 COPY ["nuget.config", "ApiGateways/"]
 
 RUN --mount=type=secret,id=github_token \

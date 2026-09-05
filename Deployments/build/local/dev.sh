@@ -4,15 +4,16 @@ set -euo pipefail
 command_name="${1:-}"
 service_name="${2:-}"
 
-project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-env_template="${project_dir}/.op/local.env"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="$(cd "${script_dir}/../../.." && pwd)"
+env_template="${script_dir}/.op/local.env"
 
 export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/$(id -u)/docker.sock}"
 
 compose_with_secrets() {
     op run \
         --env-file="${env_template}" \
-        -- docker compose --project-directory "${project_dir}" "$@"
+        -- docker compose --project-directory "${repository_root}" "$@"
 }
 
 case "${command_name}" in
@@ -39,18 +40,18 @@ case "${command_name}" in
 
     down)
         docker compose \
-            --project-directory "${project_dir}" \
+            --project-directory "${repository_root}" \
             down
         ;;
 
     logs)
         if [[ -n "${service_name}" ]]; then
             docker compose \
-                --project-directory "${project_dir}" \
+                --project-directory "${repository_root}" \
                 logs --follow "${service_name}"
         else
             docker compose \
-                --project-directory "${project_dir}" \
+                --project-directory "${repository_root}" \
                 logs --follow
         fi
         ;;
