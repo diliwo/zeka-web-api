@@ -2,7 +2,7 @@
 
 namespace ClientManagement.Core.Entities
 {
-    public class MonitoringReport : Entity
+    public class MonitoringReport : TenantOwnedEntity
     {
         public MonitoringReport()
         {

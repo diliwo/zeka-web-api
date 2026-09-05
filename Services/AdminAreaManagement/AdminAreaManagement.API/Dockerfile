@@ -14,22 +14,22 @@ COPY ["Services/AdminAreaManagement/AdminAreaManagement.API/AdminAreaManagement.
 #COPY ["Services/AdminAreaManagement/AdminAreaManagement.Core/AdminAreaManagement.Core.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Core/"]
 #COPY ["Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj", "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/"]
 
-RUN --mount=type=secret,id=github_token \
-    dotnet nuget update source github \
-      --username diliwo \
-      --password "$(cat /run/secrets/github_token)" \
-      --store-password-in-clear-text \
-      --configfile nuget.config && \
+RUN --mount=type=secret,id=github_token,required=true \
+    NuGetPackageSourceCredentials_github="Username=diliwo;Password=$(cat /run/secrets/github_token);ValidAuthenticationTypes=Basic" \
     dotnet restore "./Services/AdminAreaManagement/AdminAreaManagement.API/./AdminAreaManagement.API.csproj" \
       --configfile nuget.config
 
 COPY . .
 WORKDIR "/src/Services/AdminAreaManagement/AdminAreaManagement.API"
-RUN dotnet build "./AdminAreaManagement.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
+RUN --mount=type=secret,id=github_token,required=true \
+    NuGetPackageSourceCredentials_github="Username=diliwo;Password=$(cat /run/secrets/github_token);ValidAuthenticationTypes=Basic" \
+    dotnet build "./AdminAreaManagement.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./AdminAreaManagement.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN --mount=type=secret,id=github_token,required=true \
+    NuGetPackageSourceCredentials_github="Username=diliwo;Password=$(cat /run/secrets/github_token);ValidAuthenticationTypes=Basic" \
+    dotnet publish "./AdminAreaManagement.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app

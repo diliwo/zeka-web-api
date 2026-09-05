@@ -25,6 +25,11 @@
     <PackageReference Include="Shouldly" Version="4.2.1" />
     <PackageReference Include="Respawn" Version="6.2.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.10" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\AdminAreaManagement.Infrastructure\AdminAreaManagement.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

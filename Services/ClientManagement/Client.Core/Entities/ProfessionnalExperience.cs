@@ -3,7 +3,7 @@ using ClientManagement.Core.Enums;
 
 namespace ClientManagement.Core.Entities
 {
-    public class ProfessionnalExperience : Entity
+    public class ProfessionnalExperience : TenantOwnedEntity
     {
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }

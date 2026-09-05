@@ -20,5 +20,6 @@ public class SocialWorkerConfiguration : IEntityTypeConfiguration<SocialWorker>
 
         builder.Property(r => r.UserName)
             .HasMaxLength(60);
+        builder.HasIndex(r => new { r.OrganisationId, r.UserName }).IsUnique();
     }
 }

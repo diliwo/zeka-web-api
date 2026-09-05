@@ -3,7 +3,7 @@ using ClientManagement.Core.Enums;
 
 namespace ClientManagement.Core.Entities
 {
-    public class SchoolRegistration : Entity
+    public class SchoolRegistration : TenantOwnedEntity
     {
         public int TrainingId { get; set; }
         public virtual Training Training { get; set; }

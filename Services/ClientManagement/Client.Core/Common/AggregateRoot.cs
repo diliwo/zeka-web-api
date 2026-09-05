@@ -1,6 +1,6 @@
 ﻿namespace ClientManagement.Core.Common
 {
-    public abstract class AggregateRoot : Entity
+    public abstract class AggregateRoot : TenantOwnedEntity
     {
         private readonly List<IHasDomainEvent> _domainEvents = new List<IHasDomainEvent>();
         public virtual IReadOnlyList<IHasDomainEvent> DomainEvents => _domainEvents;

@@ -3,7 +3,7 @@ using AdminAreaManagement.Core.Exceptions;
 
 namespace AdminAreaManagement.Core.Entities
 {
-    public class Team : Entity
+    public class Team : TenantOwnedEntity
     {
         public string Name { get; set; }
         public string Acronym { get; set; }

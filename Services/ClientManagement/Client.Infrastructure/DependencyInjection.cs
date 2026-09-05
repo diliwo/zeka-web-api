@@ -8,7 +8,7 @@ using ClientManagement.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Tenant;
+using Microsoft.EntityFrameworkCore;
 
 namespace ClientManagement.Infrastructure;
 
@@ -18,7 +18,10 @@ public static class DependencyInjection
     {
         services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
 
-        services.AddMultiTenantDbContext<ApplicationDbContext>(configuration);
+        services.AddDbContext<ApplicationDbContext>(options =>
+            options.UseNpgsql(
+                configuration.GetConnectionString("ClientApiConnection"),
+                builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
 
         services.AddTransient<IMonitoringActionRepository, MonitoringActionRepository>(); ;
         services.AddTransient<ILanguageRepository, LanguageRepository>(); 
