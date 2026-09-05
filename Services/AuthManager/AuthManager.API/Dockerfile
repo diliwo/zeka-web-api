@@ -18,7 +18,7 @@ RUN dotnet restore "Services/AuthManager/AuthManager.API/AuthManager.API.csproj"
 
 COPY . .
 WORKDIR "/src/Services/AuthManager/AuthManager.API"
-RUN dotnet build "./AuthManager.API.csproj" -c $BUILD_CONFIGURATION -o /app/build --no-restore
+RUN dotnet build "./AuthManager.API.csproj" -c $BUILD_CONFIGURATION --no-restore
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release

@@ -12,22 +12,22 @@ COPY nuget.config .
 COPY ["ApiGateways/Ocelot.ApiGateway/Ocelot.ApiGateway.csproj", "ApiGateways/Ocelot.ApiGateway/"]
 COPY ["nuget.config", "ApiGateways/"]
 
-RUN --mount=type=secret,id=github_token \
-    dotnet nuget update source github \
-      --username diliwo \
-      --password "$(cat /run/secrets/github_token)" \
-      --store-password-in-clear-text \
-      --configfile nuget.config && \
+RUN --mount=type=secret,id=github_token,required=true \
+    NuGetPackageSourceCredentials_github="Username=diliwo;Password=$(cat /run/secrets/github_token);ValidAuthenticationTypes=Basic" \
     dotnet restore "./ApiGateways/Ocelot.ApiGateway/./Ocelot.ApiGateway.csproj" \
       --configfile nuget.config
 
 COPY . .
 WORKDIR "/src/ApiGateways/Ocelot.ApiGateway"
-RUN dotnet build "./Ocelot.ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/build
+RUN --mount=type=secret,id=github_token,required=true \
+    NuGetPackageSourceCredentials_github="Username=diliwo;Password=$(cat /run/secrets/github_token);ValidAuthenticationTypes=Basic" \
+    dotnet build "./Ocelot.ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./Ocelot.ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN --mount=type=secret,id=github_token,required=true \
+    NuGetPackageSourceCredentials_github="Username=diliwo;Password=$(cat /run/secrets/github_token);ValidAuthenticationTypes=Basic" \
+    dotnet publish "./Ocelot.ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
