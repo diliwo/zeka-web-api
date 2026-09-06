@@ -24,3 +24,13 @@ The API for Zeka is designed to handle client and case management via a scalable
 ## Architecture
 
 ![Zeka_archi](https://github.com/user-attachments/assets/30ff9b7a-72d5-4766-a4fe-3d37f1f94fff)
+
+## Private package restore
+
+`Zeka.Extensions.*` packages are restored from GitHub Packages. The tracked
+`nuget.config` contains package sources only; credentials must be injected at
+runtime through 1Password.
+
+See [Private package restore](Docs/security/private-package-restore.md) for the
+one-time setup and restore command. Before committing package configuration,
+run `./scripts/security/check-nuget-credentials.sh`.
