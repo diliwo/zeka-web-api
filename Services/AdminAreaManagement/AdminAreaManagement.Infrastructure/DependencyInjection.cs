@@ -1,5 +1,6 @@
 ﻿using AdminAreaManagement.Application.Common.Services;
 using AdminAreaManagement.Core.Entities;
+using AdminAreaManagement.Application.Cities;
 using AdminAreaManagement.Core.Enums;
 using AdminAreaManagement.Core.Interfaces;
 using AdminAreaManagement.Infrastructure.Persistence;
@@ -35,6 +36,7 @@ public static class DependencyInjection
 
         services.AddTransient<IDateTime, DateTimeService>();
         services.AddScoped<IRepositoryManager, RepositoryManager>();
+        services.AddScoped<ICityQueries, CityQueries>();
         services.Configure<GenericReadRepository<Reward>>(configuration.GetSection(ConfigurationKeys.Rewards));
         services.AddSingleton<IGenericReadRepository<Reward>, GenericReadRepository<Reward>>(sp =>
             sp.GetRequiredService<IOptions<GenericReadRepository<Reward>>>().Value); // TODO : move into RepositoryManager

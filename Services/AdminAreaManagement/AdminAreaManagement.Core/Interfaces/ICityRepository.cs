@@ -6,7 +6,6 @@ namespace AdminAreaManagement.Core.Interfaces
     {
         void Persist(City nationality);
         City GetById(int id);
-        IQueryable<City> GetCities(string filter = "");
         void SoftDelete(City city);
     }
 }
