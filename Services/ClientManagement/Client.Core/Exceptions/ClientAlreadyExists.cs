@@ -2,8 +2,8 @@
 {
     public class ClientAlreadyExists : Exception
     {
-        public ClientAlreadyExists(string ClientSsn)
-            :base($"The client with the given niss \"{ClientSsn}\" already exists !")
+        public ClientAlreadyExists()
+            :base("A client with the supplied NISS already exists.")
         {
         }
     }

@@ -33,12 +33,12 @@ namespace ClientManagement.Infrastructure.Persistence
                 {
                     case EntityState.Added:
                         entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.Created = DateTime.Now; ;
+                        entry.Entity.Created = DateTime.UtcNow;
                         break;
 
                     case EntityState.Modified:
                         entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.LastModified = DateTime.Now; ;
+                        entry.Entity.LastModified = DateTime.UtcNow;
                         break;
                 }
             }
@@ -59,12 +59,12 @@ namespace ClientManagement.Infrastructure.Persistence
                 {
                     case EntityState.Added:
                         entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.Created = DateTime.Now; ;
+                        entry.Entity.Created = DateTime.UtcNow;
                         break;
 
                     case EntityState.Modified:
                         entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.LastModified = DateTime.Now; ;
+                        entry.Entity.LastModified = DateTime.UtcNow;
                         break;
                 }
             }

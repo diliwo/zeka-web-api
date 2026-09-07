@@ -20,6 +20,9 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
             builder.Property(b => b.ReferenceNumber)
                 .IsRequired();
             builder.HasIndex(b => new { b.OrganisationId, b.ReferenceNumber }).IsUnique();
+            builder.Property(b => b.Ssn)
+                .IsRequired()
+                .UsePropertyAccessMode(PropertyAccessMode.Property);
             builder
                 .OwnsOne(b => b.Address);
             builder

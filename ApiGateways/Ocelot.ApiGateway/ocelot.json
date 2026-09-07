@@ -15,6 +15,33 @@
       ]
     },
     {
+      //Clients: sensitive inputs are carried in request bodies.
+      "DownstreamPathTemplate": "/api/clients/search",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "host.docker.internal", "Port": "5103" } ],
+      "UpstreamPathTemplate": "/clients/search",
+      "UpstreamHttpMethod": [ "Post" ],
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "10s",
+        "PeriodTimespan": 10,
+        "Limit": 3
+      }
+    },
+    {
+      "DownstreamPathTemplate": "/api/clients/native-language",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "host.docker.internal", "Port": "5103" } ],
+      "UpstreamPathTemplate": "/clients/native-language",
+      "UpstreamHttpMethod": [ "Patch" ],
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "10s",
+        "PeriodTimespan": 10,
+        "Limit": 3
+      }
+    },
+    {
       //Clients
       "DownstreamPathTemplate": "/api/clients/{url}",
       "DownstreamScheme": "http",

@@ -1,6 +1,19 @@
 @Client.API_HostAddress = http://localhost:5091
 
-GET {{Client.API_HostAddress}}/weatherforecast/
+# Supply a valid bearer token through your local HTTP client's secret store.
+# Generate syntheticNiss locally with Tests/Common/SyntheticClient.Niss(); never use a person's identifier.
+@syntheticNiss = REPLACE_WITH_SYNTHETIC_CANONICAL_NISS
+
+POST {{Client.API_HostAddress}}/api/clients/search
+Content-Type: application/json
 Accept: application/json
 
+{ "searchText": "{{syntheticNiss}}" }
+
 ###
+
+PATCH {{Client.API_HostAddress}}/api/clients/native-language
+Content-Type: application/json
+Accept: application/json
+
+{ "niss": "{{syntheticNiss}}", "language": "Français" }

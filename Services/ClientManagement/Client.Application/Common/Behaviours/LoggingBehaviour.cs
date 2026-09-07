@@ -26,8 +26,8 @@ namespace ClientManagement.Application.Common.Behaviours
                 userName =  _currentUserService.Username;
             }
 
-            _logger.LogInformation("Zeka Request: {FirstName} {@UserId} {@UserName} {@Request}",
-                requestName, userId, userName, request);
+            _logger.LogInformation("Zeka Request: {Name} {UserId} {UserName}",
+                requestName, userId, userName);
         }
     }
 }
