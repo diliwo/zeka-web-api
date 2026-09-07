@@ -12,12 +12,12 @@ namespace AdminAreaManagement.Core.Entities
         {
             if (string.IsNullOrEmpty(name))
             {
-                throw new ArgumentNullException("",$"{nameof(name)} cannot be null or empty.");
+                throw new ArgumentNullException(nameof(name), $"{nameof(name)} cannot be null or empty.");
             }
 
             if (string.IsNullOrEmpty(locality))
             {
-                throw new ArgumentNullException("",$"{nameof(locality)} cannot be null or empty.");
+                throw new ArgumentNullException(nameof(locality), $"{nameof(locality)} cannot be null or empty.");
             }
 
             Name = name;

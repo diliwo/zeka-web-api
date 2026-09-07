@@ -12,7 +12,12 @@ public class City : Entity
     {
         if (string.IsNullOrEmpty(name))
         {
-            throw new ArgumentNullException(nameof(Name));
+            throw new ArgumentNullException(nameof(name));
+        }
+
+        if (string.IsNullOrEmpty(country))
+        {
+            throw new ArgumentNullException(nameof(country));
         }
 
         Name = name;
