@@ -1,7 +1,6 @@
 ﻿using AdminAreaManagement.Application.Cities.Commands.CreateCity;
 using AdminAreaManagement.Core.Interfaces;
 using FluentValidation;
-using Microsoft.EntityFrameworkCore;
 
 namespace AdminAreaManagement.Application.Cities.Commands.UpdateCity
 {

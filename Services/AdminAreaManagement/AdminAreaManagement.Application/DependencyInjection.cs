@@ -33,7 +33,6 @@ namespace AdminAreaManagement.Application
             services.AddScoped<ISortHelper<SchoolDto>, SortHelper<SchoolDto>>();
             services.AddScoped<ISortHelper<ProfessionDto>, SortHelper<ProfessionDto>>();
             services.AddScoped<ISortHelper<PartnerDto>, SortHelper<PartnerDto>>();
-            services.AddScoped<ISortHelper<CityDto>, SortHelper<CityDto>>();
             services.AddScoped<ISortHelper<NationalityDto>, SortHelper<NationalityDto>>();
             services.AddScoped<ISortHelper<PartnerSelectionListDto>, SortHelper<PartnerSelectionListDto>>();
             services.AddAutoMapper(Assembly.GetExecutingAssembly());

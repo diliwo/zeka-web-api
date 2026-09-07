@@ -1,7 +1,5 @@
 ﻿using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
-using LinqKit;
-using Microsoft.EntityFrameworkCore;
 
 namespace AdminAreaManagement.Infrastructure.Persistence;
 
@@ -30,24 +28,6 @@ public class CityRepository : ICityRepository
     public City GetById(int id)
     {
         return _context.Cities.FirstOrDefault(s => s.Id == id);
-    }
-
-    public IQueryable<City> GetCities(string filter = "")
-    {
-        var fields = _context.Cities.AsNoTracking().AsExpandable().Where(p => p.Softdelete != true);
-
-        if (!string.IsNullOrEmpty(filter))
-        {
-            var predicate = PredicateBuilder.New<City>();
-
-            predicate = predicate.Or(p => p.Country.ToLower().Contains(filter.ToLower().Trim()));
-
-            predicate = predicate.Or(p => p.Name.ToLower().Contains(filter.ToLower().Trim()));
-
-            fields = fields.Where(predicate);
-        }
-
-        return fields;
     }
 
     public void SoftDelete(City city)

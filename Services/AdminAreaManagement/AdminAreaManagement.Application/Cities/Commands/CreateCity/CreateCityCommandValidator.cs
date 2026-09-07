@@ -1,33 +1,29 @@
-﻿using AdminAreaManagement.Core.Interfaces;
+using AdminAreaManagement.Core.Entities;
 using FluentValidation;
-using Microsoft.EntityFrameworkCore;
 
-namespace AdminAreaManagement.Application.Cities.Commands.CreateCity
+namespace AdminAreaManagement.Application.Cities.Commands.CreateCity;
+
+public class CreateCityCommandValidator : AbstractValidator<CreateCityCommand>
 {
-    public class CreateCityCommandValidator : AbstractValidator<CreateCityCommand>
+    public CreateCityCommandValidator(ICityQueries cities)
     {
+        RuleFor(v => v.Name).Custom((value, context) => ValidateText(value, "Name", context));
+        RuleFor(v => v.Country).Custom((value, context) => ValidateText(value, "Country", context));
 
-        private readonly IRepositoryManager _repository;
+        RuleFor(v => v.Name)
+            .MustAsync(async (command, _, cancellationToken) =>
+                !await cities.ActiveCityExistsAsync(command.Name, command.Country, cancellationToken))
+            .When(command => CityText.IsValid(command.Name) && CityText.IsValid(command.Country))
+            .WithMessage("The specified city already exists.");
+    }
 
-        public CreateCityCommandValidator(IRepositoryManager repository)
-        {
-            _repository = repository;
-
-            RuleFor(v => v.Name)
-                .NotEmpty().WithMessage("Name is required.")
-                .MaximumLength(100).WithMessage("Number of chars must not exceed 50.")
-                .MustAsync(BeUnique).WithMessage("The specified city already exists.");
-
-            RuleFor(v => v.Country)
-                .NotEmpty().WithMessage("Country is required.")
-                .MaximumLength(100).WithMessage("Number of chars must not exceed 50.")
-                .MustAsync(BeUnique).WithMessage("The specified country already exists.");
-        }
-
-        public async Task<bool> BeUnique(string name, CancellationToken cancellationToken)
-        {
-            return await _repository.City.GetCities("")
-                .AllAsync(c => c.Name != name || c.Country != name);
-        }
+    private static void ValidateText(string value, string field, ValidationContext<CreateCityCommand> context)
+    {
+        if (!CityText.TryNormalize(value, out var normalized))
+            context.AddFailure(value is null ? $"{field} is required." : $"{field} must be valid Unicode text.");
+        else if (normalized.Length == 0)
+            context.AddFailure($"{field} is required.");
+        else if (CityText.ScalarLength(normalized) > CityText.MaximumLength)
+            context.AddFailure($"{field} must not exceed {CityText.MaximumLength} Unicode scalar values after normalization and trimming.");
     }
 }

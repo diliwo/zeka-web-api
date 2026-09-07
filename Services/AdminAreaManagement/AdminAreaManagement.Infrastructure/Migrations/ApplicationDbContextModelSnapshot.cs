@@ -53,12 +53,36 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("NormalizedCountry")
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("text")
+                        .HasComputedColumnSql("public.zeka_city_key(\"Country\")", true)
+                        .UseCollation("C");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("text")
+                        .HasComputedColumnSql("public.zeka_city_key(\"Name\")", true)
+                        .UseCollation("C");
+
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
                     b.HasKey("Id");
 
-                    b.ToTable("Cities");
+                    b.HasIndex("NormalizedName", "NormalizedCountry")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Cities_ActiveNormalizedIdentity")
+                        .HasFilter("NOT \"Softdelete\"");
+
+                    b.ToTable("Cities", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Cities_Country_Text", "char_length(public.zeka_city_text(\"Country\")) BETWEEN 1 AND 100");
+
+                            t.HasCheckConstraint("CK_Cities_Name_Text", "char_length(public.zeka_city_text(\"Name\")) BETWEEN 1 AND 100");
+                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.DocumentPartner", b =>
