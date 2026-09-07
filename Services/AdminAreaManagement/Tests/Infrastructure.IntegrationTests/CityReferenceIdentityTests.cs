@@ -81,16 +81,18 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         string name, string country, string otherName, string otherCountry)
     {
         await using var context = await fixture.CreateContextAsync();
-        await InsertAsync(context, name, country);
+        var canonical = new City(name, country);
+        await InsertAsync(context, canonical.Name, canonical.Country);
         (await Queries(context).ActiveCityExistsAsync(otherName, otherCountry, CancellationToken.None)).Should().BeTrue();
 
-        Func<Task> duplicate = () => InsertAsync(context, otherName, otherCountry);
+        var equivalent = new City(otherName, otherCountry);
+        Func<Task> duplicate = () => InsertAsync(context, equivalent.Name, equivalent.Country);
         var exception = await duplicate.Should().ThrowAsync<PostgresException>();
         exception.Which.SqlState.Should().Be(PostgresErrorCodes.UniqueViolation);
         exception.Which.ConstraintName.Should().Be("UX_Cities_ActiveNormalizedIdentity");
         var city = await context.Cities.SingleAsync();
-        city.Name.Should().Be(name);
-        city.Country.Should().Be(country);
+        city.Name.Should().Be(name.Normalize().Trim());
+        city.Country.Should().Be(country.Normalize().Trim());
         context.Model.FindEntityType(typeof(City))!.FindProperty("OrganisationId").Should().BeNull();
     }
 
@@ -114,14 +116,30 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
     {
         await using var context = await fixture.CreateContextAsync();
         var display = " \u00a0" + string.Concat(Enumerable.Repeat("e\u0301\U0001f600", 50)) + "\t";
-        await InsertAsync(context, display, display);
-        (await context.Cities.SingleAsync()).Name.Should().Be(display);
+        var city = new City(display, display);
+        await InsertAsync(context, city.Name, city.Country);
+        var persisted = await context.Cities.SingleAsync();
+        var canonical = string.Concat(Enumerable.Repeat("é\U0001f600", 50));
+        persisted.Name.Should().Be(canonical);
+        persisted.Country.Should().Be(canonical);
+        context.Model.FindEntityType(typeof(City))!.FindProperty("Name")!.GetMaxLength().Should().Be(100);
+        context.Model.FindEntityType(typeof(City))!.FindProperty("Country")!.GetMaxLength().Should().Be(100);
         foreach (var invalid in new[] { new string('a', 101), string.Concat(Enumerable.Repeat("\U0001f600", 101)), "\t\u00a0", "" })
         {
             Func<Task> name = () => InsertAsync(context, invalid, "Belgium");
             Func<Task> country = () => InsertAsync(context, "Brussels", invalid);
-            (await name.Should().ThrowAsync<PostgresException>()).Which.ConstraintName.Should().Be("CK_Cities_Name_Text");
-            (await country.Should().ThrowAsync<PostgresException>()).Which.ConstraintName.Should().Be("CK_Cities_Country_Text");
+            var nameFailure = (await name.Should().ThrowAsync<PostgresException>()).Which;
+            var countryFailure = (await country.Should().ThrowAsync<PostgresException>()).Which;
+            if (invalid.Length > 100)
+            {
+                nameFailure.SqlState.Should().Be(PostgresErrorCodes.StringDataRightTruncation);
+                countryFailure.SqlState.Should().Be(PostgresErrorCodes.StringDataRightTruncation);
+            }
+            else
+            {
+                nameFailure.ConstraintName.Should().Be("CK_Cities_Name_Text");
+                countryFailure.ConstraintName.Should().Be("CK_Cities_Country_Text");
+            }
         }
     }
 
@@ -162,7 +180,7 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         await InsertAsync(context, "Brussels", "Belgium");
         await InsertAsync(context, "Antwerp", "Belgium");
         Func<Task> duplicate = () => context.Database.ExecuteSqlRawAsync(
-            """UPDATE "Cities" SET "Name" = ' BRUSSELS ' WHERE "Name" = 'Antwerp'""");
+            """UPDATE "Cities" SET "Name" = 'BRUSSELS' WHERE "Name" = 'Antwerp'""");
         (await duplicate.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be(PostgresErrorCodes.UniqueViolation);
         await context.Database.ExecuteSqlRawAsync("""UPDATE "Cities" SET "Name" = 'Gent' WHERE "Name" = 'Antwerp'""");
         (await Queries(context).ActiveCityExistsAsync("GENT", "BELGIUM", CancellationToken.None)).Should().BeTrue();
@@ -184,7 +202,7 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
             catch (PostgresException exception) { return exception.SqlState; }
         }
         var first = Write(context, "Brussels");
-        var second = Write(other, " BRUSSELS ");
+        var second = Write(other, "BRUSSELS");
         gate.SetResult();
         (await Task.WhenAll(first, second)).Should().BeEquivalentTo("committed", PostgresErrorCodes.UniqueViolation);
         (await context.Cities.CountAsync()).Should().Be(1);
@@ -261,9 +279,12 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         await InsertAsync(context, name, "Belgium");
         if (duplicate) await InsertAsync(context, " BRUSSELS ", "BELGIUM");
         var before = await context.Database.SqlQuery<int>($"""SELECT count(*)::int AS "Value" FROM "Cities" """).SingleAsync();
+        var beforeNames = await context.Database.SqlQuery<string>($"""SELECT "Name" AS "Value" FROM "Cities" ORDER BY "CityId" """).ToListAsync();
         Func<Task> migrate = () => context.GetService<IMigrator>().MigrateAsync();
         var exception = await migrate.Should().ThrowAsync<PostgresException>();
         exception.Which.MessageText.Should().Contain("reviewed remediation");
+        (await context.Database.SqlQuery<string>($"""SELECT "Name" AS "Value" FROM "Cities" ORDER BY "CityId" """).ToListAsync())
+            .Should().Equal(beforeNames);
         (await context.Database.SqlQuery<int>($"""SELECT count(*)::int AS "Value" FROM "Cities" """).SingleAsync()).Should().Be(before);
         (await context.Database.SqlQuery<int>($"""
             SELECT count(*)::int AS "Value" FROM information_schema.columns
@@ -278,22 +299,63 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
     }
 
     [Fact]
-    public async Task Migration_preserves_legacy_display_and_rollback_only_removes_derived_schema()
+    public async Task Migration_canonicalizes_legacy_text_and_rollback_preserves_the_canonical_values()
     {
         await using var context = await fixture.CreateContextAsync(migrateCity: false);
         await InsertAsync(context, " Lie\u0300ge ", " Belgium ");
-        await InsertAsync(context, "LIÈGE", "BELGIUM", deleted: true);
+        await InsertAsync(context, " LIE\u0300GE ", " BELGIUM ", deleted: true);
         await context.GetService<IMigrator>().MigrateAsync();
         (await context.Cities.CountAsync()).Should().Be(2);
         var active = await context.Cities.SingleAsync(c => !c.Softdelete);
-        active.Name.Should().Be(" Lie\u0300ge ");
+        active.Name.Should().Be("Liège");
+        active.Country.Should().Be("Belgium");
+        var deleted = await context.Cities.SingleAsync(c => c.Softdelete);
+        deleted.Name.Should().Be("LIÈGE");
+        deleted.Country.Should().Be("BELGIUM");
         (await Queries(context).ActiveCityExistsAsync("LIÈGE", "BELGIUM", CancellationToken.None)).Should().BeTrue();
         await context.GetService<IMigrator>().MigrateAsync(CityPostgreSqlFixture.PreviousMigration);
         (await context.Database.SqlQuery<string>($"""
             SELECT "Name" AS "Value" FROM "Cities" WHERE NOT "Softdelete"
-            """).SingleAsync()).Should().Be(" Lie\u0300ge ");
+            """).SingleAsync()).Should().Be("Liège");
         await context.GetService<IMigrator>().MigrateAsync();
         (await context.Cities.CountAsync()).Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData(" Brussels ")]
+    [InlineData("Lie\u0300ge")]
+    [InlineData("\u00a0Paris\t")]
+    public async Task Raw_inserts_and_updates_cannot_store_noncanonical_text(string noncanonical)
+    {
+        await using var context = await fixture.CreateContextAsync();
+        Func<Task> name = () => InsertAsync(context, noncanonical, "Belgium");
+        Func<Task> country = () => InsertAsync(context, "Brussels", noncanonical);
+        (await name.Should().ThrowAsync<PostgresException>()).Which.ConstraintName.Should().Be("CK_Cities_Name_Text");
+        (await country.Should().ThrowAsync<PostgresException>()).Which.ConstraintName.Should().Be("CK_Cities_Country_Text");
+        await InsertAsync(context, "Brussels", "Belgium");
+        Func<Task> updateName = () => context.Database.ExecuteSqlInterpolatedAsync($"""UPDATE "Cities" SET "Name" = {noncanonical}""");
+        Func<Task> updateCountry = () => context.Database.ExecuteSqlInterpolatedAsync($"""UPDATE "Cities" SET "Country" = {noncanonical}""");
+        (await updateName.Should().ThrowAsync<PostgresException>()).Which.ConstraintName.Should().Be("CK_Cities_Name_Text");
+        (await updateCountry.Should().ThrowAsync<PostgresException>()).Which.ConstraintName.Should().Be("CK_Cities_Country_Text");
+        (await context.Cities.SingleAsync()).Name.Should().Be("Brussels");
+    }
+
+    [Fact]
+    public async Task Migration_canonicalizes_before_narrowing_the_storage_length()
+    {
+        await using var context = await fixture.CreateContextAsync(migrateCity: false);
+        var raw = new string(' ', 1000) + string.Concat(Enumerable.Repeat("e\u0301\U0001f600", 50)) + "\t";
+        await InsertAsync(context, raw, raw);
+        await context.GetService<IMigrator>().MigrateAsync();
+        var city = await context.Cities.SingleAsync();
+        var canonical = string.Concat(Enumerable.Repeat("é\U0001f600", 50));
+        city.Name.Should().Be(canonical);
+        city.Country.Should().Be(canonical);
+        var sizes = await context.Database.SqlQuery<int>($"""
+            SELECT character_maximum_length AS "Value" FROM information_schema.columns
+            WHERE table_name = 'Cities' AND column_name IN ('Name', 'Country')
+            """).ToListAsync();
+        sizes.Should().Equal(100, 100);
     }
 
     [Fact]

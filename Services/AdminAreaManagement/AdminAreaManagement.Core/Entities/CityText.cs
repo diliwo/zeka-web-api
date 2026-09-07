@@ -2,7 +2,7 @@ using System.Text;
 
 namespace AdminAreaManagement.Core.Entities;
 
-/// <summary>Text policy for shared City reference data; display text is not rewritten.</summary>
+/// <summary>Canonical text policy for shared City reference data; preserves case, accents and internal whitespace.</summary>
 public static class CityText
 {
     public const int MaximumLength = 100;
@@ -36,10 +36,10 @@ public static class CityText
     public static string Validate(string value, string parameterName)
     {
         if (string.IsNullOrEmpty(value)) throw new ArgumentNullException(parameterName);
-        if (!IsValid(value))
+        if (!TryNormalize(value, out var normalized) || normalized.Length == 0 || ScalarLength(normalized) > MaximumLength)
             throw new ArgumentException(
                 $"City text must contain 1 to {MaximumLength} Unicode scalar values after NFC normalization and outer trimming.",
                 parameterName);
-        return value;
+        return normalized;
     }
 }

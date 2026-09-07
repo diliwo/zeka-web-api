@@ -13,9 +13,9 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
             builder
                 .HasKey(r => new { r.Id });
 
-            // Display values remain text: the limit applies after NFC/trim, not to stored UTF-16 length.
-            builder.Property(city => city.Name).IsRequired();
-            builder.Property(city => city.Country).IsRequired();
+            // PostgreSQL varchar counts Unicode scalars; Domain canonicalizes before persistence.
+            builder.Property(city => city.Name).IsRequired().HasMaxLength(CityText.MaximumLength);
+            builder.Property(city => city.Country).IsRequired().HasMaxLength(CityText.MaximumLength);
             builder.Property<string>("NormalizedName").IsRequired().UseCollation("C")
                 .HasComputedColumnSql("public.zeka_city_key(\"Name\")", stored: true);
             builder.Property<string>("NormalizedCountry").IsRequired().UseCollation("C")
@@ -26,9 +26,9 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
             builder.ToTable("Cities", table =>
             {
                 table.HasCheckConstraint("CK_Cities_Name_Text",
-                    "char_length(public.zeka_city_text(\"Name\")) BETWEEN 1 AND 100");
+                    "\"Name\" COLLATE \"C\" = public.zeka_city_text(\"Name\") COLLATE \"C\" AND char_length(\"Name\") BETWEEN 1 AND 100");
                 table.HasCheckConstraint("CK_Cities_Country_Text",
-                    "char_length(public.zeka_city_text(\"Country\")) BETWEEN 1 AND 100");
+                    "\"Country\" COLLATE \"C\" = public.zeka_city_text(\"Country\") COLLATE \"C\" AND char_length(\"Country\") BETWEEN 1 AND 100");
             });
 
         }

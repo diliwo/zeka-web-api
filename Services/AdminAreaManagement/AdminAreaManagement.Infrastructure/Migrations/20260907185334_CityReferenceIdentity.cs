@@ -40,8 +40,18 @@ public partial class CityReferenceIdentity : Migration
                     RAISE EXCEPTION 'Active normalized City duplicates exist; reviewed remediation is required before migration.';
                 END IF;
             END $$;
+
+            -- Both preflights run before any data rewrite, including for soft-deleted rows.
+            UPDATE "Cities"
+            SET "Name" = public.zeka_city_text("Name"), "Country" = public.zeka_city_text("Country");
             """);
 
+        migrationBuilder.AlterColumn<string>(
+            name: "Name", table: "Cities", type: "character varying(100)", maxLength: 100, nullable: false,
+            oldClrType: typeof(string), oldType: "text");
+        migrationBuilder.AlterColumn<string>(
+            name: "Country", table: "Cities", type: "character varying(100)", maxLength: 100, nullable: false,
+            oldClrType: typeof(string), oldType: "text");
         migrationBuilder.AddColumn<string>(
             name: "NormalizedCountry", table: "Cities", type: "text", nullable: false,
             computedColumnSql: "public.zeka_city_key(\"Country\")", stored: true, collation: "C");
@@ -54,10 +64,10 @@ public partial class CityReferenceIdentity : Migration
             unique: true, filter: "NOT \"Softdelete\"");
         migrationBuilder.AddCheckConstraint(
             name: "CK_Cities_Name_Text", table: "Cities",
-            sql: "char_length(public.zeka_city_text(\"Name\")) BETWEEN 1 AND 100");
+            sql: "\"Name\" COLLATE \"C\" = public.zeka_city_text(\"Name\") COLLATE \"C\" AND char_length(\"Name\") BETWEEN 1 AND 100");
         migrationBuilder.AddCheckConstraint(
             name: "CK_Cities_Country_Text", table: "Cities",
-            sql: "char_length(public.zeka_city_text(\"Country\")) BETWEEN 1 AND 100");
+            sql: "\"Country\" COLLATE \"C\" = public.zeka_city_text(\"Country\") COLLATE \"C\" AND char_length(\"Country\") BETWEEN 1 AND 100");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
@@ -67,6 +77,12 @@ public partial class CityReferenceIdentity : Migration
         migrationBuilder.DropCheckConstraint(name: "CK_Cities_Country_Text", table: "Cities");
         migrationBuilder.DropColumn(name: "NormalizedName", table: "Cities");
         migrationBuilder.DropColumn(name: "NormalizedCountry", table: "Cities");
+        migrationBuilder.AlterColumn<string>(
+            name: "Name", table: "Cities", type: "text", nullable: false,
+            oldClrType: typeof(string), oldType: "character varying(100)", oldMaxLength: 100);
+        migrationBuilder.AlterColumn<string>(
+            name: "Country", table: "Cities", type: "text", nullable: false,
+            oldClrType: typeof(string), oldType: "character varying(100)", oldMaxLength: 100);
         migrationBuilder.Sql("""
             DROP FUNCTION public.zeka_city_key(text);
             DROP FUNCTION public.zeka_city_text(text);

@@ -36,7 +36,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
 
                     b.Property<string>("Country")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<DateTime>("Created")
                         .HasColumnType("timestamp without time zone");
@@ -54,7 +55,8 @@ namespace AdminAreaManagement.Infrastructure.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<string>("NormalizedCountry")
                         .IsRequired()
@@ -82,9 +84,9 @@ namespace AdminAreaManagement.Infrastructure.Migrations
 
                     b.ToTable("Cities", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Cities_Country_Text", "char_length(public.zeka_city_text(\"Country\")) BETWEEN 1 AND 100");
+                            t.HasCheckConstraint("CK_Cities_Country_Text", "\"Country\" COLLATE \"C\" = public.zeka_city_text(\"Country\") COLLATE \"C\" AND char_length(\"Country\") BETWEEN 1 AND 100");
 
-                            t.HasCheckConstraint("CK_Cities_Name_Text", "char_length(public.zeka_city_text(\"Name\")) BETWEEN 1 AND 100");
+                            t.HasCheckConstraint("CK_Cities_Name_Text", "\"Name\" COLLATE \"C\" = public.zeka_city_text(\"Name\") COLLATE \"C\" AND char_length(\"Name\") BETWEEN 1 AND 100");
                         });
                 });
 

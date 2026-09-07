@@ -68,17 +68,30 @@ public class CityTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void Length_counts_normalized_Unicode_scalars_and_preserves_display_text(bool country)
+    public void Length_counts_normalized_Unicode_scalars_and_stores_canonical_text(bool country)
     {
         var text = " \u00a0" + string.Concat(Enumerable.Repeat("e\u0301\U0001f600", 50)) + "\t";
         var city = new City(country ? "Brussels" : text, country ? text : "Belgium");
-        (country ? city.Country : city.Name).Should().Be(text);
+        var canonical = string.Concat(Enumerable.Repeat("é\U0001f600", 50));
+        (country ? city.Country : city.Name).Should().Be(canonical);
         var tooLong = text.Trim() + "a";
         Action construct = () => new City(country ? "Brussels" : tooLong, country ? tooLong : "Belgium");
         construct.Should().Throw<ArgumentException>().WithParameterName(country ? "country" : "name");
         Action mutate = () => { if (country) city.Country = tooLong; else city.Name = tooLong; };
         mutate.Should().Throw<ArgumentException>().WithParameterName(country ? "country" : "name");
-        (country ? city.Country : city.Name).Should().Be(text);
+        (country ? city.Country : city.Name).Should().Be(canonical);
+    }
+
+    [Fact]
+    public void Constructor_and_setters_canonicalize_both_fields_without_changing_display_case_or_internal_spaces()
+    {
+        var city = new City(" \u00a0E\u0301vry  Centre\t", "  Re\u0301publique  Franc\u0327aise ");
+        city.Name.Should().Be("Évry  Centre");
+        city.Country.Should().Be("République  Française");
+        city.Name = " \tLie\u0300ge  Centre ";
+        city.Country = "  BeLgIuM  ";
+        city.Name.Should().Be("Liège  Centre");
+        city.Country.Should().Be("BeLgIuM");
     }
 
     [Fact]
