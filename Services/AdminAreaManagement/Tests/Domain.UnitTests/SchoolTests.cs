@@ -40,6 +40,19 @@ public class SchoolTests
         }
     }
 
+    [Theory]
+    [InlineData(" ", "Cambridge")]
+    [InlineData("\t\r\n", "Cambridge")]
+    [InlineData("Harvard", " ")]
+    [InlineData("Harvard", "\t\r\n")]
+    public void Constructor_ShouldPreserveValues_WhenParametersAreWhitespaceOnly(string name, string locality)
+    {
+        var school = new School(name, locality);
+
+        Assert.Equal(name, school.Name);
+        Assert.Equal(locality, school.Locality);
+    }
+
     [Fact]
     public void NameAndLocalityProperties_ShouldAllowSettingAndGetting()
     {

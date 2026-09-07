@@ -34,7 +34,7 @@ public class CityTests
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("Name");
+            .WithParameterName("name");
     }
 
     [Theory]
@@ -50,6 +50,19 @@ public class CityTests
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("Country");
+            .WithParameterName("country");
+    }
+
+    [Theory]
+    [InlineData(" ", "Belgium")]
+    [InlineData("\t\r\n", "Belgium")]
+    [InlineData("Brussels", " ")]
+    [InlineData("Brussels", "\t\r\n")]
+    public void Constructor_WithWhitespaceOnlyParameters_ShouldPreserveValues(string name, string country)
+    {
+        var city = new City(name, country);
+
+        city.Name.Should().Be(name);
+        city.Country.Should().Be(country);
     }
 }

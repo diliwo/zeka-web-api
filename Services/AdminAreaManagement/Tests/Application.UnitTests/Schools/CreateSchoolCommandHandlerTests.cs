@@ -63,7 +63,11 @@ public class CreateSchoolCommandHandlerTests
         Func<Task> act = async () => await _handler.Handle(command, CancellationToken.None);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentException>().WithMessage("Name cannot be null or empty.");
+        var exception = await act.Should().ThrowExactlyAsync<ArgumentNullException>();
+        exception.WithParameterName("name")
+            .WithMessage(new ArgumentNullException("name", "name cannot be null or empty.").Message);
+        _schoolRepositoryMock.Verify(r => r.Persist(It.IsAny<School>()), Times.Never);
+        _repositoryMock.Verify(r => r.Save(), Times.Never);
     }
 
     [Theory]
@@ -78,6 +82,10 @@ public class CreateSchoolCommandHandlerTests
         Func<Task> act = async () => await _handler.Handle(command, CancellationToken.None);
 
         // Assert
-        await act.Should().ThrowAsync<ArgumentException>().WithMessage("Locality cannot be null or empty.");
+        var exception = await act.Should().ThrowExactlyAsync<ArgumentNullException>();
+        exception.WithParameterName("locality")
+            .WithMessage(new ArgumentNullException("locality", "locality cannot be null or empty.").Message);
+        _schoolRepositoryMock.Verify(r => r.Persist(It.IsAny<School>()), Times.Never);
+        _repositoryMock.Verify(r => r.Save(), Times.Never);
     }
 }
