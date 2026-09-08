@@ -30,7 +30,8 @@ namespace ClientManagement.Application.Clients.Commands.UpSertIbisNumber
                     throw new PatchDocBadRequestException();
                 }
 
-                var entity = await _repository.Client.GetClientByNissAsync(request.Niss, true);
+                var niss = Core.ValueObjects.Niss.Parse(request.Niss);
+                var entity = await _repository.Client.GetClientByNissAsync(niss.Value, true);
 
                 if (entity is null)
                 {

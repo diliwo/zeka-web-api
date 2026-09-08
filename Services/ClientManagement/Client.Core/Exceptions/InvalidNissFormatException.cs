@@ -2,8 +2,8 @@
 {
     public class InvalidNissFormatException : Exception
     {
-        public InvalidNissFormatException(string ClientSsn)
-            :base($"Le format du niss \"{ClientSsn}\" n'est pas valide !")
+        public InvalidNissFormatException()
+            :base("NISS must contain exactly eleven ASCII digits and a valid modulo-97 check.")
         {
         }
     }

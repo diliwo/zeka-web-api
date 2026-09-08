@@ -1,4 +1,4 @@
-﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Enums;
 using ClientManagement.Core.Exceptions;
 using ClientManagement.Core.ValueObjects;
@@ -22,7 +22,7 @@ namespace Domain.UnitTests
                 new DateTime(1980, 3, 15),
                 "USA",
                 "Belge",
-                "898988740",
+                ClientManagement.Tests.Common.SyntheticClient.Niss(),
                 new Email("Robert@noyce.com"),
                 new Phone("0489602345"),
                 new Phone("0478568912"),
@@ -45,7 +45,7 @@ namespace Domain.UnitTests
                     new DateTime(1980, 3, 15),
                     "RDC",
                     "Usa",
-                    "89072235122",
+                    ClientManagement.Tests.Common.SyntheticClient.Niss(),
                     new Email("Robert@noyce.com"),
                     new Phone("0489602345"),
                     new Phone("0412345785"),
@@ -69,7 +69,7 @@ namespace Domain.UnitTests
                     new DateTime(1980, 3, 15),
                     "France",
                     "Usa",
-                    "89072235122",
+                    ClientManagement.Tests.Common.SyntheticClient.Niss(),
                     new Email("Robert@noyce.com"),
                     new Phone("0489602345"),
                     new Phone("0489602345"),
@@ -93,7 +93,7 @@ namespace Domain.UnitTests
                     new DateTime(1980, 3, 15),
                     "Mexico",
                     "Belge",
-                    "89898874x",
+                    "invalid-synthetic-input",
                     new Email("Robert@noyce.com"),
                     new Phone("0489602345"),
                     new Phone("0489602784"),

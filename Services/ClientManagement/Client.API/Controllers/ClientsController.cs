@@ -1,5 +1,7 @@
 ﻿using System.Reflection;
 using ClientManagement.Application.Clients.Commands.AddClient;
+using ClientManagement.API.Filters;
+using System.ComponentModel.DataAnnotations;
 using ClientManagement.Application.Clients.Commands.UpdateNativeLanguage;
 using ClientManagement.Application.Clients.Queries.GetClientDetail;
 using ClientManagement.Application.Clients.Queries.GetClients;
@@ -8,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ClientManagement.API.Controllers
 {
+    [ApiExceptionFilter]
     public class ClientsController : ApiControllerBase
     {
         [HttpGet]
@@ -18,12 +21,17 @@ namespace ClientManagement.API.Controllers
         }
 
 
-        [HttpGet("searchtext/{text}")]
+        [HttpPost("search")]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult> GetBySearchText(string text)
+        public async Task<ActionResult> GetBySearchText([FromBody, Required] GetClientsBySearchTextQuery query)
         {
-            var vm = await Mediator.Send(new GetClientsBySearchTextQuery() { SearchText = text});
+            if (!ModelState.IsValid || query is null)
+                return BadRequest();
+
+            var vm = await Mediator.Send(query);
             return Ok(vm);
         }
 
@@ -39,20 +47,28 @@ namespace ClientManagement.API.Controllers
 
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesDefaultResponseType]
         public async Task<ActionResult> Add(AddClientCommand command)
         {
+            if (!ModelState.IsValid || command is null)
+                return BadRequest();
+
             var vm = await Mediator.Send(command);
 
             return Ok(vm);
         }
 
-        [HttpPost("updatelanguage/{ssn}/{language?}")]
+        [HttpPatch("native-language")]
         [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult> UpdateLanguage(string ssn, string language = "")
+        public async Task<ActionResult> UpdateLanguage([FromBody, Required] UpdateNativeLanguageCommand command)
         {
-            var vm = await Mediator.Send(new UpdateNativeLanguageCommand() { Niss = ssn, Language = language });
+            if (!ModelState.IsValid || command is null)
+                return BadRequest();
+
+            var vm = await Mediator.Send(command);
 
             return Ok(vm);
         }

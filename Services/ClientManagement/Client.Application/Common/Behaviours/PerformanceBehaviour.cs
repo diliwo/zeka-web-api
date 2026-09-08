@@ -46,8 +46,8 @@ namespace ClientManagement.Application.Common.Behaviours
                 //    userName = await _identityService.GetUserNameAsync(userId);
                 //}
 
-                _logger.LogWarning("CleanArchitecture Long Running Request: {Name} ({ElapsedMilliseconds} milliseconds) {@UserId} {@UserName} {@Request}",
-                    requestName, elapsedMilliseconds, userId, userName, request);
+                _logger.LogWarning("Zeka Long Running Request: {Name} ({ElapsedMilliseconds} milliseconds) {UserId} {UserName}",
+                    requestName, elapsedMilliseconds, userId, userName);
             }
 
             return response;

@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Client.Application\ClientManagement.Application.csproj" />
     <ProjectReference Include="..\..\Client.Core\ClientManagement.Core.csproj" />
+    <Compile Include="..\Common\SyntheticClient.cs" Link="Common\SyntheticClient.cs" />
   </ItemGroup>
 
 </Project>

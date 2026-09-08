@@ -1,5 +1,6 @@
 ﻿using ClientManagement.Application.Common.Exceptions;
 using Microsoft.AspNetCore.Mvc;
+using ClientManagement.Core.Exceptions;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace ClientManagement.API.Filters
@@ -14,6 +15,8 @@ namespace ClientManagement.API.Filters
             _exceptionHandlers = new Dictionary<Type, Action<ExceptionContext>>
             {
                 { typeof(ValidationException), HandleValidationException },
+                { typeof(InvalidNissFormatException), HandleInvalidNissException },
+                { typeof(ClientAlreadyExists), HandleClientAlreadyExistsException },
                 { typeof(NotFoundException), HandleNotFoundException },
                 { typeof(UnauthorizedAccessException), HandleUnauthorizedAccessException },
                 { typeof(ForbiddenAccessException), HandleForbiddenAccessException },
@@ -43,6 +46,27 @@ namespace ClientManagement.API.Filters
             }
 
             HandleUnknownException(context);
+        }
+
+        private void HandleInvalidNissException(ExceptionContext context)
+        {
+            context.Result = new BadRequestObjectResult(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid NISS.",
+                Detail = context.Exception.Message
+            });
+            context.ExceptionHandled = true;
+        }
+
+        private void HandleClientAlreadyExistsException(ExceptionContext context)
+        {
+            context.Result = new ConflictObjectResult(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "A client with the supplied NISS already exists."
+            });
+            context.ExceptionHandled = true;
         }
 
         private void HandleValidationException(ExceptionContext context)

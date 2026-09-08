@@ -21,9 +21,8 @@ namespace ClientManagement.Application.Clients.Commands.UpdateNativeLanguage
 
             public async Task<int> Handle(UpdateNativeLanguageCommand request, CancellationToken cancellationToken)
             {
-                Console.WriteLine(request.Niss);
-
-                var entity = _repository.Client.GetClientBySsN(request.Niss);
+                var niss = Core.ValueObjects.Niss.Parse(request.Niss);
+                var entity = _repository.Client.GetClientBySsN(niss.Value);
 
                 if (entity == null)
                 {

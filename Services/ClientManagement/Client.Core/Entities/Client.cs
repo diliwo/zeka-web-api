@@ -17,7 +17,12 @@ namespace ClientManagement.Core.Entities
         public DateTime BirthDate { get; set; }
         public string PlaceOfBirth { get; set; }
         public string Nationality { get; set; }
-        public string Ssn { get; set; }
+        private Niss? _niss;
+        public string Ssn
+        {
+            get => _niss?.Value ?? throw new InvalidNissFormatException();
+            set => _niss = Niss.Parse(value);
+        }
         public Email? Email { get; set; }
         public Phone? Phone { get; set; }
         public Phone? MobilePhone { get; set; }
@@ -34,7 +39,8 @@ namespace ClientManagement.Core.Entities
             get => SchoolRegistrations;
         }
 
-        public Client()
+        // EF materializes through the guarded Ssn property.
+        private Client()
         {
         }
 

@@ -26,6 +26,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Client.Infrastructure\ClientManagement.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Client.API\ClientManagement.API.csproj" />
+    <Compile Include="..\Common\SyntheticClient.cs" Link="Common\SyntheticClient.cs" />
+    <Content Include="..\..\..\..\ApiGateways\Ocelot.ApiGateway\ocelot.json"
+             Link="GatewayRoutes.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

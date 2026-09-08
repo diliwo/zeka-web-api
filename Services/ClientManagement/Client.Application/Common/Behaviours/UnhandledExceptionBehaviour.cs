@@ -22,7 +22,9 @@ namespace ClientManagement.Application.Common.Behaviours
             {
                 var requestName = typeof(TRequest).Name;
 
-                _logger.LogError(ex.Message, "CleanArchitecture Request: Unhandled Exception for Request {Name} {@Request}", requestName, request);
+                // Exception messages and request payloads may contain personal identifiers.
+                _logger.LogError("Zeka Request: Unhandled {ExceptionType} for Request {Name}",
+                    ex.GetType().Name, requestName);
 
                 throw;
             }
