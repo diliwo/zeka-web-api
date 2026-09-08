@@ -1,0 +1,291 @@
+name: MVP Validation
+
+on:
+  pull_request:
+    branches:
+      - develop
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+concurrency:
+  group: mvp-validation-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  source_policy:
+    name: Source Policy
+    runs-on: ubuntu-24.04
+    permissions: {}
+    outputs:
+      trusted: ${{ steps.classify.outputs.trusted }}
+    steps:
+      - name: Classify pull-request source
+        id: classify
+        env:
+          BASE_REPOSITORY: ${{ github.repository }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [[ "${HEAD_REPOSITORY}" == "${BASE_REPOSITORY}" ]]; then
+            echo "trusted=true" >> "${GITHUB_OUTPUT}"
+            echo "Same-repository pull request: protected validation jobs are enabled."
+          else
+            echo "trusted=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice title=Fork pull request::Secret-dependent validation is intentionally disabled. A maintainer must validate the commit from a same-repository branch."
+          fi
+
+  build_and_test:
+    name: Build and non-PostgreSQL tests
+    needs: source_policy
+    if: ${{ needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out pull-request code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - name: Reject tracked NuGet credentials
+        run: ./scripts/security/check-nuget-credentials.sh
+
+      - name: Restore solution with ephemeral package authentication
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+        run: |
+          : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
+          export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
+          dotnet restore zeka-web-api.sln --configfile nuget.config
+
+      - name: Build solution
+        run: dotnet build zeka-web-api.sln --configuration Release --no-restore
+
+      - name: Run non-PostgreSQL test projects
+        shell: bash
+        run: |
+          test_projects=(
+            "Services/AuthManager/Tests/Domain.UnitTests/Domain.UnitTests.csproj"
+            "Services/AuthManager/Tests/Application.UnitTests/Application.UnitTests.csproj"
+            "Services/AuthManager/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj"
+            "Services/AdminAreaManagement/Tests/Domain.UnitTests/Domain.UnitTests.csproj"
+            "Services/AdminAreaManagement/Tests/Application.UnitTests/Application.UnitTests.csproj"
+            "Services/ClientManagement/Tests/Domain.UnitTests/Domain.UnitTests.csproj"
+            "Services/ClientManagement/Tests/Application.UnitTests/Application.UnitTests.csproj"
+          )
+          test_status=0
+          for test_project in "${test_projects[@]}"; do
+            echo "::group::dotnet test ${test_project}"
+            if ! dotnet test "${test_project}" --configuration Release --no-build --no-restore; then
+              test_status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "${test_status}"
+
+  postgresql:
+    name: PostgreSQL Testcontainers
+    needs: source_policy
+    if: ${{ needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out pull-request code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - name: Verify Docker daemon availability
+        run: docker info
+
+      - name: Restore PostgreSQL test projects with ephemeral package authentication
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+        run: |
+          : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
+          export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
+          dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
+          dotnet restore Services/AdminAreaManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --configfile nuget.config
+          dotnet restore Services/ClientManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --configfile nuget.config
+
+      - name: Run PostgreSQL-backed integration test projects
+        shell: bash
+        run: |
+          test_projects=(
+            "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj"
+            "Services/AdminAreaManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj"
+            "Services/ClientManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj"
+          )
+          test_status=0
+          for test_project in "${test_projects[@]}"; do
+            echo "::group::dotnet test ${test_project}"
+            if ! dotnet test "${test_project}" --configuration Release --no-restore; then
+              test_status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "${test_status}"
+
+  docker_images:
+    name: Docker images (4)
+    needs: source_policy
+    if: ${{ needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out pull-request code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Verify Docker and Compose
+        run: |
+          docker version
+          docker compose version
+
+      - name: Build all four development images with an ephemeral BuildKit secret
+        env:
+          GITHUB_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+        run: |
+          : "${GITHUB_TOKEN:?No package-read credential is available}"
+          docker compose --progress plain build \
+            adminareaman.api \
+            clientman.api \
+            authman.api \
+            zekaocelotgw
+
+  sonar:
+    name: SonarQube Cloud / Quality Gate
+    needs: source_policy
+    if: ${{ needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out full pull-request history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - name: Verify SonarQube Cloud prerequisites
+        env:
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          prerequisite_status=0
+          if [[ -z "${SONAR_ORGANIZATION}" ]]; then
+            echo "::error title=Missing Sonar variable::Repository variable SONAR_ORGANIZATION is required."
+            prerequisite_status=1
+          fi
+          if [[ -z "${SONAR_PROJECT_KEY}" ]]; then
+            echo "::error title=Missing Sonar variable::Repository variable SONAR_PROJECT_KEY is required."
+            prerequisite_status=1
+          fi
+          if [[ -z "${SONAR_TOKEN}" ]]; then
+            echo "::error title=Missing Sonar secret::Repository secret SONAR_TOKEN is required."
+            prerequisite_status=1
+          fi
+          exit "${prerequisite_status}"
+
+      - name: Restore scanner and solution with ephemeral package authentication
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+        run: |
+          : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
+          export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
+          dotnet tool restore --configfile nuget.config
+          dotnet restore zeka-web-api.sln --configfile nuget.config
+
+      - name: Begin pull-request analysis
+        env:
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_PR_BASE: ${{ github.base_ref }}
+          SONAR_PR_BRANCH: ${{ github.head_ref }}
+          SONAR_PR_KEY: ${{ github.event.pull_request.number }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          dotnet sonarscanner begin \
+            /k:"${SONAR_PROJECT_KEY}" \
+            /o:"${SONAR_ORGANIZATION}" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.pullrequest.key="${SONAR_PR_KEY}" \
+            /d:sonar.pullrequest.branch="${SONAR_PR_BRANCH}" \
+            /d:sonar.pullrequest.base="${SONAR_PR_BASE}" \
+            /d:sonar.qualitygate.wait=true \
+            /d:sonar.qualitygate.timeout=300 \
+            /d:sonar.token="${SONAR_TOKEN}"
+
+      - name: Build for analysis
+        run: dotnet build zeka-web-api.sln --configuration Release --no-restore --no-incremental
+
+      - name: Complete analysis and wait for Quality Gate
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+
+  mvp_validation:
+    name: MVP Validation
+    needs:
+      - source_policy
+      - build_and_test
+      - postgresql
+      - docker_images
+      - sonar
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Require every MVP component
+        env:
+          TRUSTED_SOURCE: ${{ needs.source_policy.outputs.trusted }}
+          BUILD_AND_TEST_RESULT: ${{ needs.build_and_test.result }}
+          POSTGRESQL_RESULT: ${{ needs.postgresql.result }}
+          DOCKER_IMAGES_RESULT: ${{ needs.docker_images.result }}
+          SONAR_RESULT: ${{ needs.sonar.result }}
+        run: |
+          if [[ "${TRUSTED_SOURCE}" != "true" ]]; then
+            echo "::error title=Fork validation required::Secret-dependent jobs did not execute. Validate this commit from a same-repository branch before merge."
+            exit 1
+          fi
+
+          aggregate_status=0
+          for component_result in \
+            "Build and non-PostgreSQL tests:${BUILD_AND_TEST_RESULT}" \
+            "PostgreSQL Testcontainers:${POSTGRESQL_RESULT}" \
+            "Docker images (4):${DOCKER_IMAGES_RESULT}" \
+            "SonarQube Cloud / Quality Gate:${SONAR_RESULT}"
+          do
+            component_name="${component_result%%:*}"
+            result="${component_result##*:}"
+            if [[ "${result}" == "success" ]]; then
+              echo "${component_name}: success"
+            else
+              echo "::error title=${component_name}::Required component concluded ${result}."
+              aggregate_status=1
+            fi
+          done
+          exit "${aggregate_status}"

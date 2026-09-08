@@ -34,3 +34,10 @@ runtime through 1Password.
 See [Private package restore](Docs/security/private-package-restore.md) for the
 one-time setup and restore command. Before committing package configuration,
 run `./scripts/security/check-nuget-credentials.sh`.
+
+## Pull-request validation
+
+Pull requests targeting `develop` run the issue-scoped MVP validation workflow.
+See [MVP pull-request validation](Docs/ci/mvp-pr-validation.md) for the exact
+test projects, four-image Docker scope, fork policy, credential handling,
+reproducibility limits, Sonar prerequisites, and aggregate check behavior.
