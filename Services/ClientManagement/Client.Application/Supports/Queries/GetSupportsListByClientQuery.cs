@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.Common.Models;
@@ -7,6 +7,7 @@ using MediatR;
 
 namespace ClientManagement.Application.Supports.Queries
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ViewAll", "Clients.ViewAssigned")]
     public class GetSupportsListByClientQuery : IRequest<PaginatedList<SupportDto>>
     {
         public int ClientId { get; set; }

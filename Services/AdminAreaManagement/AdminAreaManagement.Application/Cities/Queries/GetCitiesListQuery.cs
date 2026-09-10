@@ -3,6 +3,8 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.Cities.Queries;
 
+[AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("ReferenceData.View")]
+
 public class GetCitiesListQuery : IRequest<PaginatedList<CityDto>>
 {
     public string Filter { get; set; }

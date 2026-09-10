@@ -1,10 +1,11 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
 namespace ClientManagement.Application.SchoolRegistations.Commands.DeleteSchoolRegistration
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.Delete")]
     public class DeleteSchoolRegistrationCommand : IRequest<Unit>
     {
         public int SchoolRegistrationId { get; set; }

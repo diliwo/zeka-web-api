@@ -13,14 +13,9 @@ public class SocialWorkerCreatedEventHandler : IEventHandler<SocialWorkerCreated
 
     public Task Handle(SocialWorkerCreatedEvent @event)
     {
-        var newSocialWorker = new Core.Entities.SocialWorker(@event.firstname, @event.lastname, @event.teamname,
-            @event.teamacronym, @event.username);
-        newSocialWorker.TenantName = @event.tenant; // We retrieve the tenant id from the message
-
-        _repository.SocialWorker.Persist(newSocialWorker);
-
-        _repository.Save();
-
-        return Task.CompletedTask;
+        // Legacy messages contain a mutable name and no immutable membership or revision.
+        // They require reviewed replay through the versioned contract, never name-based inference.
+        throw new ClientManagement.Application.Common.Authorization.TenantAccessException(
+            ClientManagement.Application.Common.Authorization.AccessFailure.Denied);
     }
 }

@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Mappings;
+using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Core.Interfaces;
 using AutoMapper;
@@ -7,6 +7,7 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.Staffs.Queries
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("TeamConfiguration.View")]
     public class GetStaffMemberListQuery : IRequest<PaginatedList<StaffMemberDto>>
     {
         public string Filter { get; set; }
@@ -33,7 +34,7 @@ namespace AdminAreaManagement.Application.Staffs.Queries
 
             public async Task<PaginatedList<StaffMemberDto>> Handle(GetStaffMemberListQuery request, CancellationToken cancellationToken)
             {
-                 var query = 
+                 var query =
                      _sortReferent.ApplySort(_repository.StaffMember.GetStaffMembers(request.Filter).ProjectTo<StaffMemberDto>(_mapper.ConfigurationProvider), request.OrderBy);
 
                  return await query.PaginatedListAsync(request.PageNumber, request.PageSize);

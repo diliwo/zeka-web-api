@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Mappings;
+using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.TrainingFields.Common;
 using AdminAreaManagement.Core.Interfaces;
@@ -8,6 +8,7 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.TrainingFields.Queries.GetTrainingFieldList
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("ReferenceData.View")]
     public class GetTrainingFieldListQuery : IRequest<PaginatedList<TrainingFieldDto>>
     {
         public string Filter { get; set; }

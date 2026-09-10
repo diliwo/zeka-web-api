@@ -1,4 +1,4 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
 using ClientManagement.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,18 +10,18 @@ public class RepositoryBase<T> : IRepositoryBase<T> where T : class
 
     public RepositoryBase(ApplicationDbContext context) => ApplicationDbContext = context;
 
-    public IQueryable<T> FindAll(bool trackChanges) => 
+    public IQueryable<T> FindAll(bool trackChanges) =>
         !trackChanges
-            ? ApplicationDbContext.Set<T>()
+            ? ApplicationDbContext.Visible<T>()
                 .AsNoTracking()
-            : ApplicationDbContext.Set<T>();
+            : ApplicationDbContext.Visible<T>();
 
         public IQueryable<T> FindByCondition(Expression<Func<T, bool>> expression, bool trackChanges) =>
             !trackChanges
-                ? ApplicationDbContext.Set<T>()
+                ? ApplicationDbContext.Visible<T>()
                     .Where(expression)
                     .AsNoTracking()
-                : ApplicationDbContext.Set<T>()
+                : ApplicationDbContext.Visible<T>()
                     .Where(expression);
 
     public void Create(T entity) => ApplicationDbContext.Set<T>().Add(entity);

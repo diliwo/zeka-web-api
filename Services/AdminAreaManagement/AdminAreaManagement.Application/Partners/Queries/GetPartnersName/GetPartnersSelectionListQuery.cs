@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Mappings;
+using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.Partners.Queries.Common;
 using AdminAreaManagement.Core.Interfaces;
@@ -8,6 +8,7 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.Partners.Queries.GetPartnersName
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Partners.View")]
     public class GetPartnersSelectionListQuery : IRequest<PaginatedList<PartnerSelectionListDto>>
     {
         public string Filter { get; set; }

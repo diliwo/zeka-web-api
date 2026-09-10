@@ -36,6 +36,8 @@ public static class DependencyInjection
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
         services.AddOnboardingPersistenceFoundations(configuration);
+        services.AddScoped<AuthManager.Application.Authorization.ICurrentTenantAccess, CurrentTenantAccessResolver>();
+        services.AddScoped<AuthManager.Application.Authorization.IActiveOrganisationMembership, ActiveOrganisationMembership>();
 
         if (configuration.GetValue<bool>($"{OutboxDispatcherOptions.SectionName}:Enabled"))
             services.AddHostedService<OutboxBackgroundService>();

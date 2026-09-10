@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Models;
+using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.Schools.Commands.CreateSchool;
 using AdminAreaManagement.Application.Schools.Commands.DeleteSchool;
 using AdminAreaManagement.Application.Schools.Commands.UpdateSchool;
@@ -11,6 +11,7 @@ namespace AdminAreaManagement.API.Controllers
     public class SchoolsController : ApiControllerBase
     {
         [HttpGet]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetSchoolListQuery))]
         public async Task<PaginatedList<SchoolDto>> GetAll([FromQuery] GetSchoolListQuery query)
         {
             return await Mediator.Send(query);
@@ -19,6 +20,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(CreateSchoolCommand))]
         public async Task<IActionResult> Create(CreateSchoolCommand command)
         {
             var id = await Mediator.Send(command);
@@ -29,6 +31,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPut]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(UpdateSchoolCommand))]
         public async Task<IActionResult> Update(UpdateSchoolCommand command)
         {
             var id = await Mediator.Send(command);
@@ -39,6 +42,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpDelete("{id}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(DeleteSchoolCommand))]
         public async Task<IActionResult> Delete(int id)
         {
             await Mediator.Send(new DeleteSchoolCommand() { SchoolId = id });

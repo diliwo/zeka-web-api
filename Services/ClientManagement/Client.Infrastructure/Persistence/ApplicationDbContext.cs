@@ -1,107 +1,193 @@
-﻿using System.Reflection;
-using System.Reflection.Emit;
 using ClientManagement.Core.Common;
 using ClientManagement.Core.Entities;
-using ClientManagement.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Zeka.Extensions.MultiTenancy.Abstractions;
+using Zeka.Extensions.MultiTenancy.EntityFrameworkCore;
 
-namespace ClientManagement.Infrastructure.Persistence
+namespace ClientManagement.Infrastructure.Persistence;
+
+public class ApplicationDbContext : TenantDbContext
 {
-    public class ApplicationDbContext :  DbContext
+    private readonly ClientManagement.Application.Common.Authorization.TenantOperation? operation;
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, ITenantContextAccessor tenant,
+        ClientManagement.Application.Common.Authorization.TenantOperation operation) : this(options, tenant)
+        => this.operation = operation;
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, ITenantContextAccessor tenant)
+        : base(WithAudit(options), tenant) { }
+
+    // Model inspection is permitted without a scope; runtime queries and writes still fail closed.
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : this(options, new TenantContextScope()) { }
+
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, PlatformAccessContext platform)
+        : base(WithAudit(options), platform) { }
+
+    private static DbContextOptions WithAudit(DbContextOptions options) =>
+        new DbContextOptionsBuilder(options).AddInterceptors(new EntityAuditInterceptor(), new AssignedWriteInterceptor()).Options;
+
+    public IQueryable<T> Visible<T>() where T : class
     {
-        private readonly ICurrentUserService _currentUserService;
-        private readonly IDateTime _dateTime;
-        //private readonly IDomainEventService _domainEventService;
+        var query = Set<T>().AsQueryable();
+        if (operation?.AssignedOnly != true) return query;
+        var clients = AssignedClients().Select(c => c.Id);
+        if (typeof(T) == typeof(Client)) return (IQueryable<T>)AssignedClients();
+        if (typeof(T) == typeof(SocialCase)) return (IQueryable<T>)SocialCases.Where(x => clients.Contains(x.ClientId));
+        if (typeof(T) == typeof(SchoolRegistration)) return (IQueryable<T>)SchoolRegistrations.Where(x => clients.Contains(x.ClientId));
+        if (typeof(T) == typeof(MonitoringReport)) return (IQueryable<T>)MonitoringReports.Where(x => clients.Contains(x.ClientId));
+        if (typeof(T) == typeof(Assessment)) return (IQueryable<T>)Assessments.Where(x => x.ClientId != null && clients.Contains(x.ClientId.Value));
+        if (typeof(T) == typeof(ProfessionalAssessment)) return (IQueryable<T>)ProfessionalAssessments.Where(x =>
+            x.Assessment.ClientId != null && clients.Contains(x.Assessment.ClientId.Value));
+        if (typeof(T) == typeof(ProfessionnalExperience)) return (IQueryable<T>)Set<ProfessionnalExperience>().Where(x => clients.Contains(x.ClientId));
+        if (typeof(T) == typeof(SocialWorker)) return (IQueryable<T>)SocialWorkers.Where(x => x.OrganisationMembershipId == operation.MembershipId);
+        if (typeof(IGlobalEntity).IsAssignableFrom(typeof(T))) return query;
+        throw new ClientManagement.Application.Common.Authorization.TenantAccessException(
+            ClientManagement.Application.Common.Authorization.AccessFailure.Denied);
+    }
 
-        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options) { }
+    private IQueryable<Client> AssignedClients()
+    {
+        var membership = operation!.MembershipId;
+        return Clients.Where(c => !c.Softdelete
+            && c.SocialCases.Count(s => !s.Softdelete && s.EndDate == null) == 1
+            && c.SocialCases.Any(s => !s.Softdelete && s.EndDate == null && !s.SocialWorker.Softdelete
+                && s.SocialWorker.OrganisationId == c.OrganisationId
+                && s.SocialWorker.OrganisationMembershipId == membership));
+    }
 
-        public DbSet<Client> Clients { get; set; }
-        public DbSet<SocialCase> SocialCases { get; set; }
-        public DbSet<SchoolRegistration> SchoolRegistrations { get; set; }
-        public DbSet<Assessment> Assessments { get; set; }
-        public DbSet<MonitoringReport> MonitoringReports { get; set; }
-        public DbSet<MonitoringAction> MonitoringActions { get; set; }
-        public DbSet<ProfessionalAssessment> ProfessionalAssessments { get; set; }
-        public DbSet<Language> Languages { get; set; }
-        public DbSet<SocialWorker> SocialWorkers { get; set; }
-
-        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
+    internal void ValidateAssignedWrites()
+    {
+        if (operation?.AssignedOnly != true) return;
+        foreach (var entry in ChangeTracker.Entries<TenantOwnedEntity>()
+            .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
         {
-            foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Entity> entry in ChangeTracker.Entries<Entity>())
+            int? clientId = entry.Entity switch
             {
-                switch (entry.State)
+                Client client => client.Id,
+                SocialCase support => support.ClientId,
+                SchoolRegistration school => school.ClientId,
+                MonitoringReport report => report.ClientId,
+                ProfessionnalExperience experience => experience.ClientId,
+                Assessment assessment => assessment.ClientId,
+                ProfessionalAssessment professional => Assessments.Where(a => a.Id == professional.AssessmentId)
+                    .Select(a => a.ClientId).SingleOrDefault(),
+                _ => null
+            };
+            if (clientId is null || !AssignedClients().Any(c => c.Id == clientId)) Deny();
+            if (entry.State != EntityState.Added)
+            {
+                var id = entry.Entity.Id;
+                var owned = entry.Entity switch
                 {
-                    case EntityState.Added:
-                        entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.Created = DateTime.UtcNow;
-                        break;
-
-                    case EntityState.Modified:
-                        entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.LastModified = DateTime.UtcNow;
-                        break;
-                }
+                    Client => Visible<Client>().Any(x => x.Id == id),
+                    SocialCase => Visible<SocialCase>().Any(x => x.Id == id),
+                    SchoolRegistration => Visible<SchoolRegistration>().Any(x => x.Id == id),
+                    MonitoringReport => Visible<MonitoringReport>().Any(x => x.Id == id),
+                    ProfessionnalExperience => Visible<ProfessionnalExperience>().Any(x => x.Id == id),
+                    Assessment => Visible<Assessment>().Any(x => x.Id == id),
+                    ProfessionalAssessment => Visible<ProfessionalAssessment>().Any(x => x.Id == id),
+                    _ => false
+                };
+                if (!owned) Deny();
             }
-
-            var result = await base.SaveChangesAsync(cancellationToken);
-
-            await DispatchEvents();
-
-            return result;
+            if (entry.Entity is SocialCase supportChange && !SocialWorkers.Any(w => w.Id == supportChange.SocialWorkerId
+                && w.OrganisationMembershipId == operation.MembershipId && !w.Softdelete)) Deny();
         }
+    }
 
+    private static void Deny() => throw new ClientManagement.Application.Common.Authorization.TenantAccessException(
+        ClientManagement.Application.Common.Authorization.AccessFailure.Denied);
 
-        public int SaveChanges(CancellationToken cancellationToken = new CancellationToken())
+    public int SaveChanges(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return SaveChanges();
+    }
+
+    public DbSet<Client> Clients => Set<Client>();
+    public DbSet<SocialCase> SocialCases => Set<SocialCase>();
+    public DbSet<SchoolRegistration> SchoolRegistrations => Set<SchoolRegistration>();
+    public DbSet<Assessment> Assessments => Set<Assessment>();
+    public DbSet<MonitoringReport> MonitoringReports => Set<MonitoringReport>();
+    public DbSet<MonitoringAction> MonitoringActions => Set<MonitoringAction>();
+    public DbSet<ProfessionalAssessment> ProfessionalAssessments => Set<ProfessionalAssessment>();
+    public DbSet<Language> Languages => Set<Language>();
+    public DbSet<SocialWorker> SocialWorkers => Set<SocialWorker>();
+
+    protected override void ConfigureTenantModel(ModelBuilder builder) => ConfigurePersistenceModel(builder);
+
+    internal static void ConfigurePersistenceModel(ModelBuilder builder)
+    {
+        builder.Ignore<ClientManagement.Core.ValueObjects.Address>();
+        builder.Ignore<ClientManagement.Core.ValueObjects.Email>();
+        builder.Ignore<ClientManagement.Core.ValueObjects.Phone>();
+        builder.Ignore<ClientManagement.Core.ValueObjects.Language>();
+        builder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+        // Keep the established column types; UTC schema standardization belongs to issue #25.
+        foreach (var property in builder.Model.GetEntityTypes().SelectMany(type => type.GetProperties())
+            .Where(property => property.ClrType == typeof(DateTime) || property.ClrType == typeof(DateTime?)))
         {
-            foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Entity> entry in ChangeTracker.Entries<Entity>())
+            if (property.GetColumnType() != "date")
             {
-                switch (entry.State)
-                {
-                    case EntityState.Added:
-                        entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.Created = DateTime.UtcNow;
-                        break;
-
-                    case EntityState.Modified:
-                        entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.LastModified = DateTime.UtcNow;
-                        break;
-                }
+                property.SetColumnType("timestamp without time zone");
+                var audit = property.Name is nameof(Entity.Created) or nameof(Entity.LastModified);
+                property.SetValueConverter(new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTime, DateTime>(
+                    value => DateTime.SpecifyKind(value, DateTimeKind.Unspecified),
+                    value => DateTime.SpecifyKind(value, audit ? DateTimeKind.Utc : DateTimeKind.Unspecified)));
             }
-
-            var result = base.SaveChanges();
-
-            DispatchEvents();
-
-            return result;
         }
-        protected override void OnModelCreating(ModelBuilder builder)
-        {
-            builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+        foreach (var type in builder.Model.GetEntityTypes()
+            .Where(type => typeof(TenantOwnedEntity).IsAssignableFrom(type.ClrType)))
+            builder.Entity(type.ClrType).HasAlternateKey(nameof(Entity.Id), nameof(TenantOwnedEntity.OrganisationId));
+    }
+}
 
-            base.OnModelCreating(builder);
-            foreach (var entityType in builder.Model.GetEntityTypes()
-                         .Where(type => typeof(TenantOwnedEntity).IsAssignableFrom(type.ClrType) && !type.IsOwned()))
+internal sealed class AssignedWriteInterceptor : SaveChangesInterceptor
+{
+    public override InterceptionResult<int> SavingChanges(DbContextEventData data, InterceptionResult<int> result)
+    { ((ApplicationDbContext)data.Context!).ValidateAssignedWrites(); return result; }
+    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData data,
+        InterceptionResult<int> result, CancellationToken cancellationToken = default)
+    { ((ApplicationDbContext)data.Context!).ValidateAssignedWrites(); return ValueTask.FromResult(result); }
+}
+
+// Only deployment tooling constructs this context. It is never registered in application DI.
+public sealed class DeploymentDbContext(DbContextOptions<DeploymentDbContext> options) : DbContext(options)
+{
+    public DbSet<Client> Clients => Set<Client>();
+    public DbSet<SocialCase> SocialCases => Set<SocialCase>();
+    public DbSet<SchoolRegistration> SchoolRegistrations => Set<SchoolRegistration>();
+    public DbSet<Assessment> Assessments => Set<Assessment>();
+    public DbSet<MonitoringReport> MonitoringReports => Set<MonitoringReport>();
+    public DbSet<MonitoringAction> MonitoringActions => Set<MonitoringAction>();
+    public DbSet<ProfessionalAssessment> ProfessionalAssessments => Set<ProfessionalAssessment>();
+    public DbSet<Language> Languages => Set<Language>();
+    public DbSet<SocialWorker> SocialWorkers => Set<SocialWorker>();
+    protected override void OnModelCreating(ModelBuilder builder) => ApplicationDbContext.ConfigurePersistenceModel(builder);
+}
+
+internal sealed class EntityAuditInterceptor : SaveChangesInterceptor
+{
+    private static void Stamp(DbContext? context)
+    {
+        if (context is null) return;
+        foreach (var entry in context.ChangeTracker.Entries<Entity>())
+        {
+            if (entry.State == EntityState.Added)
             {
-                builder.Entity(entityType.ClrType)
-                    .HasAlternateKey(nameof(Entity.Id), nameof(TenantOwnedEntity.OrganisationId));
+                entry.Entity.CreatedBy = "ZeKa";
+                entry.Entity.Created = DateTime.UtcNow;
             }
-        }
-
-        private async Task DispatchEvents()
-        {
-            while (true)
+            if (entry.State == EntityState.Modified)
             {
-                var domainEventEntity = ChangeTracker.Entries<IHasDomainEvent>()
-                    .Select(x => x.Entity.DomainEvents)
-                    .SelectMany(x => x)
-                    .Where(domainEvent => !domainEvent.IsPublished)
-                    .FirstOrDefault();
-                if (domainEventEntity == null) break;
-
-                domainEventEntity.IsPublished = true;
-                //await _domainEventService.Publish(domainEventEntity);
+                entry.Entity.LastModifiedBy = "ZeKa";
+                entry.Entity.LastModified = DateTime.UtcNow;
             }
         }
     }
+    public override InterceptionResult<int> SavingChanges(DbContextEventData data, InterceptionResult<int> result)
+    { Stamp(data.Context); return result; }
+    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData data,
+        InterceptionResult<int> result, CancellationToken cancellationToken = default)
+    { Stamp(data.Context); return ValueTask.FromResult(result); }
 }

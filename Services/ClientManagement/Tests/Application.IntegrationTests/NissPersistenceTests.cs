@@ -19,16 +19,17 @@ public sealed class NissPersistenceTests : IAsyncLifetime
     public async Task Canonical_identifier_round_trips_and_updates_through_the_guarded_property(bool useAsyncSave)
     {
         await using var context = CreateContext();
-        await context.Database.EnsureCreatedAsync();
+        await using var deployment = new DeploymentDbContext(new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(_postgres.GetConnectionString()).Options);
+        await deployment.Database.EnsureCreatedAsync();
         var niss = SyntheticClient.Niss(year: 0, post2000: true);
         var client = SyntheticClient.Create(niss);
-        client.AssignToOrganisation(Guid.NewGuid());
+        client.AssignToOrganisation(organisation);
         context.Clients.Add(client);
         await SaveAsync(context, useAsyncSave);
         Assert.Equal(DateTimeKind.Utc, client.Created.Kind);
         context.ChangeTracker.Clear();
 
-        var loaded = await context.Clients.IgnoreQueryFilters().SingleAsync();
+        var loaded = await context.Clients.SingleAsync();
         Assert.True(loaded.Ssn == niss, "PostgreSQL must preserve leading zeros and canonical digits.");
         Assert.Throws<InvalidNissFormatException>(() =>
             context.Entry(loaded).Property(c => c.Ssn).CurrentValue = "invalid-synthetic-input");
@@ -38,7 +39,7 @@ public sealed class NissPersistenceTests : IAsyncLifetime
         await SaveAsync(context, useAsyncSave);
         Assert.Equal(DateTimeKind.Utc, loaded.LastModified!.Value.Kind);
         context.ChangeTracker.Clear();
-        var updated = await context.Clients.IgnoreQueryFilters().SingleAsync();
+        var updated = await context.Clients.SingleAsync();
         Assert.True(updated.Ssn == replacement);
         Assert.Equal(DateTimeKind.Utc, updated.Created.Kind);
         Assert.Equal(DateTimeKind.Utc, updated.LastModified!.Value.Kind);
@@ -48,18 +49,19 @@ public sealed class NissPersistenceTests : IAsyncLifetime
     public async Task Legacy_invalid_value_cannot_materialize_as_a_valid_domain_entity()
     {
         await using var context = CreateContext();
-        await context.Database.EnsureCreatedAsync();
+        await using var deployment = new DeploymentDbContext(new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(_postgres.GetConnectionString()).Options);
+        await deployment.Database.EnsureCreatedAsync();
         var client = SyntheticClient.Create(SyntheticClient.Niss());
-        client.AssignToOrganisation(Guid.NewGuid());
+        client.AssignToOrganisation(organisation);
         context.Clients.Add(client);
         await context.SaveChangesAsync();
         // Simulates legacy prototype data, never an import supported by the application.
-        await context.Database.ExecuteSqlInterpolatedAsync(
+        await deployment.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE \"Clients\" SET \"Ssn\" = {"invalid-synthetic-input"} WHERE \"Id\" = {client.Id}");
         context.ChangeTracker.Clear();
 
         await Assert.ThrowsAsync<InvalidNissFormatException>(async () =>
-            await context.Clients.IgnoreQueryFilters().SingleAsync());
+            await context.Clients.SingleAsync());
     }
 
     private static async Task SaveAsync(ApplicationDbContext context, bool useAsyncSave)
@@ -70,7 +72,14 @@ public sealed class NissPersistenceTests : IAsyncLifetime
             context.SaveChanges(CancellationToken.None);
     }
 
+        private readonly Guid organisation = Guid.NewGuid();
+    private Zeka.Extensions.MultiTenancy.Abstractions.TenantContextScope Scope()
+    {
+        var scope = new Zeka.Extensions.MultiTenancy.Abstractions.TenantContextScope();
+        scope.Establish(new Zeka.Extensions.MultiTenancy.Abstractions.TenantContext(new Zeka.Extensions.MultiTenancy.Abstractions.TenantId(organisation), "fixture"));
+        return scope;
+    }
     private ApplicationDbContext CreateContext() => new(
         new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseNpgsql(_postgres.GetConnectionString()).Options);
+            .UseNpgsql(_postgres.GetConnectionString()).Options, Scope());
 }

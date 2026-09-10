@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
@@ -6,15 +6,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ClientManagement.Application.QuarterlyMonitorings.Commands.DeleteQuarterlyMonitoring
 {
-    public  class DeleteQuarterlyMonitoringCommand : IRequest
-    {        
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.Delete")]
+    public class DeleteQuarterlyMonitoringCommand : IRequest
+    {
         public int QMonitoringId { get; set; }
 
         public DeleteQuarterlyMonitoringCommand(int id)
         {
             QMonitoringId = id;
         }
-        
+
     }
     public class DeleteQuarterlyMonitoringCommandHandler : IRequestHandler<DeleteQuarterlyMonitoringCommand>
     {

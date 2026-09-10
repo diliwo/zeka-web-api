@@ -1,9 +1,10 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
 namespace ClientManagement.Application.Clients.Commands.UpdateNativeLanguage
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.EditAll", "Clients.EditAssigned")]
     public class UpdateNativeLanguageCommand : IRequest<int>
     {
         //public int Id { get; set; }

@@ -1,9 +1,10 @@
-﻿using ClientManagement.Application.Clients.Commands.Exceptions;
+using ClientManagement.Application.Clients.Commands.Exceptions;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
 namespace ClientManagement.Application.Clients.Commands.UpdateClient
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ImportExport")]
     public class UpdateClientCommand : IRequest<int>
     {
         //public int Id { get; set; }

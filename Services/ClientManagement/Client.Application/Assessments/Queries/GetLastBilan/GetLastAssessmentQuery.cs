@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Assessments.Common;
 using ClientManagement.Core.Interfaces;
@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ClientManagement.Application.Assessments.Queries.GetLastBilan
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ViewAll", "Clients.ViewAssigned")]
     public class GetLastAssessmentQuery : IRequest<AssessmentDto>
     {
         public int ClientId { get; set; }

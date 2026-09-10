@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Assessments.Common;
+using ClientManagement.Application.Assessments.Common;
 using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Enums;
@@ -7,6 +7,7 @@ using MediatR;
 
 namespace ClientManagement.Application.Assessments.Commands.CreateAssessment
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.EditAll", "Clients.EditAssigned")]
     public class CreateAssessmentCommand : IRequest<int>
     {
         public bool IsFinalized { get; set; }

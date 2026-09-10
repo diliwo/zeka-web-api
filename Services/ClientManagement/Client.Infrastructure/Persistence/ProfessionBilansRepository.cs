@@ -1,4 +1,4 @@
-﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,22 +30,22 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public ProfessionalAssessment Get(int professionBilanId)
         {
-            return _context.ProfessionalAssessments.FirstOrDefault(c => c.Id == professionBilanId && c.Softdelete != true);
+            return _context.Visible<ClientManagement.Core.Entities.ProfessionalAssessment>().FirstOrDefault(c => c.Id == professionBilanId && c.Softdelete != true);
         }
 
         public Task<ProfessionalAssessment> GetASync(int professionBilanId)
         {
-            return _context.ProfessionalAssessments.FirstOrDefaultAsync(c => c.Id == professionBilanId && c.Softdelete != true);
+            return _context.Visible<ClientManagement.Core.Entities.ProfessionalAssessment>().FirstOrDefaultAsync(c => c.Id == professionBilanId && c.Softdelete != true);
         }
 
         public IQueryable<ProfessionalAssessment> GetProfessionBilans()
         {
-            return _context.ProfessionalAssessments.Where(c => c.Softdelete != true);
+            return _context.Visible<ClientManagement.Core.Entities.ProfessionalAssessment>().Where(c => c.Softdelete != true);
         }
 
         public IQueryable GetProfessionByBilanId(int id)
         {
-            return _context.ProfessionalAssessments.Where(s => s.AssessmentId == id && s.Softdelete != true);
+            return _context.Visible<ClientManagement.Core.Entities.ProfessionalAssessment>().Where(s => s.AssessmentId == id && s.Softdelete != true);
         }
 
         public void SoftDelete(ProfessionalAssessment professionalAssessment)

@@ -1,9 +1,10 @@
-﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
 namespace ClientManagement.Application.MonitoringActions.Commands.CreateAction
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Platform.ReferenceData.Manage")]
     public class CreateMonitoringActionCommand : IRequest
     {
         public string ActionLabel { get; set; }

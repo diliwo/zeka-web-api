@@ -9,14 +9,10 @@ namespace AdminAreaManagement.Infrastructure.Persistence;
 public sealed class CityQueries(ApplicationDbContext context) : ICityQueries
 {
     public Task<bool> ActiveCityExistsAsync(string name, string country, CancellationToken cancellationToken) =>
-        context.Database.SqlQuery<bool>($"""
-            SELECT EXISTS (
-                SELECT 1 FROM "Cities"
-                WHERE NOT "Softdelete"
-                  AND "NormalizedName" = public.zeka_city_key({name}) COLLATE "C"
-                  AND "NormalizedCountry" = public.zeka_city_key({country}) COLLATE "C"
-            ) AS "Value"
-            """).SingleAsync(cancellationToken);
+        context.Cities.AnyAsync(city => !city.Softdelete
+            && EF.Property<string>(city, "NormalizedName") == EF.Functions.Collate(ApplicationDbContext.CityKey(name), "C")
+            && EF.Property<string>(city, "NormalizedCountry") == EF.Functions.Collate(ApplicationDbContext.CityKey(country), "C"),
+            cancellationToken);
 
     public async Task<PaginatedList<CityDto>> GetPageAsync(
         string filter, string orderBy, int pageNumber, int pageSize, CancellationToken cancellationToken)

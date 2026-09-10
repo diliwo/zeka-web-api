@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Mappings;
+using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.TrainingTypes.Common;
 using AdminAreaManagement.Core.Interfaces;
@@ -8,6 +8,7 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.TrainingTypes.Queries.GetTrainingTypeList
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("ReferenceData.View")]
     public class GetTrainingTypeListQuery : IRequest<PaginatedList<TrainingTypeDto>>
     {
         public string Filter { get; set; }

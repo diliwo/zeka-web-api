@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.MonitoringActions.Common;
 using ClientManagement.Core.Interfaces;
@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ClientManagement.Application.MonitoringActions.Queries.GetById
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("ReferenceData.View")]
     public class GetMonitoringActionById : IRequest<MonitoringActionDto>
     {
         public int ActionId { get; set; }

@@ -30,6 +30,7 @@
     <ProjectReference Include="..\..\AuthManager.Application\AuthManager.Application.csproj" />
     <ProjectReference Include="..\..\AuthManager.Core\AuthManager.Core.csproj" />
     <ProjectReference Include="..\..\AuthManager.Infrastructure\AuthManager.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\AuthManager.API\AuthManager.API.csproj" />
   </ItemGroup>
 
 </Project>

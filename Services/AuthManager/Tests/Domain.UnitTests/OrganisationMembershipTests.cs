@@ -55,7 +55,7 @@ public sealed class OrganisationMembershipTests
     public void System_permission_sets_have_stable_distinct_codes_and_identifiers()
     {
         PermissionSet.SystemPermissionSets.Select(value => value.Code)
-            .Should().Equal("OrganisationOwner", "OrganisationAdministrator", "Member");
+            .Should().Equal("Owner", "Admin", "LimitedViewer", "LimitedEditor", "Viewer", "Contributor", "Editor");
         PermissionSet.SystemPermissionSets.Select(value => value.Id)
             .Should().OnlyHaveUniqueItems();
         PermissionSet.SystemPermissionSets.Should().OnlyContain(value => value.IsSystem);

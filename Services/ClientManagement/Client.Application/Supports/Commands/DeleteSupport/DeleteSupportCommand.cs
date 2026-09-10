@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Application.Supports.Commands.SendReferentChangedNotification;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
@@ -6,6 +6,7 @@ using MediatR;
 
 namespace ClientManagement.Application.Supports.Commands.DeleteSupport
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.Delete")]
     public class DeleteSupportCommand : IRequest
     {
         public int Id { get; set; }

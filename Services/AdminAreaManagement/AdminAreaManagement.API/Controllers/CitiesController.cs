@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Cities.Commands.CreateCity;
+using AdminAreaManagement.Application.Cities.Commands.CreateCity;
 using AdminAreaManagement.Application.Cities.Commands.DeleteClity;
 using AdminAreaManagement.Application.Cities.Commands.UpdateCity;
 using AdminAreaManagement.Application.Cities.Queries;
@@ -15,6 +15,7 @@ namespace AdminAreaManagement.API.Controllers
     public class CitiesController : ApiControllerBase
     {
         [HttpGet]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetCitiesListQuery))]
         public async Task<ActionResult<PaginatedList<CityDto>>> GetAll([FromQuery] GetCitiesListQuery query)
         {
             return await Mediator.Send(query);
@@ -23,6 +24,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(CreateCityCommand))]
         public async Task<IActionResult> Create(CreateCityCommand command)
         {
             var id = await Mediator.Send(command);
@@ -33,6 +35,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPut]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(UpdateCityCommand))]
         public async Task<IActionResult> Update(UpdateCityCommand command)
         {
             var id = await Mediator.Send(command);
@@ -43,6 +46,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpDelete("{id}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(DeleteCityCommand))]
         public async Task<IActionResult> Delete(int id)
         {
             await Mediator.Send(new DeleteCityCommand() { Id = id });

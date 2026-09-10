@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Enums;
 using ClientManagement.Core.Interfaces;
@@ -6,6 +6,7 @@ using MediatR;
 
 namespace ClientManagement.Application.SchoolRegistations.Commands.CreateSchoolRegistration
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.EditAll", "Clients.EditAssigned")]
     public class CreateSchoolRegistrationCommand : IRequest<int>
     {
         public int TrainingId { get; set; }
@@ -37,7 +38,7 @@ namespace ClientManagement.Application.SchoolRegistations.Commands.CreateSchoolR
                 {
                     throw new NotFoundException(nameof(Training), request.TrainingId);
                 }
-                //TODO: implement the Grpc request here 
+                //TODO: implement the Grpc request here
                 //var school = _repository.School.GetSchoolById(request.SchoolId);
                 var school = new School("temp", "tp");
                 if (school == null)

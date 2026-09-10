@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ClientManagement.Application.QuarterlyMonitorings.Commands.CreateQuarterlyMonitoring
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.EditAll", "Clients.EditAssigned")]
     public class CreateQuarterlyMonitoringCommand : IRequest<int>
     {
         public int ClientId { get; set; }
@@ -24,7 +25,7 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Commands.CreateQuart
             _repository = repository;
             _monitoringActionRepository = monitoringActionRepository;
         }
-        
+
 
         public async Task<int> Handle(CreateQuarterlyMonitoringCommand request, CancellationToken cancellationToken)
         {

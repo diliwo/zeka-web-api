@@ -1,5 +1,8 @@
 using AdminAreaManagement.API;
 using AdminAreaManagement.API.Services;
+using Zeka.Extensions.MultiTenancy.AspNetCore;
+using AdminAreaManagement.API;
+using AdminAreaManagement.API.Services;
 using AdminAreaManagement.Application;
 using AdminAreaManagement.Infrastructure;
 using AdminAreaManagement.Infrastructure.Persistence;
@@ -13,6 +16,11 @@ if (builder.Environment.IsDevelopment())
     builder.Configuration.AddUserSecrets<Program>();
 }
 
+builder.Services.AddTenantContext();
+builder.Services.AddScoped<TenantRequestIdentity>();
+builder.Services.AddScoped<AdminAreaManagement.Application.Common.Authorization.IOperationIdentity>(sp => sp.GetRequiredService<TenantRequestIdentity>());
+builder.Services.AddScoped<AdminAreaManagement.Infrastructure.Authorization.ITenantAccessCredential>(sp => sp.GetRequiredService<TenantRequestIdentity>());
+builder.Services.AddTenantAuthentication(builder.Configuration);
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddWebServices();
@@ -35,6 +43,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 app.UseCors("CorsPolicy");
+app.UseAuthentication();
+app.UseMiddleware<TenantAccessMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();

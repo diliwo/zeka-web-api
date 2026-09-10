@@ -1,113 +1,106 @@
-﻿using System.Reflection;
-using AdminAreaManagement.Application.Staffs.Queries;
 using AdminAreaManagement.Core.Common;
 using AdminAreaManagement.Core.Entities;
-using AdminAreaManagement.Core.Interfaces;
-using AdminAreaManagement.Infrastructure.Persistence.Seed;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.VisualBasic;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Zeka.Extensions.MultiTenancy.Abstractions;
+using Zeka.Extensions.MultiTenancy.EntityFrameworkCore;
 
-namespace AdminAreaManagement.Infrastructure.Persistence
+namespace AdminAreaManagement.Infrastructure.Persistence;
+
+public class ApplicationDbContext : TenantDbContext
 {
-    public class ApplicationDbContext : DbContext
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, ITenantContextAccessor tenant)
+        : base(WithAudit(options), tenant) { }
+
+    // Model inspection is permitted without a scope; runtime queries and writes still fail closed.
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : this(options, new TenantContextScope()) { }
+
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, PlatformAccessContext platform)
+        : base(WithAudit(options), platform) { }
+
+    private static DbContextOptions WithAudit(DbContextOptions options) =>
+        new DbContextOptionsBuilder(options).AddInterceptors(new EntityAuditInterceptor()).Options;
+
+    public int SaveChanges(CancellationToken cancellationToken)
     {
-        private readonly ICurrentUserService _currentUserService;
-        private readonly IDateTime _dateTime;
-        //private readonly IDomainEventService _domainEventService;
+        cancellationToken.ThrowIfCancellationRequested();
+        return SaveChanges();
+    }
 
-        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options) { }
+    public DbSet<StaffMember> StaffMembers => Set<StaffMember>();
+    public DbSet<Team> Teams => Set<Team>();
+    public DbSet<Partner> Partners => Set<Partner>();
+    public DbSet<DocumentPartner> DocumentPartners => Set<DocumentPartner>();
+    public DbSet<School> Schools => Set<School>();
+    public DbSet<Training> Trainings => Set<Training>();
+    public DbSet<Profession> Professions => Set<Profession>();
+    public DbSet<TrainingType> TrainingTypes => Set<TrainingType>();
+    public DbSet<TrainingField> TrainingFields => Set<TrainingField>();
+    public DbSet<City> Cities => Set<City>();
+    public DbSet<Nationality> Nationalities => Set<Nationality>();
 
-        public DbSet<StaffMember> StaffMembers { get; set; }
-        public DbSet<Team> Teams { get; set; }
-        public DbSet<Partner> Partners { get; set; }
-        public DbSet<DocumentPartner> DocumentPartners { get; set; }
-        public DbSet<School> Schools { get; set; }
-        public DbSet<Training> Trainings { get; set; }
-        public DbSet<Profession> Professions { get; set; }
-        public DbSet<TrainingType> TrainingTypes { get; set; }
-        public DbSet<TrainingField> TrainingFields { get; set; }
-        public DbSet<City> Cities { get; set; }
-        public DbSet<Nationality> Nationalities { get; set; }
+    protected override void ConfigureTenantModel(ModelBuilder builder) => ConfigurePersistenceModel(builder);
 
-        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = new CancellationToken())
+    public static string CityKey(string value) => throw new InvalidOperationException("Database function only.");
+
+    internal static void ConfigurePersistenceModel(ModelBuilder builder)
+    {
+        builder.Ignore<AdminAreaManagement.Core.ValueObjects.Address>();
+        builder.HasDbFunction(typeof(ApplicationDbContext).GetMethod(nameof(CityKey))!)
+            .HasName("zeka_city_key").HasSchema("public");
+        builder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+        // Keep the established column types; UTC schema standardization belongs to issue #25.
+        foreach (var property in builder.Model.GetEntityTypes().SelectMany(type => type.GetProperties())
+            .Where(property => property.ClrType == typeof(DateTime) || property.ClrType == typeof(DateTime?)))
         {
-            foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Entity> entry in ChangeTracker.Entries<Entity>())
-            {
-                switch (entry.State)
-                {
-                    case EntityState.Added:
-                        entry.Entity.CreatedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.Created = DateTime.Now;
-                        break;
-
-                    case EntityState.Modified:
-                        entry.Entity.LastModifiedBy = "ZeKa";  //TODO: This will be replaced by Identity Server
-                        entry.Entity.LastModified = DateTime.Now;
-                        break;
-                }
-            }
-
-            var result = await base.SaveChangesAsync(cancellationToken);
-
-            await DispatchEvents();
-
-            return result;
+            if (property.GetColumnType() != "date") property.SetColumnType("timestamp without time zone");
         }
+        foreach (var type in builder.Model.GetEntityTypes()
+            .Where(type => typeof(TenantOwnedEntity).IsAssignableFrom(type.ClrType)))
+            builder.Entity(type.ClrType).HasAlternateKey(nameof(Entity.Id), nameof(TenantOwnedEntity.OrganisationId));
+    }
+}
 
+// Only deployment tooling constructs this context. It is never registered in application DI.
+public sealed class DeploymentDbContext(DbContextOptions<DeploymentDbContext> options) : DbContext(options)
+{
+    public DbSet<StaffMember> StaffMembers => Set<StaffMember>();
+    public DbSet<Team> Teams => Set<Team>();
+    public DbSet<Partner> Partners => Set<Partner>();
+    public DbSet<DocumentPartner> DocumentPartners => Set<DocumentPartner>();
+    public DbSet<School> Schools => Set<School>();
+    public DbSet<Training> Trainings => Set<Training>();
+    public DbSet<Profession> Professions => Set<Profession>();
+    public DbSet<TrainingType> TrainingTypes => Set<TrainingType>();
+    public DbSet<TrainingField> TrainingFields => Set<TrainingField>();
+    public DbSet<City> Cities => Set<City>();
+    public DbSet<Nationality> Nationalities => Set<Nationality>();
+    protected override void OnModelCreating(ModelBuilder builder) => ApplicationDbContext.ConfigurePersistenceModel(builder);
+}
 
-        public int SaveChanges(CancellationToken cancellationToken = new CancellationToken())
+internal sealed class EntityAuditInterceptor : SaveChangesInterceptor
+{
+    private static void Stamp(DbContext? context)
+    {
+        if (context is null) return;
+        foreach (var entry in context.ChangeTracker.Entries<Entity>())
         {
-            foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<Entity> entry in ChangeTracker.Entries<Entity>())
+            if (entry.State == EntityState.Added)
             {
-                switch (entry.State)
-                {
-                    case EntityState.Added:
-                        entry.Entity.CreatedBy = "ZeKa"; //TODO: This will be replaced by Identity Server
-                        entry.Entity.Created = DateTime.Now;
-                        break;
-
-                    case EntityState.Modified:
-                        entry.Entity.LastModifiedBy = "ZeKa"; //TODO: This will be replaced by Identity Server
-                        entry.Entity.LastModified = DateTime.Now;
-                        break;
-                }
+                entry.Entity.CreatedBy = "ZeKa";
+                entry.Entity.Created = DateTime.Now;
             }
-
-            var result = base.SaveChanges();
-
-            DispatchEvents();
-
-            return result;
-        }
-        protected override void OnModelCreating(ModelBuilder builder)
-        {
-            builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
-
-            base.OnModelCreating(builder);
-
-            foreach (var entityType in builder.Model.GetEntityTypes()
-                         .Where(type => typeof(TenantOwnedEntity).IsAssignableFrom(type.ClrType) && !type.IsOwned()))
+            if (entry.State == EntityState.Modified)
             {
-                builder.Entity(entityType.ClrType)
-                    .HasAlternateKey(nameof(Entity.Id), nameof(TenantOwnedEntity.OrganisationId));
-            }
-
-        }
-
-        private async Task DispatchEvents()
-        {
-            while (true)
-            {
-                var domainEventEntity = ChangeTracker.Entries<IHasDomainEvent>()
-                    .Select(x => x.Entity.DomainEvents)
-                    .SelectMany(x => x)
-                    .Where(domainEvent => !domainEvent.IsPublished)
-                    .FirstOrDefault();
-                if (domainEventEntity == null) break;
-
-                domainEventEntity.IsPublished = true;
-                //await _domainEventService.Publish(domainEventEntity);
+                entry.Entity.LastModifiedBy = "ZeKa";
+                entry.Entity.LastModified = DateTime.Now;
             }
         }
     }
+    public override InterceptionResult<int> SavingChanges(DbContextEventData data, InterceptionResult<int> result)
+    { Stamp(data.Context); return result; }
+    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData data,
+        InterceptionResult<int> result, CancellationToken cancellationToken = default)
+    { Stamp(data.Context); return ValueTask.FromResult(result); }
 }

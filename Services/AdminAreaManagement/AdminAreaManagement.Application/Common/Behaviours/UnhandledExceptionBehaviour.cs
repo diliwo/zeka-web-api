@@ -18,7 +18,8 @@ namespace AdminAreaManagement.Application.Common.Behaviours
             {
                 return await next();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not Common.Authorization.TenantAccessException
+                && ex is not Zeka.Extensions.MultiTenancy.Abstractions.TenantContextException)
             {
                 var requestName = typeof(TRequest).Name;
 

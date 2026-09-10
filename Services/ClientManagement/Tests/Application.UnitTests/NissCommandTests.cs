@@ -4,7 +4,6 @@ using ClientManagement.Application.Clients.Commands.UpSertIbisNumber;
 using ClientManagement.Application.Clients.Model;
 using ClientManagement.Core.Exceptions;
 using ClientManagement.Tests.Common;
-using Microsoft.AspNetCore.JsonPatch;
 
 namespace Application.UnitTests;
 
@@ -40,7 +39,13 @@ public sealed class NissCommandTests
         await Assert.ThrowsAsync<InvalidNissFormatException>(() => handler.Handle(
             new UpSertIbisNumberCommand
             {
-                Niss = " " + SyntheticClient.Niss(), PatchDoc = new JsonPatchDocument<UpdateClientDto>()
+                Niss = " " + SyntheticClient.Niss(), PatchDoc = new EmptyPatch()
             }, default));
+    }
+
+    private sealed class EmptyPatch : IClientPatch
+    {
+        public IEnumerable<string> ReplacementValues => Array.Empty<string>();
+        public void ApplyTo(UpdateClientDto client) { }
     }
 }

@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Partners.Queries.Common;
+using AdminAreaManagement.Application.Partners.Queries.Common;
 using AdminAreaManagement.Core.Interfaces;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AdminAreaManagement.Application.Partners.Queries.GetPartnerDetail
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Partners.View")]
     public class GetPartnerDetailQuery : IRequest<PartnerDto>
     {
         public int Id { get; set; }

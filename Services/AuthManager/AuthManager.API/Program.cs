@@ -1,3 +1,4 @@
+using AuthManager.API;
 using AuthManager.API.Endpoints;
 using AuthManager.Application;
 using AuthManager.Infrastructure;
@@ -11,7 +12,11 @@ builder.Services.AddProblemDetails();
 
 builder.ConfigureMicrosoftIdentity();
 
+builder.Services.AddTenantAuthentication(builder.Configuration);
 var app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapTenantAccess();
 
 //if (app.Environment.IsDevelopment())
 //{

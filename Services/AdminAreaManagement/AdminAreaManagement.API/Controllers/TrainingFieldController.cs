@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Models;
+using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.TrainingFields.Common;
 using AdminAreaManagement.Application.TrainingFields.Queries.GetTrainingFieldList;
 using Microsoft.AspNetCore.Mvc;
@@ -10,6 +10,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpGet]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetTrainingFieldListQuery))]
         public async Task<ActionResult<PaginatedList<TrainingFieldDto>>> GetTypes([FromQuery] GetTrainingFieldListQuery query)
         {
             return await Mediator.Send(query);

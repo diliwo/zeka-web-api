@@ -1,9 +1,10 @@
-﻿using AdminAreaManagement.Core.Entities;
+using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
 namespace AdminAreaManagement.Application.Professions.Commands.UpsertProfession
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Platform.ReferenceData.Manage")]
     public class UpsertProfessionCommand : IRequest<int>
     {
         public int? Id { get; set; }

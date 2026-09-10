@@ -3,8 +3,10 @@ using AdminAreaManagement.Core.Enums;
 
 namespace AdminAreaManagement.Core.ValueObjects
 {
-    public class ContactPerson : ValueObject
+    public class ContactPerson : ValueObject, Zeka.Extensions.MultiTenancy.Abstractions.ITenantOwnedEntity
     {
+        public Guid OrganisationId { get; private set; }
+        public int PartnerId { get; private set; }
         public String ContactDetails { get; set; }
         public String ContactName { get; set; }
         public Gender Gender { get; set; }

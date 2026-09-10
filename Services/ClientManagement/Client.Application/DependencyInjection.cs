@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using ClientManagement.Application.Common.Behaviours;
 using ClientManagement.Application.Common.Helpers;
 using ClientManagement.Application.Common.Interfaces;
@@ -24,12 +24,13 @@ namespace ClientManagement.Application
             services.AddTransient<ISortHelper<MySupportDto>, SortHelper<MySupportDto>>();
             services.AddTransient<ISortHelper<SchoolRegistrationDto>, SortHelper<SchoolRegistrationDto>>();
             services.AddTransient<IDocumentGeneratorService, DocumentGeneratorService>();
+            services.AddScoped<ClientManagement.Application.Common.Authorization.TenantOperation>();
             services.AddAutoMapper(Assembly.GetExecutingAssembly());
             services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
             services.AddMediatR(cfg => {
                 cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
                 cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(UnhandledExceptionBehaviour<,>));
-                //cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(AuthorizationBehaviour<,>));
+                cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(AuthorizationBehaviour<,>));
                 cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehaviour<,>));
                 cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(PerformanceBehaviour<,>));
             });

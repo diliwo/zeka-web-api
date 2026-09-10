@@ -1,9 +1,10 @@
-﻿using AdminAreaManagement.Core.Entities;
+using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
 namespace AdminAreaManagement.Application.Nationalities.Commands.CreateCity
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Platform.ReferenceData.Manage")]
     public class CreateNationalityCommand : IRequest<int>
     {
         public string Name { get; set; }

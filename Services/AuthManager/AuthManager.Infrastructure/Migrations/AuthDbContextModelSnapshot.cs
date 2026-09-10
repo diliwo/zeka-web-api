@@ -133,22 +133,50 @@ namespace AuthManager.Infrastructure.Migrations
                         new
                         {
                             Id = new Guid("d8eceeeb-b796-4d77-92a5-6a11fab10a01"),
-                            Code = "OrganisationOwner",
-                            DisplayName = "Organisation owner",
+                            Code = "Owner",
+                            DisplayName = "Owner",
                             IsSystem = true
                         },
                         new
                         {
                             Id = new Guid("d8eceeeb-b796-4d77-92a5-6a11fab10a02"),
-                            Code = "OrganisationAdministrator",
-                            DisplayName = "Organisation administrator",
+                            Code = "Admin",
+                            DisplayName = "Admin",
                             IsSystem = true
                         },
                         new
                         {
-                            Id = new Guid("d8eceeeb-b796-4d77-92a5-6a11fab10a03"),
-                            Code = "Member",
-                            DisplayName = "Member",
+                            Id = new Guid("d8eceeeb-b796-4d77-92a5-6a11fab10a04"),
+                            Code = "LimitedViewer",
+                            DisplayName = "Limited Viewer",
+                            IsSystem = true
+                        },
+                        new
+                        {
+                            Id = new Guid("d8eceeeb-b796-4d77-92a5-6a11fab10a05"),
+                            Code = "LimitedEditor",
+                            DisplayName = "Limited Editor",
+                            IsSystem = true
+                        },
+                        new
+                        {
+                            Id = new Guid("d8eceeeb-b796-4d77-92a5-6a11fab10a06"),
+                            Code = "Viewer",
+                            DisplayName = "Viewer",
+                            IsSystem = true
+                        },
+                        new
+                        {
+                            Id = new Guid("d8eceeeb-b796-4d77-92a5-6a11fab10a07"),
+                            Code = "Contributor",
+                            DisplayName = "Contributor",
+                            IsSystem = true
+                        },
+                        new
+                        {
+                            Id = new Guid("d8eceeeb-b796-4d77-92a5-6a11fab10a08"),
+                            Code = "Editor",
+                            DisplayName = "Editor",
                             IsSystem = true
                         });
                 });

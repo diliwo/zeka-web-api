@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Models;
+using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.Teams.Commands.DeleteTeam;
 using AdminAreaManagement.Application.Teams.Commands.UpsertTeam;
 using AdminAreaManagement.Application.Teams.Queries;
@@ -9,6 +9,7 @@ namespace AdminAreaManagement.API.Controllers
     public class TeamsController : ApiControllerBase
     {
         [HttpGet]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetTeamsListQuery))]
         public async Task<ActionResult<PaginatedList<TeamDto>>> GetAll([FromQuery] GetTeamsListQuery query)
         {
             var vm = await Mediator.Send(query);
@@ -18,6 +19,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(UpsertTeamCommand))]
         public async Task<IActionResult> Upsert(UpsertTeamCommand command)
         {
             var id = await Mediator.Send(command);
@@ -28,6 +30,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpDelete("{id}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(DeleteTeamCommand))]
         public async Task<IActionResult> Delete(int id)
         {
             await Mediator.Send(new DeleteTeamCommand { Id = id });
@@ -38,6 +41,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpGet("{name}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetTeamsByNameQuery))]
         public async Task<ActionResult<Boolean>> Get(string name)
         {
             var vm = await Mediator.Send(new GetTeamsByNameQuery() { Name = name });

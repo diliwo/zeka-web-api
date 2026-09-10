@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.Common.Models;
@@ -8,6 +8,7 @@ using MediatR;
 
 namespace ClientManagement.Application.Supports.Queries.GetSupportsByReferents
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ViewAll", "Clients.ViewAssigned")]
     public class GetSupportsBySocialWorkersQuery : IRequest<PaginatedList<MySupportDto>>
     {
         public string Filter { get; set; }
@@ -25,7 +26,7 @@ namespace ClientManagement.Application.Supports.Queries.GetSupportsByReferents
             private readonly IMapper _mapper;
 
             public GetClientsByStaffMembersQueryHandler(
-                IRepositoryManager repository, 
+                IRepositoryManager repository,
                 //IHttpContextAccessor httpContextAccessor,
                 ISortHelper<MySupportDto> sortMyConsultantSupports,
                 IMapper mapper)

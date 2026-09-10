@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Application.Common.Interfaces;
 using ClientManagement.Application.Configuration;
 using ClientManagement.Application.Exceptions;
@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace ClientManagement.Application.AssessmentDocument.Commands.GenerateAssessmentDocumentCommand
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ViewAll", "Clients.ViewAssigned")]
     public class GenerateAssessmentDocumentCommand: IRequest<byte[]>
     {
         public int AssessmentId;
@@ -26,15 +27,15 @@ namespace ClientManagement.Application.AssessmentDocument.Commands.GenerateAsses
             private readonly FluidServiceConfiguration _configuration;
             private readonly IRepositoryManager _repository;
 
-            public GenerateAssessmentDocumentCommandHandler(IDocumentGeneratorService documentGeneratorService, 
-                ILogger<GenerateAssessmentDocumentCommand> logger, 
+            public GenerateAssessmentDocumentCommandHandler(IDocumentGeneratorService documentGeneratorService,
+                ILogger<GenerateAssessmentDocumentCommand> logger,
                 IOptionsSnapshot<FluidServiceConfiguration> configurationAccessor,
-                IRepositoryManager repository) 
+                IRepositoryManager repository)
             {
                 _documentGeneratorService = documentGeneratorService;
                 _repository = repository;
                 _logger = logger;
-                _configuration = configurationAccessor.Value; 
+                _configuration = configurationAccessor.Value;
             }
 
             public async Task<byte[]> Handle(GenerateAssessmentDocumentCommand request, CancellationToken cancellationToken)
@@ -59,7 +60,9 @@ namespace ClientManagement.Application.AssessmentDocument.Commands.GenerateAsses
                         throw new NotFoundException(nameof(Assessment), request.AssessmentId);
                     AssessmentReportModel.Assessment = Assessment;
 
-                    Core.Entities.Client client = _repository.Client.Get(15,true);
+                    if (Assessment.ClientId is not int clientId)
+                        throw new Common.Authorization.TenantAccessException(Common.Authorization.AccessFailure.Denied);
+                    Core.Entities.Client client = _repository.Client.Get(clientId, true);
                     if (client == null)
                         throw new NotFoundException(nameof(Client), request.AssessmentId);
                     AssessmentReportModel.Client = client;

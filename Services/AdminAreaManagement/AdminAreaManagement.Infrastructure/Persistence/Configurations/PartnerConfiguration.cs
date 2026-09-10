@@ -19,33 +19,15 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
                 .HasPrincipalKey(p => new { p.Id, p.OrganisationId });
             builder
                 .HasKey(r => new { r.Id });
-            builder
-                .OwnsOne(p => p.Address);
-            builder
-                .OwnsMany<ContactPerson>("ContactPersons", t =>
-                {
-                    t.Property<Guid>("OrganisationId");
-                    t.WithOwner()
-                        .HasForeignKey("PartnerId", "OrganisationId")
-                        .HasPrincipalKey(nameof(Partner.Id), nameof(Partner.OrganisationId));
-                    t.Property(p => p.ContactDetails);
-                    t.Property(p => p.ContactName);
-                    t.Property(p => p.Gender);
-                    t.Property(p => p.ToDelete);
-                    t.HasKey("PartnerId", "OrganisationId", "ContactDetails", "Gender", "ToDelete");
-                    t.ToTable("ContactPersons");
-                });
-            builder
-                .OwnsMany<Email>(e => e.Emails, a =>
-                {
-                    a.Property<Guid>("OrganisationId");
-                    a.WithOwner()
-                        .HasForeignKey("PartnerId", "OrganisationId")
-                        .HasPrincipalKey(nameof(Partner.Id), nameof(Partner.OrganisationId));
-                    a.Property(e => e.EmailAddress);
-                    a.HasKey("PartnerId", "OrganisationId", "Id");
-                    a.ToTable("Emails");
-                });            
+            builder.Ignore(p => p.Address);
+            foreach (var part in new[] { "Number", "Street", "PostalCode", "City" })
+                builder.Property<string>("Address" + part).HasColumnName("Address_" + part).IsRequired();
+            builder.HasMany(p => p.ContactPersons).WithOne()
+                .HasForeignKey(p => new { p.PartnerId, p.OrganisationId })
+                .HasPrincipalKey(p => new { p.Id, p.OrganisationId }).OnDelete(DeleteBehavior.Cascade);
+            builder.HasMany(p => p.Emails).WithOne()
+                .HasForeignKey(p => new { p.PartnerId, p.OrganisationId })
+                .HasPrincipalKey(p => new { p.Id, p.OrganisationId }).OnDelete(DeleteBehavior.Cascade);
             builder
                 .Property(e => e.DateOfAgreementSignature).HasColumnType("date");
             builder

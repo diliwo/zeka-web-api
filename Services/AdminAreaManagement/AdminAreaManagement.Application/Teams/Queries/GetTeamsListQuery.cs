@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Mappings;
+using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Core.Interfaces;
 using AutoMapper;
@@ -7,6 +7,7 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.Teams.Queries
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("TeamConfiguration.View")]
     public class GetTeamsListQuery : IRequest<PaginatedList<TeamDto>>
     {
         public string Filter { get; set; }

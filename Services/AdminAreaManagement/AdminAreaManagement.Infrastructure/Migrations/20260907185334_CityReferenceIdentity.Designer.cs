@@ -11,7 +11,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace AdminAreaManagement.Infrastructure.Migrations
 {
-    [DbContext(typeof(ApplicationDbContext))]
+    [DbContext(typeof(DeploymentDbContext))]
     [Migration("20260907185334_CityReferenceIdentity")]
     partial class CityReferenceIdentity
     {

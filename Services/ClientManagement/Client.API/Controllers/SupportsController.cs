@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Common.Models;
+using ClientManagement.Application.Common.Models;
 using ClientManagement.Application.Supports.Commands.CloseTrack;
 using ClientManagement.Application.Supports.Commands.DeleteSupport;
 using ClientManagement.Application.Supports.Commands.UpsertSupport;
@@ -13,21 +13,16 @@ namespace ClientManagement.API.Controllers
 {
     public class SupportsController : ApiControllerBase
     {
-        private readonly IGenericReadRepository<ReasonOfClosure> _reasonRepository;
-
-        public SupportsController(IGenericReadRepository<ReasonOfClosure> reasonRepository)
-        {
-            _reasonRepository = reasonRepository;
-        }
-
         [HttpGet]
+        [ClientManagement.API.Services.TenantRequestPolicy(typeof(GetSupportsListByClientQuery))]
         public async Task<PaginatedList<SupportDto>> GetAllByBeneficiaryId([FromQuery] GetSupportsListByClientQuery query)
-        { 
+        {
             return  await Mediator.Send(query);
 
         }
 
         [HttpGet("mysupports")]
+        [ClientManagement.API.Services.TenantRequestPolicy(typeof(GetSupportsBySocialWorkersQuery))]
         public async Task<PaginatedList<MySupportDto>> GetSupportsByReferent([FromQuery] GetSupportsBySocialWorkersQuery query)
         {
             return await Mediator.Send(query);
@@ -37,6 +32,7 @@ namespace ClientManagement.API.Controllers
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [ClientManagement.API.Services.TenantRequestPolicy(typeof(UpsertSupportCommand))]
         public async Task<IActionResult> Upsert(UpsertSupportCommand command)
         {
             var id = await Mediator.Send(command);
@@ -47,6 +43,7 @@ namespace ClientManagement.API.Controllers
         [HttpPut("close")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [ClientManagement.API.Services.TenantRequestPolicy(typeof(CloseSupportCommand))]
         public async Task<IActionResult> Close(CloseSupportCommand command)
         {
             var id = await Mediator.Send(command);
@@ -57,6 +54,7 @@ namespace ClientManagement.API.Controllers
         [HttpDelete("{id}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ClientManagement.API.Services.TenantRequestPolicy(typeof(DeleteSupportCommand))]
         public async Task<IActionResult> Delete(int id)
         {
             await Mediator.Send(new DeleteSupportCommand { Id = id });
@@ -67,6 +65,7 @@ namespace ClientManagement.API.Controllers
         [HttpGet("reasons")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> GetRewards() => Ok(await _reasonRepository.GetItemsAsync());
+        [ClientManagement.API.Services.TenantRequestPolicy(typeof(GetSupportClosureReasonsQuery))]
+        public async Task<IActionResult> GetRewards() => Ok(await Mediator.Send(new GetSupportClosureReasonsQuery()));
     }
 }

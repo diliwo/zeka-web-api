@@ -16,4 +16,5 @@
   <ItemGroup>
     <ProjectReference Include="../../AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj" />
   </ItemGroup>
+<ItemGroup><ProjectReference Include="..\..\AdminAreaManagement.API\AdminAreaManagement.API.csproj" /></ItemGroup>
 </Project>

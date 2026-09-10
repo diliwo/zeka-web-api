@@ -25,7 +25,7 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
         var migrator = context.GetService<IMigrator>();
         await migrator.MigrateAsync("20250425093851_Initial Migration");
 
-        var migration = () => migrator.MigrateAsync();
+        var migration = () => migrator.MigrateAsync("20260904124417_OrganisationTenantConstraints");
 
         await migration.Should().ThrowAsync<PostgresException>()
             .Where(exception => exception.MessageText.Contains("Create and validate __OrganisationTenantMap"));
@@ -48,7 +48,7 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
         await context.Database.ExecuteSqlRawAsync(
             "CREATE TABLE \"__OrganisationTenantMap\" (\"TenantName\" text PRIMARY KEY, \"OrganisationId\" uuid NOT NULL UNIQUE)");
 
-        var incompleteMigration = () => migrator.MigrateAsync();
+        var incompleteMigration = () => migrator.MigrateAsync("20260904124417_OrganisationTenantConstraints");
         await incompleteMigration.Should().ThrowAsync<PostgresException>()
             .Where(exception => exception.MessageText.Contains("Tenant backfill is incomplete"));
         (await ScalarAsync<long>(context, "SELECT count(*) FROM \"SocialWorkers\""))
@@ -58,7 +58,7 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
         await context.Database.ExecuteSqlInterpolatedAsync(
             $"INSERT INTO \"__OrganisationTenantMap\" VALUES ('Legacy', {organisationId})");
 
-        await migrator.MigrateAsync();
+        await migrator.MigrateAsync("20260904124417_OrganisationTenantConstraints");
 
         (await ScalarAsync<long>(context, $"SELECT count(*) FROM \"SocialWorkers\" WHERE \"OrganisationId\" = '{organisationId}'"))
             .Should().Be(1);
@@ -79,7 +79,7 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
             .Where(exception => exception.MessageText.Contains("Automatic rollback is disabled"));
     }
 
-    private async Task<ApplicationDbContext> CreateContextAsync()
+    private async Task<DeploymentDbContext> CreateContextAsync()
     {
         var databaseName = $"client_{Guid.NewGuid():N}";
         await using var connection = new NpgsqlConnection(_postgres.GetConnectionString());
@@ -88,11 +88,11 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
         command.CommandText = $"CREATE DATABASE \"{databaseName}\"";
         await command.ExecuteNonQueryAsync();
         var connectionString = new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString()) { Database = databaseName };
-        return new ApplicationDbContext(
-            new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(connectionString.ConnectionString).Options);
+        return new DeploymentDbContext(
+            new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(connectionString.ConnectionString).Options);
     }
 
-    private static async Task<T> ScalarAsync<T>(ApplicationDbContext context, string sql)
+    private static async Task<T> ScalarAsync<T>(DeploymentDbContext context, string sql)
     {
         await context.Database.OpenConnectionAsync();
         await using var command = context.Database.GetDbConnection().CreateCommand();

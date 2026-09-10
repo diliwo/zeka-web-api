@@ -1,9 +1,10 @@
-﻿using AdminAreaManagement.Core.Entities;
+using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
 namespace AdminAreaManagement.Application.Teams.Commands.UpsertTeam
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("TeamConfiguration.ManageTeams")]
     public class UpsertTeamCommand : IRequest<int>
     {
         public int? Id { get; set; }

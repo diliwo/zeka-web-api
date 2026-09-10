@@ -1,8 +1,8 @@
-﻿using AdminAreaManagement.Core.Common;
+using AdminAreaManagement.Core.Common;
 
 namespace AdminAreaManagement.Core.Entities;
 
-public class City : Entity
+public class City : Entity, Zeka.Extensions.MultiTenancy.Abstractions.IGlobalEntity
 {
     private string _name = null!;
     private string _country = null!;

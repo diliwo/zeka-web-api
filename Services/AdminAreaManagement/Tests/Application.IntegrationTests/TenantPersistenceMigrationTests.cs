@@ -31,7 +31,7 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
             INSERT INTO "__OrganisationTenantMap" VALUES ('Zeka', {{organisationA}});
             """);
 
-        var migration = () => migrator.MigrateAsync();
+        var migration = () => migrator.MigrateAsync("20260904124303_OrganisationTenantConstraints");
 
         await migration.Should().ThrowAsync<PostgresException>()
             .Where(exception => exception.MessageText.Contains("Duplicate StaffMembers"));
@@ -58,7 +58,7 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
         // Reviewed remediation fixture: seed record 1 receives its approved replacement key.
         await context.Database.ExecuteSqlRawAsync("UPDATE \"StaffMembers\" SET \"UserName\" = 'jdoe' WHERE \"Id\" = 1");
 
-        await migrator.MigrateAsync();
+        await migrator.MigrateAsync("20260904124303_OrganisationTenantConstraints");
 
         (await ScalarAsync<long>(context, "SELECT count(*) FROM \"StaffMembers\""))
             .Should().Be(3);
@@ -99,7 +99,7 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
         await migrator.MigrateAsync("20250427103057_Initial Migration");
         await context.Database.ExecuteSqlRawAsync("UPDATE \"StaffMembers\" SET \"UserName\" = 'jdoe' WHERE \"Id\" = 1");
 
-        var migration = () => migrator.MigrateAsync();
+        var migration = () => migrator.MigrateAsync("20260904124303_OrganisationTenantConstraints");
 
         await migration.Should().ThrowAsync<PostgresException>()
             .Where(exception => exception.MessageText.Contains("Create and validate __OrganisationTenantMap"));
@@ -107,7 +107,7 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
             .Should().Be(3);
     }
 
-    private async Task<ApplicationDbContext> CreateContextAsync()
+    private async Task<DeploymentDbContext> CreateContextAsync()
     {
         var databaseName = $"admin_{Guid.NewGuid():N}";
         await using var connection = new NpgsqlConnection(_postgres.GetConnectionString());
@@ -116,11 +116,11 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
         command.CommandText = $"CREATE DATABASE \"{databaseName}\"";
         await command.ExecuteNonQueryAsync();
         var connectionString = new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString()) { Database = databaseName };
-        return new ApplicationDbContext(
-            new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(connectionString.ConnectionString).Options);
+        return new DeploymentDbContext(
+            new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(connectionString.ConnectionString).Options);
     }
 
-    private static async Task<T> ScalarAsync<T>(ApplicationDbContext context, string sql)
+    private static async Task<T> ScalarAsync<T>(DeploymentDbContext context, string sql)
     {
         await context.Database.OpenConnectionAsync();
         await using var command = context.Database.GetDbConnection().CreateCommand();

@@ -1,4 +1,4 @@
-﻿using Adminarea.Grpc.Protos;
+using Adminarea.Grpc.Protos;
 using AdminAreaManagement.Application.Staffs.Queries;
 using AdminAreaManagement.Core.Interfaces;
 using Grpc.Core;
@@ -13,9 +13,10 @@ namespace AdminAreaManagement.API.Services
         private readonly ILogger<AdminareaService> _logger;
         private readonly IRepositoryManager _repository;
 
-        public AdminareaService(ILogger<AdminareaService> logger, IRepositoryManager repository)
+        public AdminareaService(ILogger<AdminareaService> logger, IRepositoryManager repository, IMediator mediator)
         {
             _logger = logger;
+            _mediator = mediator;
             _repository = repository;
         }
 
@@ -26,7 +27,7 @@ namespace AdminAreaManagement.API.Services
             var result = await _mediator.Send(socialWorkerRequest);
             _logger.LogInformation($"Social worker with id: {request.SocialWorkerId} has been found");
 
-            return result;
+            return new SocialWorker { Id = result.Id, FirstName = result.FirstName, LastName = result.LastName, UserName = result.UserName, TeamName = result.TeamName, TeamAcronym = result.TeamAcronym };
         }
     }
 }
