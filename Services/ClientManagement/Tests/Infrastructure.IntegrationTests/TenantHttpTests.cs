@@ -107,7 +107,7 @@ public sealed class TenantHttpTests
     }
 
     [Theory]
-    [InlineData(401, TenantAccessOutcome.Denied)] [InlineData(403, TenantAccessOutcome.Denied)]
+    [InlineData(401, TenantAccessOutcome.Unauthenticated)] [InlineData(403, TenantAccessOutcome.Denied)]
     [InlineData(500, TenantAccessOutcome.Unavailable)] [InlineData(503, TenantAccessOutcome.Unavailable)]
     public async Task Adapter_has_no_success_fallback_for_failed_current_access(int status, TenantAccessOutcome expected)
     {
@@ -129,12 +129,12 @@ public sealed class TenantHttpTests
                 OrganisationMembershipId = Guid.NewGuid(), DecisionVersion = "1", ObservedAtUtc = DateTimeOffset.UtcNow,
                 EffectivePermissionCodes = new[] { invalid == "permission" ? "unknown" : "ReferenceData.View" } })
         })) { BaseAddress = new("https://auth.invalid/") };
-        Assert.Equal(TenantAccessOutcome.Denied,
+        Assert.Equal(TenantAccessOutcome.Unavailable,
             (await new CurrentTenantAccessClient(http, new Credential()).ResolveAsync("subject", organisation, default)).Outcome);
     }
 
     [Fact]
-    public async Task Deadline_is_bounded_and_does_not_retry()
+    public async Task Overall_deadline_exhaustion_prevents_another_attempt()
     {
         var handler = new TimeoutHandler();
         using var http = new HttpClient(handler) { BaseAddress = new("https://auth.invalid/") };

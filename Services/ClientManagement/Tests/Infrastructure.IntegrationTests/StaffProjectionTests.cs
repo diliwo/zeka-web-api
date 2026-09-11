@@ -34,6 +34,15 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
         var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), config);
         var created = Message(a, membership, 1, true, "original");
         await consumer.Handle(created); await consumer.Handle(created);
+        await using (var context = new ApplicationDbContext(options, TenantEnforcementTests.Scope(a)))
+        {
+            var worker = await context.SocialWorkers.SingleAsync();
+            var client = ClientManagement.Tests.Common.SyntheticClient.Create(
+                ClientManagement.Tests.Common.SyntheticClient.Niss(sequence: 81));
+            context.Add(new ClientManagement.Core.Entities.SocialCase(client, DateTime.Today.AddDays(-1), worker));
+            await context.SaveChangesAsync();
+            Assert.Single(await context.AssignedClients(membership).ToListAsync());
+        }
         handler.Inactive.Add(membership);
         await consumer.Handle(Message(a, membership, 3, false, "renamed"));
         await consumer.Handle(Message(a, membership, 2, true, "out-of-order"));
@@ -45,6 +54,8 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
         {
             var worker = await context.SocialWorkers.SingleAsync();
             Assert.True(worker.Softdelete); Assert.Equal("renamed", worker.UserName); Assert.Equal(3, worker.ProjectionVersion);
+            Assert.Empty(await context.AssignedClients(membership).ToListAsync());
+            Assert.Empty(await new SupportRepository(context).GetConsultantSupportsByMembership(membership).ToListAsync());
             context.Entry(worker).Property(x => x.OrganisationMembershipId).CurrentValue = Guid.NewGuid();
             await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync());
         }

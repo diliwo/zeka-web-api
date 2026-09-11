@@ -15,6 +15,9 @@ public static class TenantRegistration
         services.TryAddScoped<ITenantContextAccessor>(sp => sp.GetRequiredService<TenantContextScope>());
         services.TryAddScoped<ITenantContextInitializer>(sp => sp.GetRequiredService<TenantContextScope>());
         services.AddScoped<AdminAreaManagement.Application.Staffs.IStaffProjectionOutbox, Messaging.StaffProjectionOutbox>();
+        services.AddHostedService<Messaging.StaffProjectionRetryWorker>();
+        services.AddHttpClient("TenantWorkerAccess").ConfigurePrimaryHttpMessageHandler(() =>
+            new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
         services.AddHttpClient<AdminAreaManagement.Application.Staffs.IStaffMembershipLink, StaffMembershipClient>(client =>
         {
             if (!Uri.TryCreate(configuration["TenantAuthorization:AuthManagementUrl"], UriKind.Absolute, out var uri)

@@ -5,6 +5,7 @@ using ClientManagement.Application.Common.Models;
 using ClientManagement.Core.Common.Dto;
 using ClientManagement.Core.Interfaces;
 using MediatR;
+using ClientManagement.Application.Common.Authorization;
 
 namespace ClientManagement.Application.Supports.Queries.GetSupportsByReferents
 {
@@ -22,31 +23,29 @@ namespace ClientManagement.Application.Supports.Queries.GetSupportsByReferents
         {
             private readonly IRepositoryManager _repository;
             private ISortHelper<MySupportDto> _sortMyConsultantSupports;
-            //private readonly IHttpContextAccessor _httpContextAccessor;
+            private readonly TenantOperation _operation;
             private readonly IMapper _mapper;
 
             public GetClientsByStaffMembersQueryHandler(
                 IRepositoryManager repository,
-                //IHttpContextAccessor httpContextAccessor,
+                TenantOperation operation,
                 ISortHelper<MySupportDto> sortMyConsultantSupports,
                 IMapper mapper)
             {
                 _repository = repository;
                 _sortMyConsultantSupports = sortMyConsultantSupports;
-                //_httpContextAccessor = httpContextAccessor;
+                _operation = operation;
                 _mapper = mapper;
             }
 
             public async Task<PaginatedList<MySupportDto>> Handle(GetSupportsBySocialWorkersQuery request, CancellationToken cancellationToken)
             {
-                //var StaffMemberUserName = _httpContextAccessor.HttpContext.User.Identity.Name;
-                var StaffMemberUserName = "System";
-                if (StaffMemberUserName == null)
+                if (_operation.MembershipId == Guid.Empty)
                 {
-                    throw new NotFoundException(nameof(StaffMemberUserName), StaffMemberUserName);
+                    throw new TenantAccessException(AccessFailure.Denied);
                 }
 
-                    var supports = _sortMyConsultantSupports.ApplySort(_repository.Support.GetConsultantSupportsByUserName(StaffMemberUserName,request.Filter, request.IsActive),request.OrderBy);
+                var supports = _sortMyConsultantSupports.ApplySort(_repository.Support.GetConsultantSupportsByMembership(_operation.MembershipId, request.Filter, request.IsActive), request.OrderBy);
 
                 return await supports.PaginatedListAsync(request.PageNumber, request.PageSize);
             }

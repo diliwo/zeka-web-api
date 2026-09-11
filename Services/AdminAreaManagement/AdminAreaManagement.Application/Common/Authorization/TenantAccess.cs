@@ -3,7 +3,7 @@ using Zeka.Extensions.MultiTenancy.Abstractions;
 
 namespace AdminAreaManagement.Application.Common.Authorization;
 
-public enum TenantAccessOutcome { Authorized, Denied, Unavailable }
+public enum TenantAccessOutcome { Authorized, Unauthenticated, Denied, Unavailable }
 
 public sealed record AuthorizedTenantMembership(Guid OrganisationId, Guid OrganisationMembershipId,
     IReadOnlyCollection<string> EffectivePermissionCodes, string DecisionVersion, DateTimeOffset ObservedAtUtc);
@@ -53,6 +53,8 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
             throw new TenantAccessException(AccessFailure.Denied);
 
         var decision = await access.ResolveAsync(identity.SubjectId, identity.SelectedOrganisationId, cancellationToken);
+        if (decision.Outcome == TenantAccessOutcome.Unauthenticated)
+            throw new TenantAccessException(AccessFailure.Unauthenticated);
         if (decision.Outcome == TenantAccessOutcome.Unavailable)
             throw new TenantAccessException(AccessFailure.Unavailable);
         var grant = decision.Membership;

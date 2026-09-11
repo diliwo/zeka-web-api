@@ -45,12 +45,15 @@ public class ApplicationDbContext : TenantDbContext
             ClientManagement.Application.Common.Authorization.AccessFailure.Denied);
     }
 
-    private IQueryable<Client> AssignedClients()
+    private IQueryable<Client> AssignedClients() => AssignedClients(operation!.MembershipId);
+
+    public IQueryable<Client> AssignedClients(Guid membership)
     {
-        var membership = operation!.MembershipId;
+        var active = SocialCases.Where(CurrentAssignment.ActiveOn(DateTime.Today));
         return Clients.Where(c => !c.Softdelete
-            && c.SocialCases.Count(s => !s.Softdelete && s.EndDate == null) == 1
-            && c.SocialCases.Any(s => !s.Softdelete && s.EndDate == null && !s.SocialWorker.Softdelete
+            && membership != Guid.Empty
+            && active.Count(s => s.ClientId == c.Id) == 1
+            && active.Any(s => s.ClientId == c.Id && !s.SocialWorker.Softdelete
                 && s.SocialWorker.OrganisationId == c.OrganisationId
                 && s.SocialWorker.OrganisationMembershipId == membership));
     }

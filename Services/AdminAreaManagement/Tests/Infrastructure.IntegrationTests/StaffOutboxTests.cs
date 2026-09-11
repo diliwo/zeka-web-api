@@ -5,6 +5,7 @@ using AdminAreaManagement.Infrastructure.Messaging;
 using AdminAreaManagement.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 using Zeka.Extensions.EventBus;
 using Zeka.Extensions.EventBus.Abstractions;
@@ -26,7 +27,7 @@ public sealed class StaffOutboxTests(TenantDatabase fixture) : IClassFixture<Ten
         {
             var team = new Team("Synthetic", "SYN"); database.Add(team); await database.SaveChangesAsync();
             var staff = new StaffMember("Synthetic", "Worker", team, "synthetic"); staff.LinkMembership(Guid.NewGuid());
-            var outbox = new StaffProjectionOutbox(database, scope, publisher, NullLogger<StaffProjectionOutbox>.Instance);
+            var outbox = new StaffProjectionOutbox(database, scope, publisher, NullLogger<StaffProjectionOutbox>.Instance, Configuration(organisation));
             database.Add(staff); outbox.Stage(staff, team);
             await using (var transaction = await database.Database.BeginTransactionAsync())
             { await database.SaveChangesAsync(); await transaction.RollbackAsync(); }
@@ -40,12 +41,12 @@ public sealed class StaffOutboxTests(TenantDatabase fixture) : IClassFixture<Ten
         }
         var otherScope = TenantEnforcementTests.Scope(Guid.NewGuid());
         await using (var other = new ApplicationDbContext(Options, otherScope))
-            await new StaffProjectionOutbox(other, otherScope, publisher, NullLogger<StaffProjectionOutbox>.Instance).DispatchAsync(default);
+            await new StaffProjectionOutbox(other, otherScope, publisher, NullLogger<StaffProjectionOutbox>.Instance, Configuration(organisation)).DispatchAsync(default);
         Assert.Equal(1, publisher.Calls);
         publisher.Fail = false;
         var retryScope = TenantEnforcementTests.Scope(organisation);
         await using var retry = new ApplicationDbContext(Options, retryScope);
-        await new StaffProjectionOutbox(retry, retryScope, publisher, NullLogger<StaffProjectionOutbox>.Instance).DispatchAsync(default);
+        await new StaffProjectionOutbox(retry, retryScope, publisher, NullLogger<StaffProjectionOutbox>.Instance, Configuration(organisation)).DispatchAsync(default);
         Assert.NotNull((await retry.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
         Assert.Equal(2, publisher.Calls);
         var persisted = await retry.StaffMembers.SingleAsync();
@@ -84,6 +85,9 @@ public sealed class StaffOutboxTests(TenantDatabase fixture) : IClassFixture<Ten
         other.Entry(loaded.Emails.Single()).State = EntityState.Deleted;
         await Assert.ThrowsAsync<TenantContextException>(() => other.SaveChangesAsync());
     }
+    private static IConfiguration Configuration(Guid organisation) => new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?> { ["TenantWorker:OrganisationIds:0"] = organisation.ToString() }).Build();
+
     private sealed class Publisher : IEventBus
     {
         public bool Fail { get; set; }

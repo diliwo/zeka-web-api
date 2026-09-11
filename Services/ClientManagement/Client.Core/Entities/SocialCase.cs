@@ -13,7 +13,7 @@ namespace ClientManagement.Core.Entities
         public String? Note { get; set; }
         public string? ReasonOfClosure { get; set; }
 
-        public bool IsActif => !EndDate.HasValue;
+        public bool IsActif => CurrentAssignment.ActiveOn(DateTime.Today).Compile()(this);
 
         public SocialCase()
         {

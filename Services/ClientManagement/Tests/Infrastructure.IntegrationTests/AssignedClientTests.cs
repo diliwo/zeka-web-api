@@ -27,16 +27,16 @@ public sealed class AssignedClientTests(TenantDatabase fixture) : IClassFixture<
             var hidden = SyntheticClient.Create(SyntheticClient.Niss(sequence: 22));
             hidden.ReferenceNumber = "hidden-reference";
             seed.AddRange(own, other, visible, hidden);
-            seed.Add(new SocialCase(visible, DateTime.UtcNow, own));
+            seed.Add(new SocialCase(visible, DateTime.Today.AddDays(-1), own));
             if (scenario != "missing")
             {
                 var worker = scenario is "other" or "inactive" ? other : own;
                 if (scenario == "inactive") worker.Softdelete = true;
-                var support = new SocialCase(hidden, DateTime.UtcNow, worker);
-                if (scenario == "closed") support.EndDate = DateTime.UtcNow;
+                var support = new SocialCase(hidden, DateTime.Today.AddDays(-1), worker);
+                if (scenario == "closed") support.EndDate = DateTime.Today;
                 if (scenario == "deleted") support.Softdelete = true;
                 seed.Add(support);
-                if (scenario == "ambiguous") seed.Add(new SocialCase(hidden, DateTime.UtcNow, other));
+                if (scenario == "ambiguous") seed.Add(new SocialCase(hidden, DateTime.Today.AddDays(-1), other));
             }
             await seed.SaveChangesAsync(); visibleId = visible.Id; hiddenId = hidden.Id;
         }

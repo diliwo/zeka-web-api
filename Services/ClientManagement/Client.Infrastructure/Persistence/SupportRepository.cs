@@ -27,7 +27,7 @@ namespace ClientManagement.Infrastructure.Persistence
                 {
                     var previousSupport = GetLastSupportForClient(socialCase.Client.Id);
 
-                    if (!previousSupport.EndDate.HasValue)
+                    if (previousSupport.IsActif)
                     {
                         previousSupport.EndDate = socialCase.StartDate.AddDays(-1);
 
@@ -159,7 +159,7 @@ namespace ClientManagement.Infrastructure.Persistence
                 return result;
             }
 
-            var activeSupport = supports.Find(s => s.Softdelete != true && s.EndDate == null);
+            var activeSupport = supports.Find(s => s.IsActif);
 
             if (activeSupport is not null && DateTime.Compare(date, activeSupport.StartDate) <= 0)
             {
@@ -179,13 +179,14 @@ namespace ClientManagement.Infrastructure.Persistence
             return _context.Visible<ClientManagement.Core.Entities.SocialCase>().Any(b =>b.ClientId == id && b.Softdelete != true);
         }
 
-        public IQueryable<MySupportDto>GetConsultantSupportsByUserName(string username, string filter = "", bool isActive = true)
+        public IQueryable<MySupportDto> GetConsultantSupportsByMembership(Guid membershipId, string filter = "", bool isActive = true)
         {
-            var today = DateTime.Today;
-            var query = _context.Visible<ClientManagement.Core.Entities.SocialCase>()
-                .Where(s => !s.Softdelete
-                            && (Equals(s.SocialWorker.UserName,username))
-                            && (!isActive || ((s.StartDate <= today && s.EndDate > today) || (s.StartDate <= today && s.EndDate == null))))
+            var assigned = _context.AssignedClients(membershipId).Select(c => c.Id);
+            var supports = _context.Visible<SocialCase>()
+                .Where(s => !s.Softdelete && assigned.Contains(s.ClientId)
+                    && s.SocialWorker.OrganisationMembershipId == membershipId);
+            if (isActive) supports = supports.Where(CurrentAssignment.ActiveOn(DateTime.Today));
+            var query = supports
                 .Select(x => new MySupportDto()
                 {
                     ClientId = x.ClientId,

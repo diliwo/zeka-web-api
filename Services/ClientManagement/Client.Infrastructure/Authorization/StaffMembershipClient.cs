@@ -8,7 +8,9 @@ public sealed class StaffMembershipClient(HttpClient client, ITenantAccessCreden
 {
     public async Task<bool> VerifyAsync(Guid organisationId, Guid membershipId, bool requireActive, CancellationToken cancellationToken)
     {
-        if (organisationId == Guid.Empty || membershipId == Guid.Empty || string.IsNullOrWhiteSpace(credential.BearerToken)) return false;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(credential.BearerToken)) throw new TenantAccessException(AccessFailure.Unauthenticated);
+        if (organisationId == Guid.Empty || membershipId == Guid.Empty) return false;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(2));
         using var request = new HttpRequestMessage(HttpMethod.Get,
@@ -18,7 +20,8 @@ public sealed class StaffMembershipClient(HttpClient client, ITenantAccessCreden
         {
             using var response = await client.SendAsync(request, deadline.Token);
             if (response.StatusCode == HttpStatusCode.NoContent) return true;
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) return false;
+            if (response.StatusCode == HttpStatusCode.Unauthorized) throw new TenantAccessException(AccessFailure.Unauthenticated);
+            if (response.StatusCode == HttpStatusCode.Forbidden) return false;
             throw new TenantAccessException(AccessFailure.Unavailable);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

@@ -27,23 +27,29 @@ permissions, decision version and observation time. A successful response is
 never cached. Unknown contracts, roles, permission codes or mismatched identities
 fail closed. Seven fixed roles implement the accepted catalogue exactly.
 
-Each adapter call has one attempt and a two-second deadline, including body
-consumption. There is no automatic retry or stale-success availability window.
+Each current-access adapter call has at most two safe GET attempts and a shared
+two-second deadline, including the 100 ms retry delay and body consumption.
+Only transport failures, HTTP 408/429 and 5xx are retried. Authentication failures,
+semantic denials and invalid contracts are not retried. There is no success cache.
 Unauthenticated requests return 401; denials return 403; dependency failures and
 timeouts return 503. Caller cancellation propagates. Responses use `no-store`.
 Staff creation and new consumer revisions perform a separate bounded membership
 verification, so their authorization dependency budget can reach four seconds in total. Production
 latency/availability qualification remains part of the production-readiness gate.
-Existing HTTP diagnostics and safe exception-type/request-type logging provide
-failure observations; credentials and authorization response bodies must not be
-logged. Outbox failure logging contains no event payload.
+The `AdminAreaManagement.TenantAccess` and `ClientManagement.TenantAccess`
+ActivitySource/Meter names expose decision duration, attempt count, contract
+version, bounded outcome and authority-failure reason. They emit no subject,
+organisation, membership, permission list, credentials, response body or exception
+message. Operators can subscribe through the existing diagnostics tooling; this
+slice introduces no telemetry exporter/vendor. Outbox failure logging contains no
+event payload.
 
 Only successful Application authorization establishes the immutable scoped
 `TenantContextScope`. It works without HTTP and cannot be reused for another
 organisation, subject, membership or resource policy. Job hosts must create and
 dispose a DI scope per operation and supply their own authenticated identity and
-credential adapters. `DispatchStaffProjectionsCommand` is the permission-guarded
-outbox retry entry point for such a host.
+credential adapters. The registered `StaffProjectionRetryWorker` authorizes each
+fresh scope before invoking the `DispatchStaffProjectionsCommand` handler.
 
 ## Persistence and resource authorization
 
@@ -62,6 +68,14 @@ code boundaries; PostgreSQL roles/RLS remain issue #45, not an assertion of this
 Assigned-only client queries include a SQL predicate requiring exactly one current,
 non-deleted support whose non-deleted worker has the current immutable membership
 ID in the same organisation. Missing and ambiguous assignments yield no rows.
+`CurrentAssignment.ActiveOn(date)` is the canonical temporal predicate:
+not deleted, StartDate <= today, and EndDate absent or > today (inclusive start,
+exclusive end). Future-start supports do not grant early access; future-end
+supports remain active. Reads, detached-write guards, domain active checks and
+`mysupports` share this rule. The latter derives its membership exclusively from
+`TenantOperation.MembershipId`, including callers with all-scope permission.
+Its optional history flag never broadens access beyond that membership's currently
+assigned clients. Usernames remain display data only.
 Related-resource reads and writes apply the same predicate, including detached
 writes. Full-scope permission still retains organisation isolation. Legacy
 assessments without a proven client link remain unassigned and inaccessible to
@@ -84,10 +98,24 @@ does not allow runtime raw SQL or query-filter bypass.
 The v1 staff snapshot carries organisation ID, immutable membership ID, event ID,
 monotonically increasing revision, active/tombstone state and display data. Source
 staff mutation and outbox row commit together. Publication failure leaves a pending
-row; retry dispatch operates inside an authorized tenant scope. Delivery may repeat
-after publication but before marking the row delivered. A job scheduler must invoke
-the retry entry point for each explicitly authorized organisation; no platform-wide
-tenant enumeration or new scheduler infrastructure is introduced here.
+row; the hosted retry worker starts automatically and processes explicitly configured
+organisation selections, each reauthorized against AuthManagement. Startup fails
+without worker identity, credential and selections. Staff staging rejects organisations
+without configured retry coverage, so a successful mutation cannot silently depend on
+an absent scheduler. No platform tenant enumeration or fabricated membership is used.
+
+Each tenant batch has a ten-second cancellation budget and at most 100 records;
+each broker wait is limited to two seconds. Cycles run every five seconds, backing
+off to at most thirty seconds on cycle/access failures. Credentials are reread each
+cycle. Pending records survive restart; failed attempts update the existing audit
+timestamp and move behind older pending work to avoid starvation. Malformed records
+remain pending and observable while other records proceed. Recovery continues
+automatically rather than permanently abandoning tombstones after a retry limit.
+Delivery may repeat after publication but before its acknowledgement commits.
+
+The `AdminAreaManagement.StaffOutbox` meter exposes publication outcomes, pending
+age and retry-cycle outcomes. Warning logs omit payloads, identifiers and exception
+details. No persistence model or migration change is required for this retry path.
 
 ClientManagement creates a new scope for every delivery and authorizes its worker
 identity against AuthManagement. The event organisation is selection only, not proof.
@@ -125,16 +153,16 @@ rejects messages that lack the versioned membership contract.
    `ZEKA_MIGRATION_CONNECTION` supplied securely. Select `DeploymentDbContext` for
    AdminArea/ClientManagement and `AuthDbContext` for AuthManagement. No runtime
    `EnsureCreated`, `Migrate` or privileged deployment context is wired into APIs.
-6. Configure `Authentication:Issuer`, `Authentication:Audience` and
-   `Authentication:SigningKey` through secret/configuration management in all APIs.
-   The issuing authority must use the matching HS256 contract and at least a
-   32-byte signing key. Forwarded credentials must be valid for AuthManagement;
-   this implementation uses the configured shared service audience. Configure
-   `TenantAuthorization:AuthManagementUrl` as an HTTPS base URL.
+6. Stop at the authentication architecture gate below before delivery. The existing
+   shared HS256 validators are unchanged and are not an accepted delivery contract.
+   Configure `TenantAuthorization:AuthManagementUrl` as an HTTPS base URL.
 7. Configure the consumer's `TenantWorker:SubjectId` and securely provided,
    renewable `TenantWorker:BearerToken`; the identity needs current active
    memberships with ManageStaffProfiles in its authorized organisations. Token
-   rotation and retry scheduling belong to the worker host/operator.
+   rotation belongs to the worker host/operator. AdminArea additionally requires
+   `TenantWorker:OrganisationIds` (at most 100 explicit non-empty GUID selections).
+   Every organisation that produces staff events must be enrolled before mutation.
+   The API-hosted worker supplies retry scheduling; no external scheduler is required.
 8. Verify backfills, row counts, preserved relationships and pending-outbox
    delivery before enabling traffic. Automatic down migration deliberately raises
    an exception; recovery requires a reviewed backup/reconciliation procedure.
@@ -149,21 +177,23 @@ composite relationships, bypass rejection, publication atomicity, replay orderin
 target membership ownership and migration failure/rollback behavior. PostgreSQL tests exercise these controls;
 reflection tests detect missing Application policies and forbidden layer references.
 JWT tests reject wrong signatures, issuers, audiences and expired tokens. HTTP
-tests cover 401/403/503 translation, unknown contracts and bounded single attempts.
+tests cover 401/403/503 translation, malformed/unknown contracts, one safe retry,
+retry exhaustion, overall timeout, caller cancellation and redacted telemetry.
 
 The full solution regression evidence includes PostgreSQL migrations, client-detail
 projections, explicit membership immutability and the real HTTP bearer contract
 with Identity cookie defaults present. All three EF models match their migrations.
-Final validation: `dotnet test zeka-web-api.sln --no-restore` passed **327 tests**, with
-zero failures and zero skipped tests, using SDK 8.0.129 and PostgreSQL 17 test containers.
+The original reviewed baseline passed 327 tests. Post-review Release evidence is
+recorded in `issue-44-review-corrections.md`, using SDK 8.0.129 and PostgreSQL 17
+test containers.
 Deterministic secrets scans passed. Sonar agentic analysis skipped all requested
 files because Vortex is unavailable on the configured connection; it provides no
 quality-gate evidence for this change.
 
 Outstanding deployment/security follow-up: rotate the embedded legacy credential
 in the external authentication package/issuing environment; provide the new runtime
-authentication settings; obtain reviewed production backfills; schedule outbox
-retry and credential renewal; complete issues #45/#46 before claiming production
+authentication decision; obtain reviewed production backfills; configure outbox
+worker coverage and credential renewal; complete issues #45/#46 before claiming production
 isolation/readiness. Restore also reports the existing AutoMapper 13.0.1 advisory
 GHSA-rvv3-g6hj-g44x, which was not upgraded in this issue.
 
@@ -179,3 +209,25 @@ GHSA-rvv3-g6hj-g44x, which was not upgraded in this issue.
 | Explicit detached/bypass/job/event behavior | Detached concurrency tests, raw SQL/bulk/filter rejection, guarded retry command, outbox rollback/retry and consumer replay/ownership tests |
 | No scope leakage | Parallel scopes under reused pooled connections and independent consumer deliveries |
 | Provider/HTTP-independent inner layers | Abstractions package, application-owned authorization ports, transport adapters and forbidden-assembly conformance tests |
+
+## Authentication architecture gate — delivery remains blocked
+
+The current shared HS256 key permits every validator to sign trusted tokens. It is
+not accepted for delivery and was deliberately left unchanged in these corrections.
+No issuer, signing algorithm, key distribution, Azure identity design or broader
+authentication platform was introduced.
+
+The minimum decision is the authoritative issuer and validator-only contract:
+
+1. Preferred: the approved authoritative issuer signs asymmetrically and publishes
+   public validation keys through an approved HTTPS JWKS endpoint. Downstream
+   services receive no private signing material.
+2. If JWKS is not available: the same asymmetric issuer with explicitly approved
+   pinned public-key provisioning and coordinated rotation. This retains validator-only
+   trust but increases deployment/rotation coordination.
+
+Either option must name the issuer owner, exact issuer/audience/subject contract,
+allowed asymmetric algorithm, public-key rotation and unknown-key/outage behavior,
+and credential compatibility for AuthManagement calls and workers. Choosing and
+implementing either option requires explicit approval. Shared validator configuration
+can be consolidated only after that contract is accepted.
