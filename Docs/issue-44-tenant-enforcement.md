@@ -14,7 +14,11 @@ Existing gRPC generation and JSON Patch adaptation now belong to delivery/adapte
 
 ## Operation boundary
 
-HTTP validates the JWT signature, issuer, audience and lifetime. The authenticated
+HTTP validates RS256 JWTs using public JWKS material, exact environment issuer,
+one common Zeka API audience, lifetime and mandatory kid. AuthManager owns the
+replaceable v1 issuer; downstream APIs have no private signing material. See
+[the accepted authentication implementation and evidence](issue-44-authentication.md).
+The authenticated
 subject and single `X-Organisation-Id` selection feed Application's current-access
 port; selection and role claims do not grant access. Conflicting organisation or
 subject claims fail closed. Application request attributes are authoritative;
@@ -153,8 +157,10 @@ rejects messages that lack the versioned membership contract.
    `ZEKA_MIGRATION_CONNECTION` supplied securely. Select `DeploymentDbContext` for
    AdminArea/ClientManagement and `AuthDbContext` for AuthManagement. No runtime
    `EnsureCreated`, `Migrate` or privileged deployment context is wired into APIs.
-6. Stop at the authentication architecture gate below before delivery. The existing
-   shared HS256 validators are unchanged and are not an accepted delivery contract.
+6. Supply the explicit typed authentication settings described in
+   `issue-44-authentication.md`. Legacy shared SigningKey configuration is rejected.
+   AuthManager alone receives host-supplied signing and retiring-key references;
+   validators receive public keys only through the configured HTTPS JWKS URI.
    Configure `TenantAuthorization:AuthManagementUrl` as an HTTPS base URL.
 7. Configure the consumer's `TenantWorker:SubjectId` and securely provided,
    renewable `TenantWorker:BearerToken`; the identity needs current active
@@ -192,7 +198,7 @@ quality-gate evidence for this change.
 
 Outstanding deployment/security follow-up: rotate the embedded legacy credential
 in the external authentication package/issuing environment; provide the new runtime
-authentication decision; obtain reviewed production backfills; configure outbox
+authentication environment configuration; obtain reviewed production backfills; configure outbox
 worker coverage and credential renewal; complete issues #45/#46 before claiming production
 isolation/readiness. Restore also reports the existing AutoMapper 13.0.1 advisory
 GHSA-rvv3-g6hj-g44x, which was not upgraded in this issue.
@@ -210,24 +216,16 @@ GHSA-rvv3-g6hj-g44x, which was not upgraded in this issue.
 | No scope leakage | Parallel scopes under reused pooled connections and independent consumer deliveries |
 | Provider/HTTP-independent inner layers | Abstractions package, application-owned authorization ports, transport adapters and forbidden-assembly conformance tests |
 
-## Authentication architecture gate — delivery remains blocked
+## Accepted authentication replacement
 
-The current shared HS256 key permits every validator to sign trusted tokens. It is
-not accepted for delivery and was deliberately left unchanged in these corrections.
-No issuer, signing algorithm, key distribution, Azure identity design or broader
-authentication platform was introduced.
+Ubongo's Authentication Token Issuer and Validation contract was accepted on
+2026-09-11 and implemented against `4d2db324f5da9dbcd2099266414b87c2c02bc92c`.
+Shared HS256 validation has been removed. AuthManager is the replaceable RS256
+issuer, and all three APIs use the same validator-only technical component and
+environment audience. JWKS is the only downstream key distribution path.
 
-The minimum decision is the authoritative issuer and validator-only contract:
-
-1. Preferred: the approved authoritative issuer signs asymmetrically and publishes
-   public validation keys through an approved HTTPS JWKS endpoint. Downstream
-   services receive no private signing material.
-2. If JWKS is not available: the same asymmetric issuer with explicitly approved
-   pinned public-key provisioning and coordinated rotation. This retains validator-only
-   trust but increases deployment/rotation coordination.
-
-Either option must name the issuer owner, exact issuer/audience/subject contract,
-allowed asymmetric algorithm, public-key rotation and unknown-key/outage behavior,
-and credential compatibility for AuthManagement calls and workers. Choosing and
-implementing either option requires explicit approval. Shared validator configuration
-can be consolidated only after that contract is accepted.
+The replacement adds no token/login/refresh endpoint, token exchange, On-Behalf-Of,
+gateway transformation, identity infrastructure, workload/Azure identity, RLS,
+credential provisioning, or authorization-policy change. Startup configuration,
+readiness, key publication/rotation, generic 401/503 failures, bounds and verification
+are documented in [issue-44-authentication.md](issue-44-authentication.md).

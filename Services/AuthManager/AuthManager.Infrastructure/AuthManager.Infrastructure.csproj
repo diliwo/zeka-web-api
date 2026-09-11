@@ -17,4 +17,5 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <ItemGroup><ProjectReference Include="../../../Shared/Zeka.Authentication/Zeka.Authentication.csproj" /></ItemGroup>
 </Project>

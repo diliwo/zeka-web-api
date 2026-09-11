@@ -26,4 +26,5 @@
   </ItemGroup>
 
 <ItemGroup><PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.30" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../../../Shared/Zeka.Authentication/Zeka.Authentication.csproj" /></ItemGroup>
 </Project>

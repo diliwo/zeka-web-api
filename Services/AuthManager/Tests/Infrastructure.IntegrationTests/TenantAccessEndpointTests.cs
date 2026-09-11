@@ -26,16 +26,13 @@ public sealed class TenantAccessEndpointTests
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
-        var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Authentication:Issuer"] = "https://issuer.invalid", ["Authentication:Audience"] = "zeka-services",
-            ["Authentication:SigningKey"] = key
-        });
+        using var fixture = new Zeka.Authentication.Tests.AuthenticationFixture();
+        builder.Configuration.AddConfiguration(fixture.Configuration());
         builder.Services.AddAuthentication(options =>
         { options.DefaultAuthenticateScheme = "identity-cookie"; options.DefaultChallengeScheme = "identity-cookie"; })
             .AddCookie("identity-cookie");
-        builder.Services.AddTenantAuthentication(builder.Configuration);
+        builder.Services.AddTenantAuthentication(fixture.Configuration());
+        builder.Services.AddSingleton<Zeka.Authentication.IJwksDocumentSource>(new Zeka.Authentication.Tests.DocumentSource(fixture.Jwks()));
         var access = new Access();
         builder.Services.AddSingleton<ICurrentTenantAccess>(access);
         builder.Services.AddSingleton<IActiveOrganisationMembership, Membership>();
@@ -46,10 +43,9 @@ public sealed class TenantAccessEndpointTests
         using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { BaseAddress = new Uri(address) };
         var path = $"api/v1/tenant-access/{Guid.NewGuid()}";
         Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync(path)).StatusCode);
-        var token = new JwtSecurityToken("https://issuer.invalid", "zeka-services",
-            new[] { new Claim("sub", Guid.NewGuid().ToString()) }, expires: DateTime.UtcNow.AddMinutes(5),
-            signingCredentials: new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)), SecurityAlgorithms.HmacSha256));
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", new JwtSecurityTokenHandler().WriteToken(token));
+        var issuer = IssuerContractTests.Create(fixture);
+        issuer.ConfirmPublication(await issuer.PrepareAsync());
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await issuer.IssueAsync(Guid.NewGuid().ToString()));
         using var authorized = await http.GetAsync(path);
         Assert.Equal(HttpStatusCode.OK, authorized.StatusCode); Assert.True(authorized.Headers.CacheControl!.NoStore);
         Assert.Equal(HttpStatusCode.NoContent, (await http.GetAsync(path + $"/memberships/{Guid.NewGuid()}?includeInactive=true")).StatusCode);

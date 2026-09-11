@@ -18,37 +18,18 @@ public sealed class TenantHttpTests
 {
     [Theory]
     [InlineData("issuer")] [InlineData("audience")] [InlineData("signature")] [InlineData("expiry")]
-    public void Authentication_requires_a_valid_signature_issuer_audience_and_lifetime(string invalid)
+    public async Task Authentication_requires_a_valid_signature_issuer_audience_and_lifetime(string invalid)
     {
-        var key = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(48));
-        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Authentication:Issuer"] = "https://issuer.invalid", ["Authentication:Audience"] = "zeka-services",
-                ["Authentication:SigningKey"] = key
-            }).Build();
-        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        services.AddLogging();
-        ClientManagement.API.TenantAuthentication.AddTenantAuthentication(services, configuration);
+        using var fixture = new Zeka.Authentication.Tests.AuthenticationFixture();
+        var services = new ServiceCollection().AddLogging();
+        ClientManagement.API.TenantAuthentication.AddTenantAuthentication(services, fixture.Configuration());
+        services.AddSingleton<Zeka.Authentication.IJwksDocumentSource>(new Zeka.Authentication.Tests.DocumentSource(fixture.Jwks()));
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>>()
             .Get(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme);
-        string Token(bool corrupt)
-        {
-            var signing = corrupt && invalid == "signature" ? Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(48)) : key;
-            var token = new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
-                issuer: corrupt && invalid == "issuer" ? "other" : "https://issuer.invalid",
-                audience: corrupt && invalid == "audience" ? "other" : "zeka-services",
-                claims: new[] { new Claim("sub", "subject") }, notBefore: DateTime.UtcNow.AddHours(-2),
-                expires: corrupt && invalid == "expiry" ? DateTime.UtcNow.AddHours(-1) : DateTime.UtcNow.AddMinutes(5),
-                signingCredentials: new Microsoft.IdentityModel.Tokens.SigningCredentials(
-                    new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(signing)),
-                    Microsoft.IdentityModel.Tokens.SecurityAlgorithms.HmacSha256));
-            return new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().WriteToken(token);
-        }
-        var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-        Assert.True(handler.ValidateToken(Token(false), options.TokenValidationParameters, out _).Identity!.IsAuthenticated);
-        Assert.ThrowsAny<Microsoft.IdentityModel.Tokens.SecurityTokenException>(() => handler.ValidateToken(Token(true), options.TokenValidationParameters, out _));
+        var handler = Assert.Single(options.TokenHandlers);
+        Assert.True((await handler.ValidateTokenAsync(fixture.Token(), options.TokenValidationParameters)).IsValid);
+        Assert.False((await handler.ValidateTokenAsync(fixture.Token(invalid), options.TokenValidationParameters)).IsValid);
     }
 
     [Fact]

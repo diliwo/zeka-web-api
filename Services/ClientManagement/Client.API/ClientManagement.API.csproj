@@ -40,4 +40,5 @@
   </ItemGroup>
 
 <ItemGroup><PackageReference Include="Zeka.Extensions.MultiTenancy.AspNetCore" Version="2.0.0-preview.1" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../../../Shared/Zeka.Authentication/Zeka.Authentication.csproj" /></ItemGroup>
 </Project>

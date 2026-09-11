@@ -33,4 +33,12 @@
     <ProjectReference Include="..\..\AuthManager.API\AuthManager.API.csproj" />
   </ItemGroup>
 
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/AuthenticationFixture.cs" Link="AuthenticationFixture.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/ValidatorContractTests.cs" Link="ValidatorContractTests.cs" /></ItemGroup>
+  <ItemGroup>
+    <!-- Cross-API authentication conformance: compile the exact validator-only registrations,
+         without referencing another service's Application, Domain, or persistence assemblies. -->
+    <Compile Include="../../../AdminAreaManagement/AdminAreaManagement.API/TenantAuthentication.cs" Link="AdminAreaBearerRegistration.cs" />
+    <Compile Include="../../../ClientManagement/Client.API/TenantAuthentication.cs" Link="ClientBearerRegistration.cs" />
+  </ItemGroup>
 </Project>

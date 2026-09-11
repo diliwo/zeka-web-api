@@ -10,4 +10,6 @@
   <ItemGroup><ProjectReference Include="../../Client.Infrastructure/ClientManagement.Infrastructure.csproj" /></ItemGroup>
   <ItemGroup><Compile Include="../Common/SyntheticClient.cs" Link="SyntheticClient.cs" /></ItemGroup>
 <ItemGroup><ProjectReference Include="..\..\Client.API\ClientManagement.API.csproj" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/AuthenticationFixture.cs" Link="AuthenticationFixture.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/ValidatorContractTests.cs" Link="ValidatorContractTests.cs" /></ItemGroup>
 </Project>

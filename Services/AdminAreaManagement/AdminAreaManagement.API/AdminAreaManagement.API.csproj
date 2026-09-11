@@ -38,4 +38,5 @@
   <PackageReference Include="Grpc.Tools" Version="2.49.0" PrivateAssets="all" />
   <Protobuf Include="..\AdminAreaManagement.Application\Common\Protos\adminarea.proto" GrpcServices="Server" />
 </ItemGroup>
+  <ItemGroup><ProjectReference Include="../../../Shared/Zeka.Authentication/Zeka.Authentication.csproj" /></ItemGroup>
 </Project>

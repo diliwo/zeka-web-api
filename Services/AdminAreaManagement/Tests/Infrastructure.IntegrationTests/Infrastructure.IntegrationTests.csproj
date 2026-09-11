@@ -17,4 +17,6 @@
     <ProjectReference Include="../../AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj" />
   </ItemGroup>
 <ItemGroup><ProjectReference Include="..\..\AdminAreaManagement.API\AdminAreaManagement.API.csproj" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/AuthenticationFixture.cs" Link="AuthenticationFixture.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/ValidatorContractTests.cs" Link="ValidatorContractTests.cs" /></ItemGroup>
 </Project>

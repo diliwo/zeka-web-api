@@ -2,6 +2,7 @@ using AuthManager.API;
 using AuthManager.API.Endpoints;
 using AuthManager.Application;
 using AuthManager.Infrastructure;
+using AuthManager.Infrastructure.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,10 +14,12 @@ builder.Services.AddProblemDetails();
 builder.ConfigureMicrosoftIdentity();
 
 builder.Services.AddTenantAuthentication(builder.Configuration);
+builder.Services.AddAccessTokenIssuer(builder.Configuration);
 var app = builder.Build();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapTenantAccess();
+app.MapIssuerEndpoints();
 
 //if (app.Environment.IsDevelopment())
 //{
