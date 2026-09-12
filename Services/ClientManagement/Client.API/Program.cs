@@ -6,7 +6,6 @@ using ClientManagement.Application.SocialWorker.IntegrationEvents;
 using ClientManagement.Application.SocialWorker.IntegrationEvents.EventHandlers;
 using ClientManagement.Infrastructure;
 using FluentAssertions.Common;
-using ClientManagement.API;
 using Zeka.Extensions.EventBus;
 using Zeka.Extensions.EventBus.RabbitMq;
 

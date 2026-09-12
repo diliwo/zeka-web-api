@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Configurations;
 using DotNet.Testcontainers.Containers;
 using DotNet.Testcontainers.Networks;
 using Xunit;
@@ -57,7 +58,19 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
         // Keep the shared process-exit, startup-log, real HTTP and fail-closed assertions.
         start.FileName = "docker";
         start.ArgumentList.Clear();
-        foreach (var argument in new[] { "exec", host.Id, "dotnet", "/app/" + Path.GetFileName(assembly) })
+        // Sanitization deliberately removes Docker context selection and changes HOME.
+        // Use the endpoint already resolved for our containers, including rootless
+        // Unix sockets and Windows named pipes, rather than the CLI's default socket.
+        // Preserve transport configuration references for TLS-enabled Docker daemons.
+        foreach (var name in new[] { "DOCKER_CONFIG", "DOCKER_TLS", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH" })
+            if (Environment.GetEnvironmentVariable(name) is { } value) start.Environment[name] = value;
+        var endpoint = TestcontainersSettings.OS.DockerEndpointAuthConfig.Endpoint;
+        // Docker CLI spells the same Windows pipe as a UNC URI, unlike Docker.DotNet.
+        var dockerHost = endpoint.Scheme == "npipe"
+            ? $"npipe:////{endpoint.Host}{endpoint.AbsolutePath}"
+            : endpoint.ToString();
+        foreach (var argument in new[] { "--host", dockerHost,
+            "exec", host.Id, "dotnet", "/app/" + Path.GetFileName(assembly) })
             start.ArgumentList.Add(argument);
     }
 

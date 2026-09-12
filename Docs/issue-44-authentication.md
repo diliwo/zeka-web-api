@@ -148,141 +148,97 @@ and bearer challenges omit error details.
 Tokens, subjects, organisation IDs, kids, key material, key references and discovery
 exceptions are not diagnostic dimensions. No telemetry vendor/exporter was added.
 
-## Verification
+## Verification — corrected portable harness
 
-Final commands, totals and changed-file review are recorded below.
-Tests use ephemeral in-memory RSA keys; the file-provider test creates and removes
-only its own unique temporary fixture file. No test uses a host credential.
+Reviewed remote baseline: `5e65d3231f03044ab40e5092e7b0f23866890128`.
+Verification date: 2026-09-12. This section replaces the earlier environment-dependent
+execution claims; the results below were rerun against the corrected implementation.
+The accepted production authentication/authorization implementation and required CI
+wiring were not changed.
 
-The shared validator test source is compiled separately into each service's existing
-Infrastructure.IntegrationTests project. A narrowly scoped AuthManager conformance
-test compiles the exact two downstream registration source files to validate one
-issuer-produced token across all three registrations, without referencing another
-service's Application, Domain or persistence assemblies.
+### Authorized correction
 
-Existing Issue #44 permission, current-access, assignment, staff projection/outbox,
-EF enforcement, migration and tenant-isolation production files remain unchanged.
-No database model, migration or public staff-event contract was modified.
+- `Services/ClientManagement/Tests/Infrastructure.IntegrationTests/AuthenticationStartupTests.cs`
+  passes the Docker endpoint already resolved by Testcontainers to the child CLI with
+  `--host`. Sanitizing HOME and the child environment can no longer make the CLI
+  independently select a default socket or context.
+- Unix endpoint URIs pass through unchanged, including user-specific rootless socket
+  paths. Windows named-pipe URIs are converted from Docker.DotNet's
+  `npipe://./pipe/...` representation to the equivalent Docker CLI UNC representation,
+  `npipe:////./pipe/...`. No socket path is hard-coded in the harness.
+- Explicit `DOCKER_CONFIG`, `DOCKER_TLS`, `DOCKER_TLS_VERIFY`, and `DOCKER_CERT_PATH`
+  references are preserved for the CLI only. Docker context selection is replaced
+  by the resolved endpoint; application configuration remains sanitized and these
+  transport references are not added to the API container's environment.
+- Removed only the remaining duplicate `using ClientManagement.API` from the existing
+  `Services/ClientManagement/Client.API/Program.cs` path. No host registration,
+  middleware, authentication, authorization, or other production behavior changed.
 
-### Final Release evidence — 2026-09-11
+Docker's documented [CLI endpoint and configuration precedence](https://docs.docker.com/reference/cli/docker/)
+explains why supplying the resolved host is necessary after environment sanitization.
+Ubongo remained current; the accepted authentication boundary and ADR-002 integration
+responsibilities are preserved. No package, CI job/check identity, or repository setting changed.
 
-SDK 8.0.129; PostgreSQL 17 Testcontainers using the local Docker engine.
+### Active endpoint and cleanup evidence
 
-```text
-dotnet build zeka-web-api.sln -c Release --no-restore --verbosity quiet
-Exit 0: build succeeded, 0 errors. Complete Release warning evidence:
-4 pre-existing warnings total: 2 NU1903 AutoMapper advisories,
-plus gateway analyzer warnings ASP0013 and ASP0014.
+The real-host suite ran with the active Docker endpoint explicitly supplied to
+Testcontainers. The selected context was `default`, on the existing Rancher Desktop
+Docker engine (29.5.3). Its Windows endpoint was `npipe:////./pipe/docker_engine`,
+expressed as `npipe://./pipe/docker_engine` for Testcontainers. The child CLI connected
+to that same pipe using the converted URI and executed the real API successfully.
+No `/var/run/docker.sock` assumption or manually provisioned RabbitMQ was used.
+This is an executed Windows named-pipe result; a separate rootless daemon run is not
+claimed. Rootless Unix URIs are passed directly from Testcontainers rather than reconstructed.
 
-dotnet test zeka-web-api.sln -c Release --no-build --no-restore
-  --logger "trx;LogFileName=issue44-rs256-release.trx" --verbosity quiet
-Exit 0: 489 passed, 0 failed, 0 skipped, across the original 12 test projects.
-```
+All three real-host cases passed. The actual entry point, HTTP response, broker consumer,
+unknown-key rejection, and redacted startup-error assertions are retained. Each case
+still owns its private network, RabbitMQ container, and API container through the existing
+xUnit/Testcontainers lifecycle. Production services are not replaced or mocked.
 
-| Service | Domain unit | Application unit | Application integration | Infrastructure integration | Total |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| AdminAreaManagement | 60 | 42 | 4 | 116 | 222 |
-| AuthManager | 23 | 3 | 1 | 72 | 99 |
-| ClientManagement | 32 | 16 | 15 | 105 | 168 |
-| Total | 115 | 61 | 20 | 293 | 489 |
+Cleanup was checked independently against the active Docker engine:
 
-The baseline's 393 cases remain green. The replacement adds 96 authentication
-cases: 29 validator contract cases per service, plus nine issuer contract cases.
-The existing signature/issuer/audience/lifetime and forwarded tenant-access cases
-were adapted from HS256 to RS256 without changing their authorization assertions.
+| Path | Execution evidence | Cleanup evidence |
+| --- | --- | --- |
+| Successful host and rejected configuration cases | 3 passed | Six fixture containers and three private networks absent from Docker; explicit disposal logged for every fixture resource |
+| Intentional assertion failure while API and broker were live | 2 passed, 1 expected failure | The same six-container/three-network cleanup verified after failure |
 
-Focused authentication commands were also run against each service with filters
-for BearerValidationTests, IssuerContractTests, TenantAccessEndpointTests and
-TenantHttpTests. The final full run includes the subsequently added empty/private/
-duplicate JWKS and file-provider/typed-registration cases.
+For the failure probe, a temporary `Assert.True(false, "Intentional cleanup verification failure.")`
+was inserted at the existing successful broker-consumer check. xUnit reached that assertion,
+then the shared process `finally` and fixture disposal executed. A script restored the
+original source in its own `finally`. The mutation was not committed. The corrected source
+was rebuilt afterward and used for every final acceptance run below; the expected-failure
+probe is separate from those totals.
 
-| Required evidence | Passing tests |
-| --- | --- |
-| One issuer-produced common-audience token across three APIs | IssuerContractTests.One_issuer_token_is_accepted_by_all_three_actual_api_registrations |
-| Forwarded token reaches current-access endpoint; authorization outcomes preserved | TenantAccessEndpointTests.Tenant_contract_uses_bearer_even_when_identity_cookie_is_the_default_scheme, plus unchanged downstream access-adapter suites |
-| HS256, none, substitution, wrong signature/issuer/audience/expiry and missing kid | ValidatorContractTests.Invalid_tokens_are_generic_401, compiled separately for all three APIs |
-| Unknown kid refresh and refresh-storm bound | Unknown_kid_refreshes_once_then_succeeds_or_returns_401_after_trusted_discovery |
-| Outage, usable cache, maximum staleness and recovery | Outage_allows_only_non_stale_matching_cache_and_recovers; Discovery_timeout_is_bounded |
-| Successful empty JWKS versus unusable JWKS | Empty_trusted_jwks_rejects_unknown_key_as_401_and_fails_readiness; Unusable_jwks_never_establishes_trust |
-| Publish-before-use, replaced private handles and overlap/retirement | Issuer_refuses_unpublished_keys_and_key_replacement_requires_republication; Rotation_retains_previous_public_key_for_maximum_lifetime_and_skew_then_retires_it (including old/new token validation) |
-| Downstream cannot sign | Public_validation_key_cannot_sign_and_no_private_material_is_distributed; cross-API composition has no issuer or private-key provider |
-| Startup/configuration/readiness | Invalid_or_legacy_configuration_fails_startup_without_echoing_values; Issuer_configuration_is_required_bounded_redacted_and_forbidden_downstream; Missing_signing_material_fails_readiness_and_issuance_without_fallback; Actual_jwks_endpoint_exposes_only_public_fields_and_controls_readiness |
-| Provider behavior and no credential mutation | Host_supplied_private_file_is_read_only_and_issuance_uses_the_supplied_key; Public_only_or_weak_signing_material_is_rejected; Typed_issuer_registration_shares_one_publication_and_signing_boundary |
-| Redacted diagnostics | Redacted_diagnostics_distinguish_invalid_and_unavailable verifies real logs, Meter and ActivitySource |
-| Existing Issue #44 behavior | All permission, membership, access-result, assignment, outbox recovery, PostgreSQL migration/isolation and scope-leakage tests in the complete suite |
+The cleanup verifier collected created resource IDs, required explicit disposal records,
+and queried containers/networks through the active endpoint to prove none remained. It also
+checked the auxiliary Testcontainers container when present; no unrelated Docker resource
+was stopped or changed.
 
-Raw local evidence is retained in each test project's ignored
-`TestResults/issue44-rs256-release.trx`, and in the temporary-directory logs
-`issue44-rs256-build.log` and `issue44-rs256-release-test.log`.
-The complete Release warning count is four pre-existing warnings: two AutoMapper
-13.0.1 advisories (NU1903, GHSA-rvv3-g6hj-g44x), plus gateway analyzer warnings
-ASP0013 (`Program.cs:15`) and ASP0014 (`Program.cs:39`). The retained incremental
-build log reports only the two package advisories; it does not represent the
-complete Release warning evidence. All four are outside this bounded replacement.
-This is not a warning-free build.
+Local evidence under `%TEMP%`:
 
-### Bounded delivery correction — 2026-09-12
+- `issue44-portability-startup-corrected.log`
+- `issue44-portability-intentional-failure.log`
+- `issue44-portability-check-cleanup.ps1`
+- `issue44-portability-success-cleanup.log`
+- `issue44-portability-failure-cleanup.log`
 
-Reviewed baseline: `53403a8788897faf73fda5356b1af124e028a367`.
-Scope: the user's post-review delivery correction for Issue #44 only.
-Ubongo was pulled with `--ff-only` (already current); the accepted Authentication
-Token Issuer and Validation decision and ADR-002 testing responsibilities were
-consulted. Authentication architecture and cryptographic controls remain accepted.
+### Required workflow and complete Release verification
 
-- Removed obsolete `Authentication:AuthBaseAddress` from the tracked AuthManager
-  and ClientManagement base settings. The strict `AuthenticationOptions` binder
-  and all production C# files are unchanged.
-- Added `AuthenticationStartupTests` to each service's existing infrastructure
-  integration project, using the linked `RealHostStartupTests` helper. No new
-  package or production test hook is required.
-- Each case launches the actual compiled API entry point with Kestrel on an
-  ephemeral loopback port, using an exact copy of its tracked `appsettings.json`
-  and process-local environment overrides supplied before `CreateBuilder` runs.
-  Developer environment configuration and user secrets are excluded. The tests
-  neither rebuild a partial host nor replace service registrations.
-- Each service has one successful startup case and two fail-closed cases:
-  reintroducing `AuthBaseAddress`, or adding `UnexpectedKey`, must terminate startup
-  with `Invalid authentication configuration.` without echoing the test value.
-  Existing negative validator coverage remains unchanged.
-- AuthManager's successful case also verifies the real JWKS endpoint returns
-  exactly the ephemeral fixture's public key. Its temporary signing fixture and
-  isolated host directory are deleted after the child process exits. ClientManagement
-  must serve an HTTP response from its actual pipeline. These are configuration
-  and HTTP-startup checks, not broker, database, or deployment-readiness claims.
+The required four-project `run` block in `.github/workflows/mvp-validation.yml` was
+extracted unchanged and executed with Bash `--noprofile --norc -e -o pipefail`, using
+the active Docker endpoint and the corrected source. No filter or test skip was added.
+All **202 expected tests passed**, with zero failures/skips:
 
-The only changed components are the two base settings, the two startup-test classes,
-their project source links, the shared startup-test helper, and this evidence report.
-RS256/JWKS, issuer/audience, kid/rotation, authorization, membership, assignment,
-outbox, EF/migrations, tenancy, workload/Azure identity and RLS/runtime roles are
-unchanged. No host credential or deployment setting was changed.
+| Required project | Passed |
+| --- | ---: |
+| AuthManager Infrastructure.IntegrationTests | 75 |
+| AdminAreaManagement Application.IntegrationTests | 4 |
+| ClientManagement Application.IntegrationTests | 15 |
+| ClientManagement Infrastructure.IntegrationTests, including real-host startup | 108 |
+| Total | 202 |
 
-Verification uses SDK 8.0.129 and the existing local Docker engine. The focused
-AuthManager authentication/startup run passed 42 tests; ClientManagement passed 51.
-The initial new AuthManager assertion compared JSON property order; it was corrected
-to structural JSON equality after confirming the real host returned the expected
-public JWKS. No production behavior or existing assertion was changed.
-
-The complete Release build (`dotnet build zeka-web-api.sln -c Release --no-restore
---verbosity quiet`) exited 0 with 0 errors. This run recompiled additional untouched
-projects and reported **264 warnings**, including the four warnings identified above;
-it must not be represented as a four-warning run. The full log is retained at
-`%TEMP%/issue44-delivery-build.log`. No warning was suppressed or repaired out of scope.
-
-The initial full Release test run passed 486 cases and failed nine AuthManager cases
-during Testcontainers Docker endpoint discovery (`npipe://./pipe/docker_engine`
-ping cancellation). All six new startup cases passed. This was an infrastructure
-availability failure before the affected database fixtures could initialize;
-no application assertion or production code was changed to address it.
-
-All nine affected cases passed on an unchanged targeted retry after Docker responded.
-The final complete Release run used sequential project execution to reduce concurrent
-Docker discovery/startup pressure:
-
-```text
-dotnet test zeka-web-api.sln -c Release --no-build --no-restore -m:1
-  --logger "trx;LogFileName=issue44-delivery-release-final.trx" --verbosity quiet
-Exit 0: 495 passed, 0 failed, 0 skipped, across all 12 test projects.
-```
+The complete Release suite then discovered and passed **495 tests across all 12 projects**,
+with **zero failures and zero skips**:
 
 | Service | Domain unit | Application unit | Application integration | Infrastructure integration | Total |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -291,178 +247,71 @@ Exit 0: 495 passed, 0 failed, 0 skipped, across all 12 test projects.
 | ClientManagement | 32 | 16 | 15 | 108 | 171 |
 | Total | 115 | 61 | 20 | 299 | 495 |
 
-Final raw results are retained in each project's ignored
-`TestResults/issue44-delivery-release-final.trx` and
-`%TEMP%/issue44-delivery-release-final-test.log`. The initial failed run remains
-separately available as `issue44-delivery-release.trx` and
-`%TEMP%/issue44-delivery-release-test.log`; the targeted recovery log is
-`%TEMP%/issue44-delivery-docker-retry.log`.
-
-The acceptance evidence is therefore: both obsolete tracked keys removed; both
-real hosts start with valid RS256/JWKS environment configuration; both hosts reject
-obsolete and arbitrary unknown authentication keys; the strict binder and accepted
-cryptographic controls are unchanged; complete warning evidence is corrected;
-focused tests, the complete Release build and final complete suite pass.
-Final scope/security review, deterministic secrets scans of all eight changed files,
-and `git diff --check` passed. Existing compiler/advisory/analyzer warnings and the
-transient Docker discovery failure are recorded above and left outside the code change.
-No push, PR, merge, Issue #44 closure, credential mutation or ADR-005 work was performed.
-The local commit SHA and post-commit working-tree status are reported in the handoff.
-
-### Final test/delivery correction — 2026-09-12
-
-Reviewed baseline: `30dc53230c208b7d556d42ac339276efc8875caa`.
-Chief accepted the production authentication/authorization implementation. This
-correction changes only five files: the ClientManagement startup fixture, its shared
-process-test helper, `.github/workflows/mvp-validation.yml`, the two duplicate using
-directives in AdminAreaManagement `Program.cs`, and this report. No package references,
-production authentication/authorization logic, persistence, deployment configuration,
-credentials, or repository settings changed. Ubongo was already current; ADR-002's
-integration-test responsibilities and the accepted authentication boundary are preserved.
-
-ClientManagement startup is now self-contained:
-
-- Each xUnit case owns a fresh Testcontainers network and `rabbitmq:3.13.7-alpine`
-  broker. It waits for RabbitMQ's startup-complete signal, then a successful
-  `rabbitmq-diagnostics -q check_port_connectivity` result.
-- The production adapter accepts only a hostname and uses AMQP port 5672. The real
-  compiled API therefore runs in `mcr.microsoft.com/dotnet/aspnet:8.0.30` on that
-  private network, with the broker's network alias. No broker host port is published
-  or selected, and no developer broker is reused. The API's HTTP port is mapped to
-  a random host port. This follows the existing Testcontainers approach without
-  introducing a package or changing production configuration binding.
-- The same shared test method still executes the actual entry point and asserts
-  startup, real HTTP response, nonzero exit on unknown configuration, and redacted
-  error text. Only process preparation/address translation gain test extension points;
-  no production registration or service is mocked or replaced. The tracked base
-  `appsettings.json` and isolated environment overrides remain the configuration inputs.
-- The successful case additionally queries this broker and requires one consumer on
-  the unique test queue. A listening HTTP host with a failed subscriber is insufficient.
-  API and broker containers and their network are disposed after each case, including
-  failure paths. Fresh broker creation and cleanup are visible in the startup log.
-
-The initial fixture attempt ran a diagnostics command before broker initialization
-completed, causing a fresh-container initialization race. Waiting for the server's
-startup-complete signal before diagnostics resolved it. No host credential, existing
-broker, or production implementation was modified.
-
-Required PR validation restores and runs the **entire ClientManagement
-Infrastructure.IntegrationTests project**, with no filter, in the existing Docker-enabled
-`postgresql` job. Testcontainers provisions and tears down its dependencies. The job ID,
-check name (`PostgreSQL Testcontainers`), and required `MVP Validation` aggregate are
-preserved. A failure in this suite sets the existing nonzero step result and fails the
-aggregate. No manually provisioned RabbitMQ service or CI credential is required.
-The workflow passes actionlint 1.7.12, including its bundled shell checks.
-Its exact integration-test `run` block was extracted unchanged and executed locally
-with Bash `--noprofile --norc -e -o pipefail`: exit 0, **202 tests passed** across
-the four listed projects (75 AuthManager infrastructure, 4 AdminAreaManagement
-application integration, 15 ClientManagement application integration, and all 108
-ClientManagement infrastructure cases). Evidence is retained in
-`%TEMP%/issue44-required-test-step.sh` and `%TEMP%/issue44-required-test-step.log`.
-This proves local execution of the required command block; no hosted GitHub Actions
-run is claimed and no PR was opened to trigger one.
-
-Verification with SDK 8.0.129:
-
-| Check | Result |
-| --- | --- |
-| Fresh ClientManagement real-host cases | 3 passed; test-owned broker/API/network, including actual broker consumer |
-| Focused AuthManager startup/authentication | 42 passed |
-| Focused AdminAreaManagement authentication | 48 passed |
-| Focused ClientManagement startup/authentication | 51 passed |
-| Complete Release suite, all 12 projects | 495 passed, 0 failed, 0 skipped |
-| Complete Release build | Exit 0; **23 warnings, 0 errors** |
-
 ```text
-dotnet build zeka-web-api.sln -c Release --no-restore --verbosity quiet
 dotnet test zeka-web-api.sln -c Release --no-build --no-restore -m:1
-  --logger "trx;LogFileName=issue44-final-test-delivery.trx" --verbosity quiet
+  --logger "trx;LogFileName=issue44-portability-release.trx" --verbosity quiet
 ```
 
-The 23 build warnings comprise two NU1903 advisories, one ASP0013, one ASP0014,
-four CS8600, three CS8602, two CS8603, four CS8604, five CS8625, and one xUnit2009.
-This is the exact count for this run, distinct from the historical runs above.
-Only the two authorized duplicate using directives were removed; remaining warnings
-were not suppressed or repaired outside scope.
+The required CI wiring, job/check names, and aggregate remain byte-for-byte unchanged
+from the reviewed commit. Workflow lint passes with actionlint 1.7.12, including shell
+checks. The required command block was executed locally; no hosted Actions run or new PR
+is claimed.
 
-Raw evidence is retained in `%TEMP%/issue44-final-startup-retry.log`,
-`%TEMP%/issue44-final-focused.log`, `%TEMP%/issue44-final-build.log`,
-`%TEMP%/issue44-final-release-suite.log`, and each project's ignored
-`TestResults/issue44-final-test-delivery.trx`.
+Raw evidence: `%TEMP%/issue44-portability-required-step.sh`,
+`%TEMP%/issue44-portability-required-step.log`, `%TEMP%/issue44-portability-release.log`,
+and each project's ignored `TestResults/issue44-portability-release.trx`.
 
-The inventory remains **755 tracked files**. Generic scans are scoped to the current
-contents of the **280 Issue #44/correction delta files** relative to develop baseline
-`4bc9bc1e5b99ee49e6ae0d1f464debdd8ef24dde`, including this five-file correction.
-Both `sonar analyze secrets` and Gitleaks 8.30.1 (`dir`, default rules, `--redact`)
-pass this delta. The isolated scan snapshot excludes the known develop Kubernetes
-Secret. Delta checks also find zero private-key markers and zero key/certificate
-artifacts. This is not a generic-scanner-clean claim about the complete repository.
-The five-file correction also passes a separate delta scan. Final `git diff --check`
-and scope review pass; the worktree is checked clean after the single commit and push.
-The full 40-character SHA is provided in the handoff for Chief's remote review.
-No PR, merge, Issue #44 closure, credential/repository-setting change, or ADR-005 work
-is part of this delivery.
+### Compiler diagnostic provenance against clean develop
 
-### Scope and security review
+The clean develop baseline is `4bc9bc1e5b99ee49e6ae0d1f464debdd8ef24dde`, confirmed
+against remote `refs/heads/develop`. It was checked out separately with a clean tracked
+worktree. Both that baseline and the corrected Issue #44 source were built with SDK
+8.0.129 and the same complete, non-incremental Release command:
 
-Exact changed-file review is limited to the authentication component, three
-registrations, AuthManager issuer/JWKS composition, corresponding tests/project
-references and documentation. Permission, current-membership, assignment, outbox,
-EF, migration and tenant-isolation production paths are unchanged.
+```text
+dotnet build zeka-web-api.sln -c Release --no-restore --no-incremental --verbosity quiet
+```
 
-The current tracked-file count is **755** (`git ls-files`); this is an inventory
-count, not a repository-wide generic-scanner result. The Issue #44 and correction
-deltas pass generic secret scanning. Delta-only key checks find no private-key
-markers or key/certificate artifacts. The production authentication component and
-three registrations remain free of symmetric fallback. The staged `git diff --check`
-passed. Post-commit cleanliness is reported with the commit SHA.
+Both builds succeeded with zero errors. Compiler diagnostic provenance was compared by
+**relative source path + CS diagnostic ID + diagnostic message**, removing duplicate
+emissions and disregarding line/column shifts. The corrected Issue #44 build introduces
+**zero compiler diagnostics relative to clean develop**. The remaining compiler diagnostics
+have matching baseline identities; no warning suppression or unrelated repair was used.
 
-Chief identified a pre-existing Kubernetes Secret finding on `develop` in
-`Deployments/k8s/zekadb/zekadb-secret.yaml`. It is outside Issue #44's delta and this
-correction's scope. Its value was not inspected, reproduced, or modified. This report
-does **not** claim that the complete repository tree is generic-scanner clean.
-Remediation requires separate authorization; no credential value is included here.
+Raw warning totals are not used as cross-build provenance. Package advisories and
+framework/test-analyzer diagnostics are separate from this compiler-identity comparison;
+this is not a warning-free-build claim.
 
-The accepted architecture is implemented; no new architecture decision remains
-within this contract. Deployment still requires independently authorized environment
-configuration, protected key references and rotation inputs. These were not provisioned.
-The original RLS and other production-readiness follow-ups remain outside Issue #44's
-authentication replacement, and these results are not a deployment-readiness claim.
+Reproducible local evidence under `%TEMP%`:
 
-Stop boundary: one local commit only; no push, PR, merge, issue closure, credential
-mutation, or ADR-005 work.
+- `issue44-portability-baseline-build.log`
+- `issue44-portability-corrected-build.log`
+- `issue44-portability-compare-diagnostics.ps1`
+- `issue44-portability-baseline-diagnostics.txt`
+- `issue44-portability-corrected-diagnostics.txt`
+- `issue44-portability-introduced-diagnostics.txt` (empty)
+- `issue44-portability-warning-provenance.log`
 
-### Changed files
+### Delta scans and scope
 
-- [Docs/issue-44-authentication.md](../Docs/issue-44-authentication.md)
-- [Docs/issue-44-tenant-enforcement.md](../Docs/issue-44-tenant-enforcement.md)
-- [Services/AdminAreaManagement/AdminAreaManagement.API/AdminAreaManagement.API.csproj](../Services/AdminAreaManagement/AdminAreaManagement.API/AdminAreaManagement.API.csproj)
-- [Services/AdminAreaManagement/AdminAreaManagement.API/TenantAuthentication.cs](../Services/AdminAreaManagement/AdminAreaManagement.API/TenantAuthentication.cs)
-- [Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/BearerValidationTests.cs](../Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/BearerValidationTests.cs)
-- [Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj](../Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj)
-- [Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/TenantHttpTests.cs](../Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/TenantHttpTests.cs)
-- [Services/AuthManager/AuthManager.API/AuthManager.API.csproj](../Services/AuthManager/AuthManager.API/AuthManager.API.csproj)
-- [Services/AuthManager/AuthManager.API/Endpoints/IssuerEndpoints.cs](../Services/AuthManager/AuthManager.API/Endpoints/IssuerEndpoints.cs)
-- [Services/AuthManager/AuthManager.API/Program.cs](../Services/AuthManager/AuthManager.API/Program.cs)
-- [Services/AuthManager/AuthManager.API/TenantAuthentication.cs](../Services/AuthManager/AuthManager.API/TenantAuthentication.cs)
-- [Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj](../Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj)
-- [Services/AuthManager/AuthManager.Infrastructure/Authentication/AccessTokenIssuer.cs](../Services/AuthManager/AuthManager.Infrastructure/Authentication/AccessTokenIssuer.cs)
-- [Services/AuthManager/AuthManager.Infrastructure/Authentication/IssuerOptions.cs](../Services/AuthManager/AuthManager.Infrastructure/Authentication/IssuerOptions.cs)
-- [Services/AuthManager/AuthManager.Infrastructure/Authentication/IssuerRegistration.cs](../Services/AuthManager/AuthManager.Infrastructure/Authentication/IssuerRegistration.cs)
-- [Services/AuthManager/AuthManager.Infrastructure/Authentication/SigningKeyProvider.cs](../Services/AuthManager/AuthManager.Infrastructure/Authentication/SigningKeyProvider.cs)
-- [Services/AuthManager/Tests/Infrastructure.IntegrationTests/BearerValidationTests.cs](../Services/AuthManager/Tests/Infrastructure.IntegrationTests/BearerValidationTests.cs)
-- [Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj](../Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj)
-- [Services/AuthManager/Tests/Infrastructure.IntegrationTests/IssuerContractTests.cs](../Services/AuthManager/Tests/Infrastructure.IntegrationTests/IssuerContractTests.cs)
-- [Services/AuthManager/Tests/Infrastructure.IntegrationTests/TenantAccessEndpointTests.cs](../Services/AuthManager/Tests/Infrastructure.IntegrationTests/TenantAccessEndpointTests.cs)
-- [Services/ClientManagement/Client.API/ClientManagement.API.csproj](../Services/ClientManagement/Client.API/ClientManagement.API.csproj)
-- [Services/ClientManagement/Client.API/TenantAuthentication.cs](../Services/ClientManagement/Client.API/TenantAuthentication.cs)
-- [Services/ClientManagement/Tests/Infrastructure.IntegrationTests/BearerValidationTests.cs](../Services/ClientManagement/Tests/Infrastructure.IntegrationTests/BearerValidationTests.cs)
-- [Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj](../Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj)
-- [Services/ClientManagement/Tests/Infrastructure.IntegrationTests/TenantHttpTests.cs](../Services/ClientManagement/Tests/Infrastructure.IntegrationTests/TenantHttpTests.cs)
-- [Shared/Authentication.TestSupport/AuthenticationFixture.cs](../Shared/Authentication.TestSupport/AuthenticationFixture.cs)
-- [Shared/Authentication.TestSupport/ValidatorContractTests.cs](../Shared/Authentication.TestSupport/ValidatorContractTests.cs)
-- [Shared/Zeka.Authentication/AuthenticationOptions.cs](../Shared/Zeka.Authentication/AuthenticationOptions.cs)
-- [Shared/Zeka.Authentication/BearerAuthentication.cs](../Shared/Zeka.Authentication/BearerAuthentication.cs)
-- [Shared/Zeka.Authentication/JwksTrust.cs](../Shared/Zeka.Authentication/JwksTrust.cs)
-- [Shared/Zeka.Authentication/Zeka.Authentication.csproj](../Shared/Zeka.Authentication/Zeka.Authentication.csproj)
-- [zeka-web-api.sln](../zeka-web-api.sln)
+The inventory is **755 tracked files**, not a repository-wide generic-scanner result.
+The current **280-file Issue #44/correction delta** relative to the clean develop SHA
+above, and this **three-file portability correction** separately, pass generic secret
+scanning with `sonar analyze secrets` and Gitleaks 8.30.1 (default rules, `dir`, `--redact`).
+Delta key checks find zero private-key markers and zero key/certificate artifacts.
+`git diff --check` passes.
+
+Chief's pre-existing develop Kubernetes Secret finding in
+`Deployments/k8s/zekadb/zekadb-secret.yaml` remains outside the delta and authorized scope.
+Its value was not inspected, reproduced, or changed. No complete-tree generic-scanner-clean
+claim is made; remediation requires separate authorization.
+
+The accepted RS256/JWKS, issuer/audience/kid/rotation, membership/permission/resource
+checks, assignment/outbox, EF/migrations/tenant isolation, RLS/runtime roles, and
+workload/Azure identity remain unchanged. No credentials, secrets, unrelated files,
+repository settings, or CI identity were changed. These tests are not a production-readiness
+claim.
+
+The delivery boundary is one clean local commit pushed to the existing Issue #44 branch.
+The handoff supplies the full remote SHA and verifies a clean issue worktree. No PR, merge,
+Issue #44 closure, or ADR-005 work is included.
