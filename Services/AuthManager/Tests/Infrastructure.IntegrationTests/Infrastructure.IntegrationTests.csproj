@@ -41,4 +41,5 @@
     <Compile Include="../../../AdminAreaManagement/AdminAreaManagement.API/TenantAuthentication.cs" Link="AdminAreaBearerRegistration.cs" />
     <Compile Include="../../../ClientManagement/Client.API/TenantAuthentication.cs" Link="ClientBearerRegistration.cs" />
   </ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/RealHostStartupTests.cs" Link="RealHostStartupTests.cs" /></ItemGroup>
 </Project>

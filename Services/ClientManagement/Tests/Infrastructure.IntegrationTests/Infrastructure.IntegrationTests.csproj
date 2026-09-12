@@ -12,4 +12,5 @@
 <ItemGroup><ProjectReference Include="..\..\Client.API\ClientManagement.API.csproj" /></ItemGroup>
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/AuthenticationFixture.cs" Link="AuthenticationFixture.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/ValidatorContractTests.cs" Link="ValidatorContractTests.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/RealHostStartupTests.cs" Link="RealHostStartupTests.cs" /></ItemGroup>
 </Project>

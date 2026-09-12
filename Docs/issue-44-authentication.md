@@ -170,7 +170,9 @@ SDK 8.0.129; PostgreSQL 17 Testcontainers using the local Docker engine.
 
 ```text
 dotnet build zeka-web-api.sln -c Release --no-restore --verbosity quiet
-Exit 0: build succeeded, 0 errors, 2 existing NU1903 AutoMapper warnings.
+Exit 0: build succeeded, 0 errors. Complete Release warning evidence:
+4 pre-existing warnings total: 2 NU1903 AutoMapper advisories,
+plus gateway analyzer warnings ASP0013 and ASP0014.
 
 dotnet test zeka-web-api.sln -c Release --no-build --no-restore
   --logger "trx;LogFileName=issue44-rs256-release.trx" --verbosity quiet
@@ -212,8 +214,100 @@ duplicate JWKS and file-provider/typed-registration cases.
 Raw local evidence is retained in each test project's ignored
 `TestResults/issue44-rs256-release.trx`, and in the temporary-directory logs
 `issue44-rs256-build.log` and `issue44-rs256-release-test.log`.
-The two AutoMapper 13.0.1 advisory warnings (GHSA-rvv3-g6hj-g44x) are pre-existing
-and outside this bounded replacement. This is not a warning-free build.
+The complete Release warning count is four pre-existing warnings: two AutoMapper
+13.0.1 advisories (NU1903, GHSA-rvv3-g6hj-g44x), plus gateway analyzer warnings
+ASP0013 (`Program.cs:15`) and ASP0014 (`Program.cs:39`). The retained incremental
+build log reports only the two package advisories; it does not represent the
+complete Release warning evidence. All four are outside this bounded replacement.
+This is not a warning-free build.
+
+### Bounded delivery correction — 2026-09-12
+
+Reviewed baseline: `53403a8788897faf73fda5356b1af124e028a367`.
+Scope: the user's post-review delivery correction for Issue #44 only.
+Ubongo was pulled with `--ff-only` (already current); the accepted Authentication
+Token Issuer and Validation decision and ADR-002 testing responsibilities were
+consulted. Authentication architecture and cryptographic controls remain accepted.
+
+- Removed obsolete `Authentication:AuthBaseAddress` from the tracked AuthManager
+  and ClientManagement base settings. The strict `AuthenticationOptions` binder
+  and all production C# files are unchanged.
+- Added `AuthenticationStartupTests` to each service's existing infrastructure
+  integration project, using the linked `RealHostStartupTests` helper. No new
+  package or production test hook is required.
+- Each case launches the actual compiled API entry point with Kestrel on an
+  ephemeral loopback port, using an exact copy of its tracked `appsettings.json`
+  and process-local environment overrides supplied before `CreateBuilder` runs.
+  Developer environment configuration and user secrets are excluded. The tests
+  neither rebuild a partial host nor replace service registrations.
+- Each service has one successful startup case and two fail-closed cases:
+  reintroducing `AuthBaseAddress`, or adding `UnexpectedKey`, must terminate startup
+  with `Invalid authentication configuration.` without echoing the test value.
+  Existing negative validator coverage remains unchanged.
+- AuthManager's successful case also verifies the real JWKS endpoint returns
+  exactly the ephemeral fixture's public key. Its temporary signing fixture and
+  isolated host directory are deleted after the child process exits. ClientManagement
+  must serve an HTTP response from its actual pipeline. These are configuration
+  and HTTP-startup checks, not broker, database, or deployment-readiness claims.
+
+The only changed components are the two base settings, the two startup-test classes,
+their project source links, the shared startup-test helper, and this evidence report.
+RS256/JWKS, issuer/audience, kid/rotation, authorization, membership, assignment,
+outbox, EF/migrations, tenancy, workload/Azure identity and RLS/runtime roles are
+unchanged. No host credential or deployment setting was changed.
+
+Verification uses SDK 8.0.129 and the existing local Docker engine. The focused
+AuthManager authentication/startup run passed 42 tests; ClientManagement passed 51.
+The initial new AuthManager assertion compared JSON property order; it was corrected
+to structural JSON equality after confirming the real host returned the expected
+public JWKS. No production behavior or existing assertion was changed.
+
+The complete Release build (`dotnet build zeka-web-api.sln -c Release --no-restore
+--verbosity quiet`) exited 0 with 0 errors. This run recompiled additional untouched
+projects and reported **264 warnings**, including the four warnings identified above;
+it must not be represented as a four-warning run. The full log is retained at
+`%TEMP%/issue44-delivery-build.log`. No warning was suppressed or repaired out of scope.
+
+The initial full Release test run passed 486 cases and failed nine AuthManager cases
+during Testcontainers Docker endpoint discovery (`npipe://./pipe/docker_engine`
+ping cancellation). All six new startup cases passed. This was an infrastructure
+availability failure before the affected database fixtures could initialize;
+no application assertion or production code was changed to address it.
+
+All nine affected cases passed on an unchanged targeted retry after Docker responded.
+The final complete Release run used sequential project execution to reduce concurrent
+Docker discovery/startup pressure:
+
+```text
+dotnet test zeka-web-api.sln -c Release --no-build --no-restore -m:1
+  --logger "trx;LogFileName=issue44-delivery-release-final.trx" --verbosity quiet
+Exit 0: 495 passed, 0 failed, 0 skipped, across all 12 test projects.
+```
+
+| Service | Domain unit | Application unit | Application integration | Infrastructure integration | Total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| AdminAreaManagement | 60 | 42 | 4 | 116 | 222 |
+| AuthManager | 23 | 3 | 1 | 75 | 102 |
+| ClientManagement | 32 | 16 | 15 | 108 | 171 |
+| Total | 115 | 61 | 20 | 299 | 495 |
+
+Final raw results are retained in each project's ignored
+`TestResults/issue44-delivery-release-final.trx` and
+`%TEMP%/issue44-delivery-release-final-test.log`. The initial failed run remains
+separately available as `issue44-delivery-release.trx` and
+`%TEMP%/issue44-delivery-release-test.log`; the targeted recovery log is
+`%TEMP%/issue44-delivery-docker-retry.log`.
+
+The acceptance evidence is therefore: both obsolete tracked keys removed; both
+real hosts start with valid RS256/JWKS environment configuration; both hosts reject
+obsolete and arbitrary unknown authentication keys; the strict binder and accepted
+cryptographic controls are unchanged; complete warning evidence is corrected;
+focused tests, the complete Release build and final complete suite pass.
+Final scope/security review, deterministic secrets scans of all eight changed files,
+and `git diff --check` passed. Existing compiler/advisory/analyzer warnings and the
+transient Docker discovery failure are recorded above and left outside the code change.
+No push, PR, merge, Issue #44 closure, credential mutation or ADR-005 work was performed.
+The local commit SHA and post-commit working-tree status are reported in the handoff.
 
 ### Scope and security review
 
