@@ -1,10 +1,11 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
 namespace ClientManagement.Application.Clients.Queries.GetClients
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ViewAll", "Clients.ViewAssigned")]
     public class GetClientsBySearchTextQuery : IRequest<ClientsDto>
     {
         public string SearchText{ get; set; }

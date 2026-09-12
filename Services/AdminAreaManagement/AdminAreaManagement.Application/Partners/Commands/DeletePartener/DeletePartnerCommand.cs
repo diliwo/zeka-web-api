@@ -1,10 +1,11 @@
-﻿using AdminAreaManagement.Application.Common.Exceptions;
+using AdminAreaManagement.Application.Common.Exceptions;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
 namespace AdminAreaManagement.Application.Partners.Commands.DeletePartener
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Partners.Delete")]
     public class DeletePartnerCommand : IRequest
     {
         public int Id { get; set; }

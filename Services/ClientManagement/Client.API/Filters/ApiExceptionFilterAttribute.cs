@@ -32,6 +32,9 @@ namespace ClientManagement.API.Filters
 
         private void HandleException(ExceptionContext context)
         {
+            if (context.Exception is ClientManagement.Application.Common.Authorization.TenantAccessException
+                or Zeka.Extensions.MultiTenancy.Abstractions.TenantContextException)
+                return; // The tenant boundary translates these to non-disclosing 401/403/503 responses.
             Type type = context.Exception.GetType();
             if (_exceptionHandlers.ContainsKey(type))
             {

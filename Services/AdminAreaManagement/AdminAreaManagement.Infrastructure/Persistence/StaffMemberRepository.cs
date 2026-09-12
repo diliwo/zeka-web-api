@@ -27,7 +27,6 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             {
                 _context.StaffMembers.Update(referent);
             }
-            _context.SaveChanges();
         }
 
         public StaffMember Get(int id)
@@ -69,7 +68,6 @@ namespace AdminAreaManagement.Infrastructure.Persistence
         public void SoftDelete(StaffMember Referent)
         {
             _context.StaffMembers.Update(Referent);
-            _context.SaveChanges();
         }
 
         public void Dispose()

@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.DocumentPartners.Commands.Delete;
+using AdminAreaManagement.Application.DocumentPartners.Commands.Delete;
 using AdminAreaManagement.Application.DocumentPartners.Commands.Persist;
 using AdminAreaManagement.Application.DocumentPartners.Queries;
 using AdminAreaManagement.Application.DocumentPartners.Queries.GetDocument;
@@ -10,6 +10,7 @@ namespace AdminAreaManagement.API.Controllers
     public class DocumentsController : ApiControllerBase
     {
         [HttpGet]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetDocumentsPartnerListQuery))]
         public async Task<ActionResult<DocumentPartnerDto>> GetAll()
         {
             var vm = await Mediator.Send(new GetDocumentsPartnerListQuery());
@@ -19,6 +20,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPost("partner/import")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(PersistDocumentPartnerCommand))]
         public async Task<ActionResult> Import(PersistDocumentPartnerCommand command)
         {
             var test = command.Name;
@@ -29,6 +31,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpGet("{partnerId}/{jobId}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetDocumentsJobPartnerListQuery))]
         public async Task<ActionResult<DocumentPartnersListDto>> GetDocumentsByJobIAndPartnerId(int partnerId, int jobId)
         {
             var vm = await Mediator.Send(new GetDocumentsJobPartnerListQuery() { PartnerId = partnerId, JobId = jobId});
@@ -40,6 +43,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpGet("{partnerId}/{jobId}/{documentId}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetSelectedDocumentQuery))]
         public async Task<ActionResult<DocumentPartnersListDto>> GetSelectedDocument(int partnerId, int jobId, int documentId)
         {
             var vm = await Mediator.Send(new GetSelectedDocumentQuery() { PartnerId = partnerId, JobId = jobId, DocumentId = documentId});
@@ -51,6 +55,7 @@ namespace AdminAreaManagement.API.Controllers
 
         [Produces(typeof(void))]
         [HttpDelete("{id}")]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(DeleteDocumentPartnerCommand))]
         public async Task<ActionResult> DeleteDocument(int id)
         {
             await Mediator.Send(new DeleteDocumentPartnerCommand(id));

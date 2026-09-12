@@ -2,8 +2,11 @@
 
 namespace AdminAreaManagement.Core.ValueObjects
 {
-    public class Email : ValueObject
+    public class Email : ValueObject, Zeka.Extensions.MultiTenancy.Abstractions.ITenantOwnedEntity
     {
+        public int Id { get; private set; }
+        public Guid OrganisationId { get; private set; }
+        public int PartnerId { get; private set; }
         public string EmailAddress { get; set; }
 
         public Email() { }

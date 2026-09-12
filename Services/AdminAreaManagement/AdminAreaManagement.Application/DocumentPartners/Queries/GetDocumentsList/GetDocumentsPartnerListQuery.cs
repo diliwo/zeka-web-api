@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Core.Interfaces;
+using AdminAreaManagement.Core.Interfaces;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using MediatR;
@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AdminAreaManagement.Application.DocumentPartners.Queries.GetDocumentsList
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("PartnerDocuments.View")]
     public class GetDocumentsPartnerListQuery : IRequest<DocumentPartnersListDto>
     {
         public class  GetDocumentsPartnerListQueryHandler : IRequestHandler< GetDocumentsPartnerListQuery, DocumentPartnersListDto>

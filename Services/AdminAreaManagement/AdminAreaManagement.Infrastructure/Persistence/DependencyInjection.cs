@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Helpers;
+using AdminAreaManagement.Application.Common.Helpers;
 using AdminAreaManagement.Application.Common.Services;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Enums;
@@ -17,6 +17,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddTenantEnforcement(configuration);
         services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
 
         services.AddDbContext<ApplicationDbContext>(options =>

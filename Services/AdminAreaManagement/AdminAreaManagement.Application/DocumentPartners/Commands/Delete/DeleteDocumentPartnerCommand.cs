@@ -1,8 +1,9 @@
-﻿using AdminAreaManagement.Core.Interfaces;
+using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
 namespace AdminAreaManagement.Application.DocumentPartners.Commands.Delete
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("PartnerDocuments.Delete")]
     public class DeleteDocumentPartnerCommand :IRequest
     {
         public DeleteDocumentPartnerCommand(int id)

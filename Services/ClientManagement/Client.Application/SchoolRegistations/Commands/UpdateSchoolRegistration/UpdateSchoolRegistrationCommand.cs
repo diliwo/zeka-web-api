@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Enums;
 using ClientManagement.Core.Interfaces;
@@ -6,6 +6,7 @@ using MediatR;
 
 namespace ClientManagement.Application.SchoolRegistations.Commands.UpdateSchoolRegistration
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.EditAll", "Clients.EditAssigned")]
     public class UpdateSchoolRegistrationCommand : IRequest<int>
     {
         public int SchoolRegistrationId { get; set; }
@@ -40,7 +41,7 @@ namespace ClientManagement.Application.SchoolRegistations.Commands.UpdateSchoolR
                 }
 
 
-                //TODO: implement the Grpc request here 
+                //TODO: implement the Grpc request here
                 //var school = _repository.School.GetSchoolById(request.SchoolId);
                 var school = new School("temp", "tp");
 

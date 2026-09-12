@@ -1,9 +1,10 @@
-﻿using AdminAreaManagement.Core.Interfaces;
+using AdminAreaManagement.Core.Interfaces;
 using AutoMapper;
 using MediatR;
 
 namespace AdminAreaManagement.Application.Teams.Queries
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("TeamConfiguration.View")]
     public class GetTeamsByNameQuery : IRequest<Boolean>
     {
         public string Name{ get; set; }

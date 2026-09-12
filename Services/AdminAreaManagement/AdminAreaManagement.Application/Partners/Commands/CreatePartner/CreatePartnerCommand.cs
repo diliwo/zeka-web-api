@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Exceptions;
+using AdminAreaManagement.Application.Common.Exceptions;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Enums;
 using AdminAreaManagement.Core.Interfaces;
@@ -7,6 +7,7 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.Partners.Commands.CreatePartner
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Partners.Manage")]
     public class CreatePartnerCommand : IRequest<int>
     {
         public int PartnerNumber { get; set; }

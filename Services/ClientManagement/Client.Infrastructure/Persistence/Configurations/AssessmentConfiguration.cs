@@ -11,6 +11,9 @@ namespace ClientManagement.Infrastructure.Persistence.Configurations
             builder
                 .Property(r => r.Id).HasColumnName("AssessmentId");
             builder.Ignore(c => c.Professions);
+            builder.HasOne(c => c.Client).WithMany()
+                .HasForeignKey(c => new { c.ClientId, c.OrganisationId })
+                .HasPrincipalKey(c => new { c.Id, c.OrganisationId });
         }
     }
 }

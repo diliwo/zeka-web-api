@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Mappings;
+using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.Partners.Queries.Common;
 using AdminAreaManagement.Core.Interfaces;
@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AdminAreaManagement.Application.Partners.Queries.GetPartners
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Partners.View")]
     public class GetPartnersListQuery : IRequest<PaginatedList<PartnerDto>>
     {
         public string Filter { get; set; }

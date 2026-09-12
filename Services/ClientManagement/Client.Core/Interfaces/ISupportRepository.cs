@@ -21,7 +21,7 @@ namespace ClientManagement.Core.Interfaces
         public Task<bool> DateIsEarlierThanExistingDates(int ClientId, DateTime date, int supportId);
         public Task<bool> EndDateIsGreaterThanStartDate(int? supportId, DateTime? endDate);
         public bool isSupportForClient(int ClientId, int? supportId);
-        IQueryable<MySupportDto> GetConsultantSupportsByUserName(string username, string filter="", bool isActive = true);
+        IQueryable<MySupportDto> GetConsultantSupportsByMembership(Guid membershipId, string filter="", bool isActive = true);
         SocialCase GetWithDetails(int id);
     }
 }

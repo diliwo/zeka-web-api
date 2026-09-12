@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Application.Common.Mappings;
@@ -9,6 +9,7 @@ using MediatR;
 
 namespace ClientManagement.Application.SchoolRegistations.Queries.GetSchoolList
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ViewAll", "Clients.ViewAssigned")]
     public class GetSchoolRegistrationsListQuery : IRequest<PaginatedList<SchoolRegistrationDto>>
     {
         public int ClientId { get; set; }

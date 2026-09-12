@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ClientManagement.Application.MonitoringActions.Commands.DeleteAction
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Platform.ReferenceData.Manage")]
     public class DeleteMonitoringActionCommand : IRequest
     {
         public int ActionId { get; set; }

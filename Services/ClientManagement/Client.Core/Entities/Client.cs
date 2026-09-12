@@ -6,7 +6,7 @@ using ClientManagement.Core.ValueObjects;
 
 namespace ClientManagement.Core.Entities
 {
-    public class Client : AggregateRoot
+    public partial class Client : AggregateRoot
     {
         public string? ReferenceNumber { get; set; }
         public CivilStatus CivilStatus { get; set; }
@@ -45,8 +45,8 @@ namespace ClientManagement.Core.Entities
         }
 
         public Client(
-            string referenceNumber, 
-            CivilStatus civilStatus, 
+            string referenceNumber,
+            CivilStatus civilStatus,
             string firstFirstName,
             string lastName,
             Gender gender,

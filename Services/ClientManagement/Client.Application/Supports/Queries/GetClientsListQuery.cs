@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using ClientManagement.Core.Interfaces;
 using MediatR;
@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ClientManagement.Application.Supports.Queries
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ViewAll", "Clients.ViewAssigned")]
     public class GetClientsListQuery : IRequest<SupportsListVm>
     {
         public class GetSupportsListQueryHandler : IRequestHandler<GetClientsListQuery, SupportsListVm>

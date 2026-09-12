@@ -1,10 +1,11 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
 namespace ClientManagement.Application.Assessments.Commands.DeleteAssessment
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.Delete")]
     public class DeleteAssessmentCommand : IRequest<Unit>
     {
         public int AssessmentId { get; set; }

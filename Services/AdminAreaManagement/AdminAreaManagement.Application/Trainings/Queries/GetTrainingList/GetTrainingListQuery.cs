@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Mappings;
+using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.Formations.Common;
 using AdminAreaManagement.Core.Interfaces;
@@ -8,6 +8,7 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.Formations.Queries.GetTrainingList
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("ReferenceData.View")]
     public class GetTrainingListQuery : IRequest<PaginatedList<TrainingDto>>
     {
         public string Filter { get; set; }

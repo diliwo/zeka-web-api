@@ -1,8 +1,8 @@
-﻿using AdminAreaManagement.Core.Common;
+using AdminAreaManagement.Core.Common;
 
 namespace AdminAreaManagement.Core.Entities
 {
-    public class TrainingType : Entity
+    public class TrainingType : Entity, Zeka.Extensions.MultiTenancy.Abstractions.IGlobalEntity
     {
         public string Name { get; set; }
 

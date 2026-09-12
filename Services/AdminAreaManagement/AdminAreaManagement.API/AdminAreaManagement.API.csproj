@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -18,7 +18,7 @@
 		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.20.1" />
 		<PackageReference Include="MimeMapping" Version="3.0.1" />
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
-		<PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.7">
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.30">
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
 		</PackageReference>
@@ -30,4 +30,13 @@
     <ProjectReference Include="..\AdminAreaManagement.Infrastructure\AdminAreaManagement.Infrastructure.csproj" />
   </ItemGroup>
 
+<ItemGroup><PackageReference Include="Zeka.Extensions.MultiTenancy.AspNetCore" Version="2.0.0-preview.1" /></ItemGroup>
+<ItemGroup><PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.30" /></ItemGroup>
+<ItemGroup>
+  <PackageReference Include="Google.Protobuf" Version="3.21.5" />
+  <PackageReference Include="Grpc.AspNetCore.Server" Version="2.49.0" />
+  <PackageReference Include="Grpc.Tools" Version="2.49.0" PrivateAssets="all" />
+  <Protobuf Include="..\AdminAreaManagement.Application\Common\Protos\adminarea.proto" GrpcServices="Server" />
+</ItemGroup>
+  <ItemGroup><ProjectReference Include="../../../Shared/Zeka.Authentication/Zeka.Authentication.csproj" /></ItemGroup>
 </Project>

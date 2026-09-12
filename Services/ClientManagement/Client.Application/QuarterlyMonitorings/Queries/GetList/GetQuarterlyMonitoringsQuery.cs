@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.Common.Models;
@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetList
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ViewAll", "Clients.ViewAssigned")]
     public class GetQuarterlyMonitoringsQuery : IRequest<PaginatedList<QuarterlyMonitoringDto>>
     {
         public string Filter { get; set; } = "";

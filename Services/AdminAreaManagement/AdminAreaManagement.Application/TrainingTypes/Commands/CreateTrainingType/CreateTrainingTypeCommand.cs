@@ -1,9 +1,10 @@
-﻿using AdminAreaManagement.Core.Entities;
+using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
 namespace AdminAreaManagement.Application.TrainingTypes.Commands.CreateTrainingType
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Platform.ReferenceData.Manage")]
     public class CreateTrainingTypeCommand : IRequest<int>
     {
         public string Name { get; set; }

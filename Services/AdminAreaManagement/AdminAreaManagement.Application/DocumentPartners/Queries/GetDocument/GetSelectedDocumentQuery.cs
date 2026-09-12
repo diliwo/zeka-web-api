@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Exceptions;
+using AdminAreaManagement.Application.Common.Exceptions;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Core.Interfaces;
 using AutoMapper;
@@ -6,6 +6,7 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.DocumentPartners.Queries.GetDocument
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("PartnerDocuments.View")]
     public class GetSelectedDocumentQuery : IRequest<FileDto>
     {
         public int PartnerId { get; set; }

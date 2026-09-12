@@ -1,10 +1,11 @@
-﻿using AdminAreaManagement.Application.Common.Exceptions;
+using AdminAreaManagement.Application.Common.Exceptions;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
 namespace AdminAreaManagement.Application.Formations.Commands.UpdateTraining
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Platform.ReferenceData.Manage")]
     public class UpdateTrainingCommand : IRequest<int>
     {
         public int TrainingId { get; set; }

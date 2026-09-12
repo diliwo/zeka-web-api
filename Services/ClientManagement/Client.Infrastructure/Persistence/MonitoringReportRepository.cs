@@ -1,5 +1,6 @@
-﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
 namespace ClientManagement.Infrastructure.Persistence
 {
@@ -10,7 +11,7 @@ namespace ClientManagement.Infrastructure.Persistence
         {
             _context = context;
         }
-        
+
         public async Task<int> Persist(MonitoringReport qMonitoringReport)
         {
             if (qMonitoringReport.Id == default(int))
@@ -21,7 +22,7 @@ namespace ClientManagement.Infrastructure.Persistence
             }
             else
             {
-                var entity = await _context.MonitoringReports.FindAsync(qMonitoringReport.Id);
+                var entity = await _context.Visible<ClientManagement.Core.Entities.MonitoringReport>().SingleOrDefaultAsync(x => x.Id == qMonitoringReport.Id);
                 if (entity != null)
                 {
                     _context.Entry(entity).CurrentValues.SetValues(qMonitoringReport);
@@ -34,7 +35,7 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public IQueryable<MonitoringReport> getQuarterlyMonitorings(string searchText = "", bool withDeleted = false)
         {
-            return _context.MonitoringReports
+            return _context.Visible<ClientManagement.Core.Entities.MonitoringReport>()
                 .Where(q => withDeleted || !q.Softdelete)
             .Where(q => String.IsNullOrWhiteSpace(searchText) ||
                         (q.Client.LastName + " " + q.Client.FirstName).ToUpper()
@@ -51,7 +52,7 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public IQueryable<MonitoringReport> getQuarterlyMonitoringsByClientId(int ClientId, string searchText = "", bool withDeleted = false)
         {
-            return _context.MonitoringReports
+            return _context.Visible<ClientManagement.Core.Entities.MonitoringReport>()
                 .Where(q => q.ClientId == ClientId)
                 .Where(q => withDeleted || !q.Softdelete)
                 .Where(q => String.IsNullOrWhiteSpace(searchText) ||
@@ -64,7 +65,7 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public IQueryable<MonitoringReport> getQuarterlyMonitoringsByStaffMemberId(int referntId, string searchText = "", bool withDeleted = false)
         {
-            return _context.MonitoringReports
+            return _context.Visible<ClientManagement.Core.Entities.MonitoringReport>()
                 .Where(q => q.SocialWorkerId == referntId)
                 .Where(q => withDeleted || !q.Softdelete)
                 .Where(q => String.IsNullOrWhiteSpace(searchText) ||
@@ -78,7 +79,7 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public void SoftDelete(int id)
         {
-            var entity = _context.MonitoringReports.Find(id);
+            var entity = _context.Visible<ClientManagement.Core.Entities.MonitoringReport>().SingleOrDefault(x => x.Id == id);
             if (entity != null && !entity.Softdelete)
             {
                 entity.Softdelete = true;
@@ -88,7 +89,7 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public IQueryable<MonitoringReport> GetQuarterlyMonitoringById(int id)
         {
-            return _context.MonitoringReports.Where(m => m.Id == id);
+            return _context.Visible<ClientManagement.Core.Entities.MonitoringReport>().Where(m => m.Id == id);
         }
     }
 }

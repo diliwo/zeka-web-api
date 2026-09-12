@@ -1,4 +1,4 @@
-﻿using Zeka.Extensions.MultiTenant;
+using Zeka.Extensions.MultiTenancy.Abstractions;
 
 namespace AdminAreaManagement.Core.Common
 {
@@ -14,7 +14,7 @@ namespace AdminAreaManagement.Core.Common
         public string TenantName { get; set; } = string.Empty;
     }
 
-    public abstract class TenantOwnedEntity : Entity
+    public abstract class TenantOwnedEntity : Entity, ITenantOwnedEntity
     {
         public Guid OrganisationId { get; private set; }
 

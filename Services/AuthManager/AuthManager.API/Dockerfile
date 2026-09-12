@@ -12,6 +12,7 @@ COPY ["Services/AuthManager/AuthManager.API/AuthManager.API.csproj", "Services/A
 COPY ["Services/AuthManager/AuthManager.Application/AuthManager.Application.csproj", "Services/AuthManager/AuthManager.Application/"]
 COPY ["Services/AuthManager/AuthManager.Core/AuthManager.Core.csproj", "Services/AuthManager/AuthManager.Core/"]
 COPY ["Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj", "Services/AuthManager/AuthManager.Infrastructure/"]
+COPY ["Shared/Zeka.Authentication/Zeka.Authentication.csproj", "Shared/Zeka.Authentication/"]
 
 RUN dotnet restore "Services/AuthManager/AuthManager.API/AuthManager.API.csproj" \
     --source https://api.nuget.org/v3/index.json

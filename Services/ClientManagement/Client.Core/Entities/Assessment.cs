@@ -5,6 +5,8 @@ namespace ClientManagement.Core.Entities
 {
     public class Assessment : TenantOwnedEntity
     {
+        public int? ClientId { get; private set; }
+        public Client? Client { get; private set; }
         public Boolean IsFinalized { get; set; } = false;
         public string UserName { get; set; }
         public string PersonalSituationFamily { get; set; }
@@ -38,7 +40,7 @@ namespace ClientManagement.Core.Entities
         public PersonalExpectationLanguageknowledgeScore ProfessionalExpectationFrWrittenLanguageScore { get; set; } = PersonalExpectationLanguageknowledgeScore.NotAtAll;
         public bool ProfessionalExpectationItKnowledgeEmail { get; set; } = false;
         public bool ProfessionalExpectationItKnowledgeInternet { get; set; } = false;
-        public bool ProfessionalExpectationItKnowledgeWord { get; set; } = false; 
+        public bool ProfessionalExpectationItKnowledgeWord { get; set; } = false;
         public IList<ProfessionalAssessment> BilanProfessions { get; set; } = new List<ProfessionalAssessment>();
 
         public Assessment(){}
@@ -82,6 +84,8 @@ namespace ClientManagement.Core.Entities
         )
         {
             IsFinalized = isFinalized;
+            Client = client ?? throw new ArgumentNullException(nameof(client));
+            ClientId = client.Id;
             UserName = userName;
             PersonalSituationFamily = personalSituationFamily;
             PersonalSituationHousing = personalSituationHousing;
@@ -122,8 +126,8 @@ namespace ClientManagement.Core.Entities
             string AcquiredKnowledge,
             string AcquiredBehaviouralKnowledge,
             string AcquiredKnowHow,
-            string KnowledgeToDevelop, 
-            string BehaviouralKnowledgeToDevelop, 
+            string KnowledgeToDevelop,
+            string BehaviouralKnowledgeToDevelop,
             string KnowHowToDevelop)
         {
             ProfessionalAssessment newProfessionalAssessment;

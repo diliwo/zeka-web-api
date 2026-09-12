@@ -1,8 +1,8 @@
-﻿using ClientManagement.Core.Common;
+using ClientManagement.Core.Common;
 
 namespace ClientManagement.Core.Entities
 {
-    public class TrainingType : Entity
+    public class TrainingType : Entity, Zeka.Extensions.MultiTenancy.Abstractions.IGlobalEntity
     {
         public string Name { get; set; }
 

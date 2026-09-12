@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Exceptions;
+using AdminAreaManagement.Application.Common.Exceptions;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
@@ -6,6 +6,7 @@ using FluentValidation.Results;
 
 namespace AdminAreaManagement.Application.Cities.Commands.DeleteClity
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Platform.ReferenceData.Manage")]
     public class DeleteCityCommand : IRequest<Unit>
     {
         public int Id { get; set; }

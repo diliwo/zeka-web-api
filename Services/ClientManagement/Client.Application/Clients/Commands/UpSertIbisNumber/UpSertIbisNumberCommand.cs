@@ -1,17 +1,18 @@
-﻿using AutoMapper;
+using AutoMapper;
 using ClientManagement.Application.Clients.Commands.Exceptions;
 using ClientManagement.Application.Clients.Model;
 using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Interfaces;
 using MediatR;
-using Microsoft.AspNetCore.JsonPatch;
+
 
 namespace ClientManagement.Application.Clients.Commands.UpSertIbisNumber
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.EditAll", "Clients.EditAssigned")]
     public class UpSertIbisNumberCommand : IRequest<UpdateClientDto>
     {
         public string Niss { get; set; }
-        public JsonPatchDocument<UpdateClientDto> PatchDoc { get; set; }
+        public IClientPatch PatchDoc { get; set; }
         public class UpSertIbisNumberCommandHandler : IRequestHandler<UpSertIbisNumberCommand, UpdateClientDto>
         {
             private readonly IRepositoryManager _repository;

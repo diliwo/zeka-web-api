@@ -10,14 +10,14 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace ClientManagement.Infrastructure.Migrations
 {
-    [DbContext(typeof(ApplicationDbContext))]
+    [DbContext(typeof(DeploymentDbContext))]
     partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.7")
+                .HasAnnotation("ProductVersion", "8.0.30")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -30,6 +30,9 @@ namespace ClientManagement.Infrastructure.Migrations
                         .HasColumnName("AssessmentId");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("Created")
                         .HasColumnType("timestamp without time zone");
@@ -181,6 +184,8 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ClientId", "OrganisationId");
+
                     b.ToTable("Assessments");
                 });
 
@@ -192,11 +197,35 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AddressCity")
+                        .HasColumnType("text")
+                        .HasColumnName("Address_City");
+
+                    b.Property<string>("AddressCountry")
+                        .HasColumnType("text")
+                        .HasColumnName("Address_Country");
+
+                    b.Property<string>("AddressNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("Address_Number");
+
+                    b.Property<string>("AddressPostalCode")
+                        .HasColumnType("text")
+                        .HasColumnName("Address_PostalCode");
+
+                    b.Property<string>("AddressStreet")
+                        .HasColumnType("text")
+                        .HasColumnName("Address_Street");
+
                     b.Property<DateTime>("BirthDate")
                         .HasColumnType("date");
 
                     b.Property<int>("CivilStatus")
                         .HasColumnType("integer");
+
+                    b.Property<string>("ContactLanguage")
+                        .HasColumnType("text")
+                        .HasColumnName("ContactLanguage_SpokenLanguage");
 
                     b.Property<DateTime>("Created")
                         .HasColumnType("timestamp without time zone");
@@ -204,6 +233,10 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Property<string>("CreatedBy")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("Email")
+                        .HasColumnType("text")
+                        .HasColumnName("Email_EmailAddress");
 
                     b.Property<string>("FirstName")
                         .IsRequired()
@@ -223,12 +256,24 @@ namespace ClientManagement.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("MobilePhone")
+                        .HasColumnType("text")
+                        .HasColumnName("MobilePhone_PhoneNumber");
+
                     b.Property<string>("Nationality")
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("NativeLanguage")
+                        .HasColumnType("text")
+                        .HasColumnName("NativeLanguage_SpokenLanguage");
+
                     b.Property<Guid>("OrganisationId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Phone")
+                        .HasColumnType("text")
+                        .HasColumnName("Phone_PhoneNumber");
 
                     b.Property<string>("PlaceOfBirth")
                         .IsRequired()
@@ -811,8 +856,18 @@ namespace ClientManagement.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<Guid>("LastProjectionEventId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("OrganisationId")
                         .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationMembershipId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("ProjectionVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
 
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
@@ -832,10 +887,16 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("OrganisationId", "OrganisationMembershipId")
+                        .IsUnique();
+
                     b.HasIndex("OrganisationId", "UserName")
                         .IsUnique();
 
-                    b.ToTable("SocialWorkers");
+                    b.ToTable("SocialWorkers", t =>
+                        {
+                            t.HasCheckConstraint("CK_SocialWorkers_Membership", "\"OrganisationMembershipId\" <> '00000000-0000-0000-0000-000000000000'");
+                        });
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.Training", b =>
@@ -945,137 +1006,14 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.ToTable("TrainingType");
                 });
 
-            modelBuilder.Entity("ClientManagement.Core.Entities.Client", b =>
+            modelBuilder.Entity("ClientManagement.Core.Entities.Assessment", b =>
                 {
-                    b.OwnsOne("ClientManagement.Core.ValueObjects.Language", "ContactLanguage", b1 =>
-                        {
-                            b1.Property<int>("ClientId")
-                                .HasColumnType("integer");
+                    b.HasOne("ClientManagement.Core.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId");
 
-                            b1.Property<string>("SpokenLanguage")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.HasKey("ClientId");
-
-                            b1.ToTable("Clients");
-
-                            b1.WithOwner()
-                                .HasForeignKey("ClientId");
-                        });
-
-                    b.OwnsOne("ClientManagement.Core.ValueObjects.Phone", "MobilePhone", b1 =>
-                        {
-                            b1.Property<int>("ClientId")
-                                .HasColumnType("integer");
-
-                            b1.Property<string>("PhoneNumber")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.HasKey("ClientId");
-
-                            b1.ToTable("Clients");
-
-                            b1.WithOwner()
-                                .HasForeignKey("ClientId");
-                        });
-
-                    b.OwnsOne("ClientManagement.Core.ValueObjects.Language", "NativeLanguage", b1 =>
-                        {
-                            b1.Property<int>("ClientId")
-                                .HasColumnType("integer");
-
-                            b1.Property<string>("SpokenLanguage")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.HasKey("ClientId");
-
-                            b1.ToTable("Clients");
-
-                            b1.WithOwner()
-                                .HasForeignKey("ClientId");
-                        });
-
-                    b.OwnsOne("ClientManagement.Core.ValueObjects.Phone", "Phone", b1 =>
-                        {
-                            b1.Property<int>("ClientId")
-                                .HasColumnType("integer");
-
-                            b1.Property<string>("PhoneNumber")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.HasKey("ClientId");
-
-                            b1.ToTable("Clients");
-
-                            b1.WithOwner()
-                                .HasForeignKey("ClientId");
-                        });
-
-                    b.OwnsOne("ClientManagement.Core.ValueObjects.Address", "Address", b1 =>
-                        {
-                            b1.Property<int>("ClientId")
-                                .HasColumnType("integer");
-
-                            b1.Property<string>("City")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.Property<string>("Country")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.Property<string>("Number")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.Property<string>("PostalCode")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.Property<string>("Street")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.HasKey("ClientId");
-
-                            b1.ToTable("Clients");
-
-                            b1.WithOwner()
-                                .HasForeignKey("ClientId");
-                        });
-
-                    b.OwnsOne("ClientManagement.Core.ValueObjects.Email", "Email", b1 =>
-                        {
-                            b1.Property<int>("ClientId")
-                                .HasColumnType("integer");
-
-                            b1.Property<string>("EmailAddress")
-                                .IsRequired()
-                                .HasColumnType("text");
-
-                            b1.HasKey("ClientId");
-
-                            b1.ToTable("Clients");
-
-                            b1.WithOwner()
-                                .HasForeignKey("ClientId");
-                        });
-
-                    b.Navigation("Address");
-
-                    b.Navigation("ContactLanguage");
-
-                    b.Navigation("Email");
-
-                    b.Navigation("MobilePhone");
-
-                    b.Navigation("NativeLanguage");
-
-                    b.Navigation("Phone");
+                    b.Navigation("Client");
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.MonitoringReport", b =>

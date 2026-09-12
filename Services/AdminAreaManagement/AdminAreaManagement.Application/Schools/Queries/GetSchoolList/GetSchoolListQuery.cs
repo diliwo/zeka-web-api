@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Mappings;
+using AdminAreaManagement.Application.Common.Mappings;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.Schools.Common;
 using AdminAreaManagement.Core.Interfaces;
@@ -8,6 +8,7 @@ using MediatR;
 
 namespace AdminAreaManagement.Application.Schools.Queries.GetSchoolList
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("ReferenceData.View")]
     public class GetSchoolListQuery : IRequest<PaginatedList<SchoolDto>>
     {
         public string Filter { get; set; }
@@ -23,7 +24,7 @@ namespace AdminAreaManagement.Application.Schools.Queries.GetSchoolList
 
             public GetSchoolListQueryHandler(
                 IRepositoryManager repository,
-                IMapper mapper, 
+                IMapper mapper,
                 ISortHelper<SchoolDto> sort)
             {
                 _repository = repository;
@@ -33,7 +34,7 @@ namespace AdminAreaManagement.Application.Schools.Queries.GetSchoolList
 
             public async Task<PaginatedList<SchoolDto>> Handle(GetSchoolListQuery request, CancellationToken cancellationToken)
             {
-                var schools = 
+                var schools =
                         _sort.ApplySort(_repository.School.GetSchools(request.Filter, request.Orderby)
                     .ProjectTo<SchoolDto>(_mapper.ConfigurationProvider), request.Orderby);
 

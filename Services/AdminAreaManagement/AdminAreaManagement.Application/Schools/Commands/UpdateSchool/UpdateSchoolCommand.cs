@@ -1,10 +1,11 @@
-﻿using AdminAreaManagement.Application.Common.Exceptions;
+using AdminAreaManagement.Application.Common.Exceptions;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
 namespace AdminAreaManagement.Application.Schools.Commands.UpdateSchool
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Platform.ReferenceData.Manage")]
     public class UpdateSchoolCommand : IRequest<int>
     {
         public int? SchoolId { get; set; }
@@ -30,7 +31,7 @@ namespace AdminAreaManagement.Application.Schools.Commands.UpdateSchool
                 School entity = _repository.School.GetSchoolById((int)request.SchoolId);
                 entity.Name = request.Name;
                 entity.Locality = request.Locality;
-                
+
                 _repository.School.Persist(entity);
 
                 return entity.Id;

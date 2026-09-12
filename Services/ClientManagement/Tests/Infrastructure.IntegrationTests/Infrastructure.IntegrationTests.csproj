@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><IsTestProject>true</IsTestProject><IsPackable>false</IsPackable></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.6.0" />
+    <PackageReference Include="xunit" Version="2.4.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5" PrivateAssets="all" />
+    <PackageReference Include="FluentAssertions" Version="7.0.0-alpha.4" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.14.0" />
+  </ItemGroup>
+  <ItemGroup><ProjectReference Include="../../Client.Infrastructure/ClientManagement.Infrastructure.csproj" /></ItemGroup>
+  <ItemGroup><Compile Include="../Common/SyntheticClient.cs" Link="SyntheticClient.cs" /></ItemGroup>
+<ItemGroup><ProjectReference Include="..\..\Client.API\ClientManagement.API.csproj" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/AuthenticationFixture.cs" Link="AuthenticationFixture.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/ValidatorContractTests.cs" Link="ValidatorContractTests.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/RealHostStartupTests.cs" Link="RealHostStartupTests.cs" /></ItemGroup>
+</Project>

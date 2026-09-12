@@ -6,6 +6,7 @@ namespace AdminAreaManagement.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class ApiControllerBase : ControllerBase
     {
         private ISender _mediator;

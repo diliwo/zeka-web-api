@@ -1,8 +1,8 @@
-﻿using AdminAreaManagement.Core.Common;
+using AdminAreaManagement.Core.Common;
 
 namespace AdminAreaManagement.Core.Entities
 {
-    public class School : Entity
+    public class School : Entity, Zeka.Extensions.MultiTenancy.Abstractions.IGlobalEntity
     {
         public string Name { get; set; }
         public string Locality { get; set; }

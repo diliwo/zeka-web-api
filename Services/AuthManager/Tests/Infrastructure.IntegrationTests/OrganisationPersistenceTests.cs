@@ -20,10 +20,10 @@ public sealed class OrganisationPersistenceTests
 
         var permissionSets = await dbContext.PermissionSets.OrderBy(value => value.Code).ToListAsync();
 
-        permissionSets.Should().HaveCount(3);
+        permissionSets.Should().HaveCount(7);
         permissionSets.Should().OnlyContain(value => value.IsSystem);
         permissionSets.Select(value => value.Code).Should().BeEquivalentTo(
-            "OrganisationOwner", "OrganisationAdministrator", "Member");
+            "Owner", "Admin", "LimitedViewer", "LimitedEditor", "Viewer", "Contributor", "Editor");
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class OrganisationPersistenceTests
         dbContext.OrganisationMemberships.AddRange(
             OrganisationMembership.CreateOwner(Guid.NewGuid(), organisation.Id, owner.Id, Now),
             OrganisationMembership.Create(Guid.NewGuid(), organisation.Id, owner.Id,
-                PermissionSet.MemberId, Now));
+                PermissionSet.ViewerId, Now));
 
         var action = () => dbContext.SaveChangesAsync();
 

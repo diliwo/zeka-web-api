@@ -1,4 +1,4 @@
-﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using LinqKit;
 using Microsoft.EntityFrameworkCore;
@@ -31,12 +31,12 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public SchoolRegistration GetRegistrationById(int registrationId)
         {
-            return _context.SchoolRegistrations.FirstOrDefault(c => c.Id == registrationId && c.Softdelete != true);
+            return _context.Visible<ClientManagement.Core.Entities.SchoolRegistration>().FirstOrDefault(c => c.Id == registrationId && c.Softdelete != true);
         }
 
         public IQueryable GetResgistrationsByClientId(int id, string filter="")
         {
-            var registrations = _context.SchoolRegistrations.AsNoTracking().Where(p => p.ClientId == id && p.Softdelete != true);
+            var registrations = _context.Visible<ClientManagement.Core.Entities.SchoolRegistration>().AsNoTracking().Where(p => p.ClientId == id && p.Softdelete != true);
 
             if (!string.IsNullOrEmpty(filter))
             {
@@ -55,7 +55,7 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public IEnumerable<SchoolRegistration> GetResgistrationsByClient(int id)
         {
-            return _context.SchoolRegistrations.Where(s => s.ClientId.Equals(id) && s.Softdelete != true)
+            return _context.Visible<ClientManagement.Core.Entities.SchoolRegistration>().Where(s => s.ClientId.Equals(id) && s.Softdelete != true)
                     .Include(f => f.Training)
                     .ThenInclude(f => f.TrainingField)
                     .Include(s => s.School)
@@ -64,8 +64,8 @@ namespace ClientManagement.Infrastructure.Persistence
 
         public IQueryable<SchoolRegistration> GetRegistrations()
         {
-            return from registrations in _context.SchoolRegistrations 
-                where registrations.Softdelete != true 
+            return from registrations in _context.Visible<ClientManagement.Core.Entities.SchoolRegistration>()
+                where registrations.Softdelete != true
                 select registrations;
         }
 

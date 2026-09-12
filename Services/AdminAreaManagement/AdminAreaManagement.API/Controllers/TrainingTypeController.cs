@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Common.Models;
+using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.TrainingTypes.Commands.CreateTrainingType;
 using AdminAreaManagement.Application.TrainingTypes.Commands.DeleteTrainingType;
 using AdminAreaManagement.Application.TrainingTypes.Commands.UpdateTrainingType;
@@ -14,6 +14,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpGet]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetTrainingTypeListQuery))]
         public async Task<ActionResult<PaginatedList<TrainingTypeDto>>> GetTypes([FromQuery] GetTrainingTypeListQuery query)
         {
             return await Mediator.Send(query);
@@ -22,6 +23,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(CreateTrainingTypeCommand))]
         public async Task<IActionResult> Create(CreateTrainingTypeCommand command)
         {
             var id = await Mediator.Send(command);
@@ -32,6 +34,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPut]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(UpdateTrainingTypeCommand))]
         public async Task<IActionResult> Update(UpdateTrainingTypeCommand command)
         {
             var id = await Mediator.Send(command);
@@ -42,6 +45,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpDelete("{id}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(DeleteTrainingTypeCommand))]
         public async Task<IActionResult> Delete(int id)
         {
             await Mediator.Send(new DeleteTrainingTypeCommand() { Id = id });

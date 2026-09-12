@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Common.Helpers;
+using ClientManagement.Application.Common.Helpers;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using ClientManagement.Core.ValueObjects;
@@ -18,13 +18,14 @@ public static class DependencyInjection
     {
         services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
 
+        services.AddTenantEnforcement(configuration);
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(
                 configuration.GetConnectionString("ClientApiConnection"),
                 builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
 
         services.AddTransient<IMonitoringActionRepository, MonitoringActionRepository>(); ;
-        services.AddTransient<ILanguageRepository, LanguageRepository>(); 
+        services.AddTransient<ILanguageRepository, LanguageRepository>();
         services.AddHttpContextAccessor();
         //services.AddTransient<IFileService, FileService>();
         services.AddTransient<IDateTime, DateTimeService>();

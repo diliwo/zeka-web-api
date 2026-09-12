@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Assessments.Common;
 using ClientManagement.Application.Common.Mappings;
@@ -8,6 +8,7 @@ using MediatR;
 
 namespace ClientManagement.Application.Assessments.Queries.GetBilansList
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.ViewAll", "Clients.ViewAssigned")]
     public class GetArchivedBilansListQuery : IRequest<PaginatedList<AssessmentDto>>
     {
         public int PageNumber { get; set; }

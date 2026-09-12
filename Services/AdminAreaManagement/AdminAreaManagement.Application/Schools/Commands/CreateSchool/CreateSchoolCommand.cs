@@ -1,9 +1,10 @@
-﻿using AdminAreaManagement.Core.Entities;
+using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
 
 namespace AdminAreaManagement.Application.Schools.Commands.CreateSchool
 {
+    [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("Platform.ReferenceData.Manage")]
     public class CreateSchoolCommand : IRequest<int>
     {
         public string Name { get; set; }

@@ -22,7 +22,7 @@ public sealed class CityPostgreSqlFixture : IAsyncLifetime
     public Task InitializeAsync() => _postgres.StartAsync();
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
-    public async Task<ApplicationDbContext> CreateContextAsync(bool migrateCity = true, bool keepSeedCities = false)
+    public async Task<DeploymentDbContext> CreateContextAsync(bool migrateCity = true, bool keepSeedCities = false)
     {
         var databaseName = $"city_{Guid.NewGuid():N}";
         await using var connection = new NpgsqlConnection(_postgres.GetConnectionString());
@@ -31,8 +31,8 @@ public sealed class CityPostgreSqlFixture : IAsyncLifetime
         command.CommandText = $"CREATE DATABASE \"{databaseName}\"";
         await command.ExecuteNonQueryAsync();
         var connectionString = new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString()) { Database = databaseName };
-        var context = new ApplicationDbContext(
-            new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(connectionString.ConnectionString).Options);
+        var context = new DeploymentDbContext(
+            new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(connectionString.ConnectionString).Options);
         var migrator = context.GetService<IMigrator>();
         await migrator.MigrateAsync("20250427103057_Initial Migration");
         // Existing issue #43 fixture remediation, confined to this disposable database.
@@ -45,7 +45,7 @@ public sealed class CityPostgreSqlFixture : IAsyncLifetime
         await migrator.MigrateAsync(PreviousMigration);
         // Most behavioral tests own their City fixtures. Keep the historical seeds in a dedicated migration test.
         if (!keepSeedCities) await context.Database.ExecuteSqlRawAsync("DELETE FROM \"Cities\"");
-        if (migrateCity) await migrator.MigrateAsync();
+        if (migrateCity) await migrator.MigrateAsync("20260907185334_CityReferenceIdentity");
         return context;
     }
 }
@@ -62,9 +62,14 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         (await Queries(context).ActiveCityExistsAsync(" BRUSSELS ", "belgium", CancellationToken.None)).Should().BeTrue();
     }
 
-    private static CityQueries Queries(ApplicationDbContext context) => new(context);
+        private static CityQueries Queries(DeploymentDbContext context)
+    {
+        var tenant = TenantEnforcementTests.Scope(Guid.NewGuid());
+        return new CityQueries(new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(context.Database.GetConnectionString()).Options, tenant));
+    }
 
-    private static Task<int> InsertAsync(ApplicationDbContext context, string name, string country, bool deleted = false) =>
+    private static Task<int> InsertAsync(DeploymentDbContext context, string name, string country, bool deleted = false) =>
         context.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "Cities" ("Name", "Country", "Created", "CreatedBy", "LastModifiedBy", "Softdelete")
             VALUES ({name}, {country}, timestamp '2026-09-07', '', '', {deleted});
@@ -190,12 +195,12 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
     public async Task Concurrent_creates_cannot_both_commit_the_same_identity()
     {
         await using var context = await fixture.CreateContextAsync();
-        await using var other = new ApplicationDbContext(
-            new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(context.Database.GetConnectionString()).Options);
+        await using var other = new DeploymentDbContext(
+            new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(context.Database.GetConnectionString()).Options);
         (await Queries(context).ActiveCityExistsAsync("Brussels", "Belgium", CancellationToken.None)).Should().BeFalse();
         (await Queries(other).ActiveCityExistsAsync("brussels", "belgium", CancellationToken.None)).Should().BeFalse();
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        async Task<string> Write(ApplicationDbContext db, string name)
+        async Task<string> Write(DeploymentDbContext db, string name)
         {
             await gate.Task;
             try { await InsertAsync(db, name, "Belgium"); return "committed"; }
@@ -223,14 +228,14 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
     public async Task Concurrent_restorations_cannot_both_commit_the_same_identity()
     {
         await using var context = await fixture.CreateContextAsync();
-        await using var other = new ApplicationDbContext(
-            new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(context.Database.GetConnectionString()).Options);
+        await using var other = new DeploymentDbContext(
+            new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(context.Database.GetConnectionString()).Options);
         await InsertAsync(context, "Brussels", "Belgium", deleted: true);
         await InsertAsync(context, "BRUSSELS", "Belgium", deleted: true);
         (await Queries(context).ActiveCityExistsAsync("Brussels", "Belgium", CancellationToken.None)).Should().BeFalse();
         (await Queries(other).ActiveCityExistsAsync("BRUSSELS", "Belgium", CancellationToken.None)).Should().BeFalse();
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        async Task<string> Restore(ApplicationDbContext db, string name)
+        async Task<string> Restore(DeploymentDbContext db, string name)
         {
             await gate.Task;
             try
@@ -280,7 +285,7 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         if (duplicate) await InsertAsync(context, " BRUSSELS ", "BELGIUM");
         var before = await context.Database.SqlQuery<int>($"""SELECT count(*)::int AS "Value" FROM "Cities" """).SingleAsync();
         var beforeNames = await context.Database.SqlQuery<string>($"""SELECT "Name" AS "Value" FROM "Cities" ORDER BY "CityId" """).ToListAsync();
-        Func<Task> migrate = () => context.GetService<IMigrator>().MigrateAsync();
+        Func<Task> migrate = () => context.GetService<IMigrator>().MigrateAsync("20260907185334_CityReferenceIdentity");
         var exception = await migrate.Should().ThrowAsync<PostgresException>();
         exception.Which.MessageText.Should().Contain("reviewed remediation");
         (await context.Database.SqlQuery<string>($"""SELECT "Name" AS "Value" FROM "Cities" ORDER BY "CityId" """).ToListAsync())
@@ -304,7 +309,7 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         await using var context = await fixture.CreateContextAsync(migrateCity: false);
         await InsertAsync(context, " Lie\u0300ge ", " Belgium ");
         await InsertAsync(context, " LIE\u0300GE ", " BELGIUM ", deleted: true);
-        await context.GetService<IMigrator>().MigrateAsync();
+        await context.GetService<IMigrator>().MigrateAsync("20260907185334_CityReferenceIdentity");
         (await context.Cities.CountAsync()).Should().Be(2);
         var active = await context.Cities.SingleAsync(c => !c.Softdelete);
         active.Name.Should().Be("Liège");
@@ -317,7 +322,7 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         (await context.Database.SqlQuery<string>($"""
             SELECT "Name" AS "Value" FROM "Cities" WHERE NOT "Softdelete"
             """).SingleAsync()).Should().Be("Liège");
-        await context.GetService<IMigrator>().MigrateAsync();
+        await context.GetService<IMigrator>().MigrateAsync("20260907185334_CityReferenceIdentity");
         (await context.Cities.CountAsync()).Should().Be(2);
     }
 
@@ -346,7 +351,7 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         await using var context = await fixture.CreateContextAsync(migrateCity: false);
         var raw = new string(' ', 1000) + string.Concat(Enumerable.Repeat("e\u0301\U0001f600", 50)) + "\t";
         await InsertAsync(context, raw, raw);
-        await context.GetService<IMigrator>().MigrateAsync();
+        await context.GetService<IMigrator>().MigrateAsync("20260907185334_CityReferenceIdentity");
         var city = await context.Cities.SingleAsync();
         var canonical = string.Concat(Enumerable.Repeat("é\U0001f600", 50));
         city.Name.Should().Be(canonical);
@@ -372,6 +377,7 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Zeka.Extensions.MultiTenancy.Abstractions.ITenantContextInitializer>().Establish(new Zeka.Extensions.MultiTenancy.Abstractions.TenantContext(new Zeka.Extensions.MultiTenancy.Abstractions.TenantId(Guid.NewGuid()), "fixture"));
         var queries = scope.ServiceProvider.GetRequiredService<ICityQueries>();
         (await queries.ActiveCityExistsAsync("Missing", "Missing", CancellationToken.None)).Should().BeFalse();
     }

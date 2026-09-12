@@ -1,10 +1,11 @@
-﻿using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
 namespace ClientManagement.Application.Supports.Commands.UpsertSupport
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.EditAll", "Clients.EditAssigned")]
     public class UpsertSupportCommand : IRequest<int>
     {
         public int? SupportId { get; set; }

@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using AdminAreaManagement.Application.Cities.Queries;
 using AdminAreaManagement.Application.Common.Behaviours;
 using AdminAreaManagement.Application.Common.Helpers;
@@ -35,18 +35,19 @@ namespace AdminAreaManagement.Application
             services.AddScoped<ISortHelper<PartnerDto>, SortHelper<PartnerDto>>();
             services.AddScoped<ISortHelper<NationalityDto>, SortHelper<NationalityDto>>();
             services.AddScoped<ISortHelper<PartnerSelectionListDto>, SortHelper<PartnerSelectionListDto>>();
+            services.AddScoped<AdminAreaManagement.Application.Common.Authorization.TenantOperation>();
             services.AddAutoMapper(Assembly.GetExecutingAssembly());
             services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
             services.AddMediatR(cfg => {
                 cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
                 cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(UnhandledExceptionBehaviour<,>));
-                //cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(AuthorizationBehaviour<,>));
+                cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(AuthorizationBehaviour<,>));
                 cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehaviour<,>));
                 cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(PerformanceBehaviour<,>));
             });
             services.AddScoped<IDomainEventService, DomainEventService>();
             //services.AddTransient<IDocumentGeneratorService, DocumentGeneratorService>();
-            
+
             return services;
         }
     }

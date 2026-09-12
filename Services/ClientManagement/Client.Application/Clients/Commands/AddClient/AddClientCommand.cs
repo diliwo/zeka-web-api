@@ -1,4 +1,4 @@
-﻿using ClientManagement.Application.Clients.Commands.Exceptions;
+using ClientManagement.Application.Clients.Commands.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Enums;
 using ClientManagement.Core.Interfaces;
@@ -8,6 +8,7 @@ using Language = ClientManagement.Core.ValueObjects.Language;
 
 namespace ClientManagement.Application.Clients.Commands.AddClient
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.Create")]
     public class AddClientCommand : IRequest<int>
     {
         public string ReferenceNumber { get; set; }

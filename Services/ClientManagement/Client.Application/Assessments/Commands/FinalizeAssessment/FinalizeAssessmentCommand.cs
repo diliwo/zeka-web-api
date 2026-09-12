@@ -1,9 +1,10 @@
-﻿using ClientManagement.Core.Entities;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
 namespace ClientManagement.Application.Assessments.Commands.FinalizeAssessment
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("Clients.EditAll", "Clients.EditAssigned")]
     public class FinalizeAssessmentCommand : IRequest<int>
     {
         public int? BilanId { get; set; }
@@ -27,7 +28,7 @@ namespace ClientManagement.Application.Assessments.Commands.FinalizeAssessment
                 {
                     throw new InvalidOperationException(nameof(Assessment));
                 }
-               
+
                 entity = _repository.Assessment.GetAssessmentById(request.BilanId.Value);
 
                 if (entity.IsFinalized == false)

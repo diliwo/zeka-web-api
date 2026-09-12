@@ -1,4 +1,4 @@
-﻿using AdminAreaManagement.Application.Cities.Queries;
+using AdminAreaManagement.Application.Cities.Queries;
 using AdminAreaManagement.Application.Common.Models;
 using AdminAreaManagement.Application.Formations.Commands.CreateTraining;
 using AdminAreaManagement.Application.Formations.Commands.DeleteTraining;
@@ -16,6 +16,7 @@ namespace AdminAreaManagement.API.Controllers
     public class NationalitiesController : ApiControllerBase
     {
         [HttpGet]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetNationalitiesListQuery))]
         public async Task<ActionResult<PaginatedList<NationalityDto>>> GetAll([FromQuery] GetNationalitiesListQuery query)
         {
             return await Mediator.Send(query);
@@ -24,6 +25,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(CreateNationalityCommand))]
         public async Task<IActionResult> Create(CreateNationalityCommand command)
         {
             var id = await Mediator.Send(command);
@@ -34,6 +36,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpPut]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(UpdateNationalityCommand))]
         public async Task<IActionResult> Update(UpdateNationalityCommand command)
         {
             var id = await Mediator.Send(command);
@@ -44,6 +47,7 @@ namespace AdminAreaManagement.API.Controllers
         [HttpDelete("{id}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(DeleteNationalityCommand))]
         public async Task<IActionResult> Delete(int id)
         {
             await Mediator.Send(new DeleteNationalityCommand() { Id = id });

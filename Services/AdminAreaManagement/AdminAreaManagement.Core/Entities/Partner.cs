@@ -4,7 +4,7 @@ using AdminAreaManagement.Core.ValueObjects;
 
 namespace AdminAreaManagement.Core.Entities
 {
-    public class Partner : AggregateRoot
+    public partial class Partner : AggregateRoot
     {
         public int PartnerNumber { get; set; }
         public String Name { get; set; }
@@ -81,7 +81,7 @@ namespace AdminAreaManagement.Core.Entities
                     this.ContactPersons.Remove(contact);
                 }
             }
-            
+
         }
     }
 }

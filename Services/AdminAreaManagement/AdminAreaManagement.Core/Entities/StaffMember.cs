@@ -4,6 +4,17 @@ namespace AdminAreaManagement.Core.Entities
 {
     public class StaffMember : AggregateRoot
     {
+        public Guid OrganisationMembershipId { get; private set; }
+        public long ProjectionVersion { get; private set; } = 1;
+
+        public void LinkMembership(Guid membershipId)
+        {
+            if (membershipId == Guid.Empty || (OrganisationMembershipId != Guid.Empty && OrganisationMembershipId != membershipId))
+                throw new InvalidOperationException("Staff membership linkage must be non-empty and immutable.");
+            OrganisationMembershipId = membershipId;
+        }
+
+        public void AdvanceProjectionVersion() => ProjectionVersion = checked(ProjectionVersion + 1);
         public string FirstName { get; set; }
         public string LastName { get; set; }
         public string FullName => $"{LastName} {FirstName}";

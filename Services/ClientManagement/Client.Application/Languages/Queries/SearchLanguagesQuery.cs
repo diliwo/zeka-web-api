@@ -1,8 +1,9 @@
-﻿using ClientManagement.Core.Interfaces;
+using ClientManagement.Core.Interfaces;
 using MediatR;
 
 namespace ClientManagement.Application.Languages.Queries
 {
+    [ClientManagement.Application.Common.Authorization.RequiresTenantPermission("ReferenceData.View")]
     public class SearchLanguagesQuery : IRequest<List<LanguageDto>>
     {
         public string SearchText = string.Empty;
