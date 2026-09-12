@@ -4,6 +4,7 @@ using MediatR;
 namespace AdminAreaManagement.Application.DocumentPartners.Commands.Delete
 {
     [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("PartnerDocuments.Delete")]
+    [AdminAreaManagement.Application.Common.Authorization.NonRetryableTenantTransaction]
     public class DeleteDocumentPartnerCommand :IRequest
     {
         public DeleteDocumentPartnerCommand(int id)

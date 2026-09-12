@@ -28,6 +28,11 @@
   <ItemGroup>
     <ProjectReference Include="..\AdminAreaManagement.Application\AdminAreaManagement.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Security/rls-manifest.v1.json" />
+    <Compile Include="../../../Shared/RlsSecurityManifestVerifier.cs" Link="Security/RlsSecurityManifestVerifier.cs" />
+    <Compile Include="../../../Shared/RuntimeDatabaseIdentityValidator.cs" Link="Security/RuntimeDatabaseIdentityValidator.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <Folder Include="Migrations\" />

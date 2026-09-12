@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "service": "AuthManagement",
+  "modelContext": "AuthManager.Infrastructure.Persistence.AuthDbContext",
+  "migrationId": "20260912180002_PostgreSqlRuntimeRoles",
+  "ownerRole": "zeka_auth_owner",
+  "migratorRole": "zeka_auth_migrator",
+  "runtimeRole": "zeka_auth_runtime",
+  "protectedTables": [],
+  "excludedTables": ["AspNetRoleClaims", "AspNetRoles", "AspNetUserClaims", "AspNetUserLogins", "AspNetUserRoles", "AspNetUserTokens", "AspNetUsers", "AuditEntries", "IdempotencyRecords", "OrganisationMemberships", "Organisations", "OutboxMessages", "PermissionSets"],
+  "sequences": ["AspNetRoleClaims_Id_seq", "AspNetUserClaims_Id_seq"],
+  "runtimeFunctions": [],
+  "policyPrefix": "rls_",
+  "contextFunction": null
+}

@@ -8,7 +8,7 @@ namespace AdminAreaManagement.Core.Interfaces
         Profession Get(int id);
         Task<Profession> GetASync(int professionId);
         IQueryable<Profession> GetProfessions(string filter, string orderBy = "");
-        void SoftDelete(Profession service);
+        Task SoftDelete(Profession service);
         public Boolean IsProfessionUnique(string name);
     }
 }

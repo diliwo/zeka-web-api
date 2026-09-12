@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using DateTimeService = AdminAreaManagement.Infrastructure.Services.DateTimeService;
+using AdminAreaManagement.Application.Common.Authorization;
 
 namespace AdminAreaManagement.Infrastructure.Persistence;
 
@@ -20,10 +21,16 @@ public static class DependencyInjection
         services.AddTenantEnforcement(configuration);
         services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
 
-        services.AddDbContext<ApplicationDbContext>(options =>
+        services.AddScoped<TenantTransactionAttemptState>();
+        services.AddScoped<TenantPostCommitActions>();
+        services.AddScoped<TenantCommandGuard>();
+        services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
+        services.AddDbContext<ApplicationDbContext>((provider, options) =>
             options.UseNpgsql(
                 configuration.GetConnectionString("ClientApiConnection"),
-                b => b.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
+                b => b.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
+                    .EnableRetryOnFailure(3, TimeSpan.FromMilliseconds(200), null))
+                .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>()));
 
         // to revert to the pre-6.0 behavior to avoid the timeZone mapping
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
@@ -40,8 +47,11 @@ public static class DependencyInjection
         services.AddSingleton<IGenericReadRepository<Reward>, GenericReadRepository<Reward>>(sp =>
             sp.GetRequiredService<IOptions<GenericReadRepository<Reward>>>().Value); // TODO : move into RepositoryManager
 
-        services.AddHealthChecks()
-            .AddDbContextCheck<ApplicationDbContext>();
+        // Runtime health must not issue an unscoped command through the tenant DbContext.
+        services.AddHealthChecks().AddCheck(
+            "adminarea-database-connectivity",
+            new DatabaseConnectivityHealthCheck(configuration.GetConnectionString("ClientApiConnection")
+                ?? throw new InvalidOperationException("ClientApiConnection is required.")));
 
         return services;
     }

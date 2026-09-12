@@ -12,6 +12,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using AdminAreaManagement.Application.Common.Authorization;
+using Microsoft.Extensions.Hosting;
+using Zeka.PersistenceSecurity;
 
 
 
@@ -24,10 +27,20 @@ public static class DependencyInjection
         services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
 
         services.AddTenantEnforcement(configuration);
-        services.AddDbContext<ApplicationDbContext>(options =>
+        var runtimeConnection = configuration.GetConnectionString("ClientApiConnection");
+        if (!string.IsNullOrWhiteSpace(runtimeConnection))
+            services.AddSingleton<IHostedService>(_ => new RuntimeDatabaseIdentityValidator(
+                runtimeConnection, "zeka_adminarea_runtime"));
+        services.AddScoped<TenantTransactionAttemptState>();
+        services.AddScoped<TenantPostCommitActions>();
+        services.AddScoped<TenantCommandGuard>();
+        services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
+        services.AddDbContext<ApplicationDbContext>((provider, options) =>
             options.UseNpgsql(
                 configuration.GetConnectionString("ClientApiConnection"),
-                builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
+                builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
+                    .EnableRetryOnFailure(3, TimeSpan.FromMilliseconds(200), null))
+                .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>()));
 
 
 

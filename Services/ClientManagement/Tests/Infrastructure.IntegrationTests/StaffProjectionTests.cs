@@ -19,18 +19,21 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
     {
         var a = Guid.NewGuid(); var b = Guid.NewGuid(); var membership = Guid.NewGuid();
         var otherMembership = Guid.NewGuid();
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(fixture.ConnectionString).Options;
         var handler = new AccessHandler();
         handler.Memberships.Add(membership, a);
         handler.Memberships.Add(otherMembership, b);
-        var services = new ServiceCollection().AddScoped<TenantContextScope>().AddSingleton(options)
-            .AddSingleton<IHttpClientFactory>(new Factory(handler));
-        await using var provider = services.BuildServiceProvider();
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        var config = new ConfigurationManager();
+        config.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["TenantWorker:SubjectId"] = "worker", ["TenantWorker:BearerToken"] = "synthetic-test-token",
-            ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/"
-        }).Build();
+            ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
+            ["ConnectionStrings:ClientApiConnection"] = fixture.ConnectionString
+        });
+        var services = new ServiceCollection();
+        ClientManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, config);
+        services.AddSingleton<IHttpClientFactory>(new Factory(handler));
+        await using var provider = services.BuildServiceProvider();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(fixture.ConnectionString).Options;
         var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), config);
         var created = Message(a, membership, 1, true, "original");
         await consumer.Handle(created); await consumer.Handle(created);

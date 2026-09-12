@@ -28,6 +28,7 @@ public class ApplicationDbContext : TenantDbContext
         return SaveChanges();
     }
 
+
     public DbSet<StaffMember> StaffMembers => Set<StaffMember>();
     public DbSet<Team> Teams => Set<Team>();
     public DbSet<Partner> Partners => Set<Partner>();

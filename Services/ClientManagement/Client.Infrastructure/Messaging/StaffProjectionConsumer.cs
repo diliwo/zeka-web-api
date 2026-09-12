@@ -34,28 +34,42 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
         var operation = new TenantOperation(access, identity, context, context);
         await operation.AuthorizeAsync(new RequiresTenantPermissionAttribute("TeamConfiguration.ManageStaffProfiles"),
             CancellationToken.None);
-        var options = scope.ServiceProvider.GetRequiredService<DbContextOptions<ApplicationDbContext>>();
-        await using var database = new ApplicationDbContext(options, context, operation);
-        var worker = await database.SocialWorkers.SingleOrDefaultAsync(
-            x => x.OrganisationMembershipId == message.OrganisationMembershipId);
-        if (worker is not null && message.Revision <= worker.ProjectionVersion)
-        {
-            // Older/duplicate deliveries do not reactivate a revoked membership or mutate persistence.
-            worker.ApplyProjection(message.OrganisationMembershipId, message.Revision, message.Id, message.Active,
-                message.FirstName, message.LastName, message.UserName, message.TeamName, message.TeamAcronym);
+        var database = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var transactions = scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
+        var currentRevision = await transactions.ExecuteAsync(async cancellationToken =>
+            await database.SocialWorkers.AsNoTracking()
+                .Where(x => x.OrganisationMembershipId == message.OrganisationMembershipId)
+                .Select(x => (long?)x.ProjectionVersion)
+                .SingleOrDefaultAsync(cancellationToken), CancellationToken.None);
+        // A previously accepted delivery is already authoritative. Avoid rejecting harmless duplicate or
+        // out-of-order redelivery merely because the membership was subsequently made inactive.
+        if (currentRevision is not null && message.Revision < currentRevision)
             return;
-        }
+        // Membership verification is an external authorization call. Complete it before opening the
+        // database transaction so an EF execution-strategy retry never replays network I/O.
         if (!await new StaffMembershipClient(http, identity).VerifyAsync(message.OrganisationId,
             message.OrganisationMembershipId, requireActive: message.Active, CancellationToken.None))
             throw new TenantAccessException(AccessFailure.Denied);
-        if (worker is null)
+        await transactions.ExecuteAsync(async cancellationToken =>
         {
-            worker = new SocialWorker();
-            database.Add(worker);
-        }
-        worker.ApplyProjection(message.OrganisationMembershipId, message.Revision, message.Id, message.Active,
-            message.FirstName, message.LastName, message.UserName, message.TeamName, message.TeamAcronym);
-        await database.SaveChangesAsync(); // Unique key + revision concurrency token make competing deliveries retryable.
+            var worker = await database.SocialWorkers.SingleOrDefaultAsync(
+                x => x.OrganisationMembershipId == message.OrganisationMembershipId, cancellationToken);
+            if (worker is not null && message.Revision <= worker.ProjectionVersion)
+            {
+                // Older/duplicate deliveries do not reactivate a revoked membership or mutate persistence.
+                worker.ApplyProjection(message.OrganisationMembershipId, message.Revision, message.Id, message.Active,
+                    message.FirstName, message.LastName, message.UserName, message.TeamName, message.TeamAcronym);
+                return;
+            }
+            if (worker is null)
+            {
+                worker = new SocialWorker();
+                database.Add(worker);
+            }
+            worker.ApplyProjection(message.OrganisationMembershipId, message.Revision, message.Id, message.Active,
+                message.FirstName, message.LastName, message.UserName, message.TeamName, message.TeamAcronym);
+            await database.SaveChangesAsync(cancellationToken);
+        }, CancellationToken.None); // Unique key + revision concurrency token make competing deliveries retryable.
     }
 
     private sealed record WorkerIdentity(string SubjectId, Guid SelectedOrganisationId, string? BearerToken)

@@ -9,6 +9,7 @@ using AdminAreaManagement.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -41,8 +42,8 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
         { foreach (var tag in tags) if (tag.Key == "outcome") outcomes.Add(tag.Value!.ToString()!); });
         metrics.Start();
         var services = new ServiceCollection().AddLogging(builder => builder.AddProvider(logs))
-            .AddSingleton<IConfiguration>(config).AddSingleton(Options).AddSingleton<IEventBus>(publisher);
-        services.AddTenantEnforcement(config);
+            .AddSingleton<IEventBus>(publisher);
+        AddWorkerRuntime(services, config);
         services.AddSingleton<IHttpClientFactory>(new Factory(authority));
         await using var provider = services.BuildServiceProvider();
         var hosted = Assert.Single(provider.GetServices<IHostedService>());
@@ -81,9 +82,8 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
         var organisation = Guid.NewGuid(); await Seed(organisation, Guid.NewGuid(), true);
         var publisher = new Publisher { Fail = false }; var authority = new Authority { Allow = false };
         var config = Configuration(organisation);
-        var services = new ServiceCollection().AddLogging().AddSingleton<IConfiguration>(config)
-            .AddSingleton(Options).AddSingleton<IEventBus>(publisher);
-        services.AddTenantEnforcement(config);
+        var services = new ServiceCollection().AddLogging().AddSingleton<IEventBus>(publisher);
+        AddWorkerRuntime(services, config);
         services.AddSingleton<IHttpClientFactory>(new Factory(authority));
         await using var provider = services.BuildServiceProvider();
         var worker = (StaffProjectionRetryWorker)Assert.Single(provider.GetServices<IHostedService>());
@@ -142,8 +142,8 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
     public async Task Missing_worker_configuration_fails_startup_instead_of_silently_disabling_recovery()
     {
         var services = new ServiceCollection().AddLogging();
-        var config = new ConfigurationBuilder().Build();
-        services.AddSingleton<IConfiguration>(config).AddTenantEnforcement(config);
+        var config = new ConfigurationManager();
+        AddWorkerRuntime(services, config);
         await using var provider = services.BuildServiceProvider();
         await Assert.ThrowsAsync<InvalidOperationException>(() => Assert.Single(provider.GetServices<IHostedService>()).StartAsync(default));
     }
@@ -157,11 +157,27 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
     }
     private static StaffProjectionChangedV1 Message(Guid organisation, Guid membership, bool active)
         => new(organisation, membership, 2, active, "private-first", "private-last", "private-user", "private-team", "T");
-    private static IConfiguration Configuration(Guid organisation) => new ConfigurationBuilder().AddInMemoryCollection(
-        new Dictionary<string, string?> { ["TenantWorker:SubjectId"] = "worker",
+    private ConfigurationManager Configuration(Guid organisation)
+    {
+        var configuration = new ConfigurationManager();
+        configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["TenantWorker:SubjectId"] = "worker",
             ["TenantWorker:BearerToken"] = "synthetic-test-token",
             ["TenantWorker:OrganisationIds:0"] = organisation.ToString(),
-            ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/" }).Build();
+            ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
+            ["ConnectionStrings:ClientApiConnection"] = fixture.ConnectionString
+        });
+        return configuration;
+    }
+
+    private static void AddWorkerRuntime(IServiceCollection services, ConfigurationManager configuration)
+    {
+        services.AddSingleton<IConfiguration>(configuration);
+        AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
+        services.RemoveAll<IHostedService>();
+        services.AddHostedService<StaffProjectionRetryWorker>();
+    }
     private sealed class Publisher : IEventBus
     {
         public volatile bool Fail = true;

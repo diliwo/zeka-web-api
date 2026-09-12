@@ -79,12 +79,13 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
                 var tenant = scope.ServiceProvider.GetRequiredService<TenantContextScope>();
                 var operation = new TenantOperation(new CurrentTenantAccessClient(http, identity), identity, tenant, tenant);
                 await operation.AuthorizeAsync(new RequiresTenantPermissionAttribute("TeamConfiguration.ManageStaffProfiles"), budget.Token);
-                await using var database = new ApplicationDbContext(
-                    scope.ServiceProvider.GetRequiredService<DbContextOptions<ApplicationDbContext>>(), tenant);
+                var database = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var outbox = new StaffProjectionOutbox(database, tenant,
                     scope.ServiceProvider.GetRequiredService<IEventBus>(),
                     scope.ServiceProvider.GetRequiredService<ILogger<StaffProjectionOutbox>>(), configuration);
-                await new DispatchStaffProjectionsCommand.Handler(outbox).Handle(new(), budget.Token);
+                var transactions = scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
+                await transactions.ExecuteAsync(token =>
+                    new DispatchStaffProjectionsCommand.Handler(outbox).Handle(new(), token), budget.Token);
                 Cycles.Add(1, new KeyValuePair<string, object?>("outcome", "completed"));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

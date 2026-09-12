@@ -28,7 +28,8 @@ public sealed class MembershipMigrationTests : IAsyncLifetime
             INSERT INTO "__OrganisationTenantMap" VALUES ('Legacy', {organisation});
             """);
         await migrator.MigrateAsync("20260904124417_OrganisationTenantConstraints");
-        var missing = await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync());
+        var missing = await Assert.ThrowsAsync<PostgresException>(() =>
+            migrator.MigrateAsync("20260910165923_ExplicitTenantEnforcement"));
         Assert.Contains("__StaffMembershipMap", missing.MessageText);
         Assert.False(await database.Database.SqlQuery<bool>($"""
             SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='SocialWorkers' AND column_name='OrganisationMembershipId') AS "Value"
@@ -37,12 +38,14 @@ public sealed class MembershipMigrationTests : IAsyncLifetime
             CREATE TABLE "__StaffMembershipMap" ("LocalId" integer, "OrganisationId" uuid, "OrganisationMembershipId" uuid);
             INSERT INTO "__StaffMembershipMap" VALUES (1, {Guid.NewGuid()}, {membership});
             """);
-        await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync());
+        await Assert.ThrowsAsync<PostgresException>(() =>
+            migrator.MigrateAsync("20260910165923_ExplicitTenantEnforcement"));
         await database.Database.ExecuteSqlInterpolatedAsync($"""UPDATE "__StaffMembershipMap" SET "OrganisationId" = {organisation}""");
         await database.Database.ExecuteSqlInterpolatedAsync($"""INSERT INTO "__StaffMembershipMap" VALUES (1, {organisation}, {Guid.NewGuid()})""");
-        await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync());
+        await Assert.ThrowsAsync<PostgresException>(() =>
+            migrator.MigrateAsync("20260910165923_ExplicitTenantEnforcement"));
         await database.Database.ExecuteSqlInterpolatedAsync($"""DELETE FROM "__StaffMembershipMap" WHERE "OrganisationMembershipId" <> {membership}""");
-        await migrator.MigrateAsync();
+        await migrator.MigrateAsync("20260910165923_ExplicitTenantEnforcement");
         var worker = await database.SocialWorkers.SingleAsync();
         Assert.Equal(membership, worker.OrganisationMembershipId); Assert.Equal("synthetic", worker.UserName);
         Assert.Equal(organisation, worker.OrganisationId); Assert.Equal(0, worker.ProjectionVersion);

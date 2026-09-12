@@ -33,7 +33,7 @@ public sealed class TenantDatabase : IAsyncLifetime
             INSERT INTO "__StaffMembershipMap" VALUES
               (1, {organisation}, {Guid.NewGuid()}), (2, {organisation}, {Guid.NewGuid()}), (3, {organisation}, {Guid.NewGuid()});
             """);
-        await migrator.MigrateAsync();
+        await migrator.MigrateAsync("20260910165920_ExplicitTenantEnforcement");
     }
     public Task DisposeAsync() => postgres.DisposeAsync().AsTask();
 }

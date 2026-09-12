@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "service": "AdminAreaManagement",
+  "modelContext": "AdminAreaManagement.Infrastructure.Persistence.DeploymentDbContext",
+  "migrationId": "20260912180000_PostgreSqlRlsAndRuntimeRoles",
+  "ownerRole": "zeka_adminarea_owner",
+  "migratorRole": "zeka_adminarea_migrator",
+  "runtimeRole": "zeka_adminarea_runtime",
+  "protectedTables": ["ContactPersons", "DocumentPartners", "Emails", "Partners", "StaffMembers", "StaffProjectionOutbox", "Teams"],
+  "excludedTables": ["Cities", "Nationalities", "Professions", "Schools", "TrainingFields", "TrainingTypes", "Trainings"],
+  "sequences": ["Cities_CityId_seq", "DocumentPartners_Id_seq", "Emails_Id_seq", "Nationalities_NationalityId_seq", "Partners_Id_seq", "Professions_Id_seq", "Schools_Id_seq", "StaffMembers_Id_seq", "StaffProjectionOutbox_Id_seq", "Teams_Id_seq", "TrainingFields_TrainingFieldId_seq", "TrainingTypes_TrainingTypeId_seq", "Trainings_Id_seq"],
+  "runtimeFunctions": ["public.zeka_city_key(value text)", "public.zeka_city_text(value text)", "zeka.current_organisation_id()"],
+  "policyPrefix": "rls_",
+  "contextFunction": "zeka.current_organisation_id"
+}

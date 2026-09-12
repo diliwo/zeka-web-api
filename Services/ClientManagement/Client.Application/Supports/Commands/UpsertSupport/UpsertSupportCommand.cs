@@ -60,7 +60,7 @@ namespace ClientManagement.Application.Supports.Commands.UpsertSupport
                 }
 
                 _repository.Support.Persist(entity);
-                _repository.SaveAsync();
+                await _repository.SaveAsync();
 
                 return entity.Id;
             }

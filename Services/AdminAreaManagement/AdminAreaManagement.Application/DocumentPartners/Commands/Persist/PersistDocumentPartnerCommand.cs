@@ -6,6 +6,7 @@ using MediatR;
 namespace AdminAreaManagement.Application.DocumentPartners.Commands.Persist
 {
     [AdminAreaManagement.Application.Common.Authorization.RequiresTenantPermission("PartnerDocuments.Import")]
+    [AdminAreaManagement.Application.Common.Authorization.NonRetryableTenantTransaction]
     public class PersistDocumentPartnerCommand : IRequest<int>
     {
         public int? DocumentId { get; set; }

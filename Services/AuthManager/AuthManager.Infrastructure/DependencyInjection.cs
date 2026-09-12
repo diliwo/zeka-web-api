@@ -14,6 +14,8 @@ using AuthManager.Application.Common.Outbox;
 using AuthManager.Infrastructure.Outbox;
 using AuthManager.Infrastructure.Persistence.Services;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Zeka.PersistenceSecurity;
 
 namespace AuthManager.Infrastructure;
 
@@ -21,6 +23,10 @@ public static class DependencyInjection
 {
     public static void Infrastructure(this IServiceCollection services, IConfigurationManager configuration)
     {
+        var runtimeConnection = configuration.GetConnectionString("Default");
+        if (!string.IsNullOrWhiteSpace(runtimeConnection))
+            services.AddSingleton<IHostedService>(_ => new RuntimeDatabaseIdentityValidator(
+                runtimeConnection, "zeka_auth_runtime"));
         services.AddDbContext<AuthDbContext>(options =>
             options.UseNpgsql(
                 configuration.GetConnectionString("Default"),

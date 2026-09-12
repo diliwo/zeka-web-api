@@ -18,4 +18,9 @@
   </ItemGroup>
 
   <ItemGroup><ProjectReference Include="../../../Shared/Zeka.Authentication/Zeka.Authentication.csproj" /></ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Security/rls-manifest.v1.json" />
+    <Compile Include="../../../Shared/RlsSecurityManifestVerifier.cs" Link="Security/RlsSecurityManifestVerifier.cs" />
+    <Compile Include="../../../Shared/RuntimeDatabaseIdentityValidator.cs" Link="Security/RuntimeDatabaseIdentityValidator.cs" />
+  </ItemGroup>
 </Project>

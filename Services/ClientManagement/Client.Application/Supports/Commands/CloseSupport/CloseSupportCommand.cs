@@ -38,7 +38,7 @@ namespace ClientManagement.Application.Supports.Commands.CloseTrack
 
                 _repository.Support.Persist(entity);
 
-                _repository.SaveAsync();
+                await _repository.SaveAsync();
 
                 return entity.Id;
             }

@@ -35,7 +35,7 @@ namespace ClientManagement.Application.Clients.Commands.UpdateNativeLanguage
 
                 _repository.Client.Persist(entity);
 
-                _repository.SaveAsync();
+                await _repository.SaveAsync();
 
                 return entity.Id;
             }
