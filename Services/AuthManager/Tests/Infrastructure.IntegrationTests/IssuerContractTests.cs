@@ -231,6 +231,35 @@ public sealed class IssuerContractTests
         Assert.Throws<InvalidOperationException>(() => AdminAreaManagement.API.TenantAuthentication.AddTenantAuthentication(new ServiceCollection(), config));
     }
 
+    [Theory]
+    [InlineData("AuthenticationIssuer:Unexpected")]
+    [InlineData("AuthenticationIssuer:RetiringKeys:0:Unexpected")]
+    [InlineData("AuthenticationIssuer:RetiringKeys:0:KeyId:Nested")]
+    public void Unknown_or_nested_issuer_configuration_fails_closed(string key)
+    {
+        using var fixture = new AuthenticationFixture();
+        var now = fixture.Clock.GetUtcNow();
+        var values = new Dictionary<string, string?>
+        {
+            ["AuthenticationIssuer:ActiveSigningKeyReference"] = Reference("active"),
+            ["AuthenticationIssuer:ActiveKeyId"] = "active",
+            ["AuthenticationIssuer:AccessTokenLifetime"] = "00:05:00",
+            ["AuthenticationIssuer:RetiringKeys:0:KeyId"] = "retiring",
+            ["AuthenticationIssuer:RetiringKeys:0:PublicKeyReference"] = Reference("retiring"),
+            ["AuthenticationIssuer:RetiringKeys:0:LastIssuedAtUtc"] = now.ToString("O"),
+            ["AuthenticationIssuer:RetiringKeys:0:RemoveAfterUtc"] = now.AddHours(2).ToString("O")
+        };
+        var settings = AuthenticationOptions.Read(fixture.Configuration());
+        var valid = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        Assert.Single(IssuerOptions.Read(valid, settings).RetiringKeys);
+        values[key] = "unexpected";
+        var invalid = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+
+        var error = Assert.Throws<InvalidOperationException>(() => IssuerOptions.Read(invalid, settings));
+
+        Assert.Equal("Invalid issuer configuration.", error.Message);
+    }
+
     internal static AccessTokenIssuer Create(AuthenticationFixture fixture, TestKeys? provider = null, IssuerOptions? options = null)
         => new(provider ?? new TestKeys(fixture.Key), options ?? Options(), AuthenticationOptions.Read(fixture.Configuration()), fixture.Clock);
     private static string Reference(string name) => Path.Combine(Path.GetTempPath(), "not-provisioned-issue44-test", name);

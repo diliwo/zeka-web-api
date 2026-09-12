@@ -6,7 +6,7 @@ public class TrainingField : Entity, Zeka.Extensions.MultiTenancy.Abstractions.I
 {
     public string Name { get; set; }
 
-    TrainingField(string name)
+    public TrainingField(string name)
     {
         if (string.IsNullOrEmpty(name))
         {

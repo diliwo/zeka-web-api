@@ -240,12 +240,20 @@ jobs:
             /d:sonar.pullrequest.key="${SONAR_PR_KEY}" \
             /d:sonar.pullrequest.branch="${SONAR_PR_BRANCH}" \
             /d:sonar.pullrequest.base="${SONAR_PR_BASE}" \
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
 
       - name: Build for analysis
         run: dotnet build zeka-web-api.sln --configuration Release --no-restore --no-incremental
+
+      - name: Run complete suite and collect coverage for analysis
+        run: |
+          docker info
+          dotnet test zeka-web-api.sln --configuration Release --no-build --no-restore \
+            --collect:"XPlat Code Coverage" --results-directory TestResults \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
       - name: Complete analysis and wait for Quality Gate
         env:
