@@ -1,8 +1,6 @@
 using AdminAreaManagement.API;
 using AdminAreaManagement.API.Services;
 using Zeka.Extensions.MultiTenancy.AspNetCore;
-using AdminAreaManagement.API;
-using AdminAreaManagement.API.Services;
 using AdminAreaManagement.Application;
 using AdminAreaManagement.Infrastructure;
 using AdminAreaManagement.Infrastructure.Persistence;

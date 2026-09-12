@@ -309,6 +309,100 @@ transient Docker discovery failure are recorded above and left outside the code 
 No push, PR, merge, Issue #44 closure, credential mutation or ADR-005 work was performed.
 The local commit SHA and post-commit working-tree status are reported in the handoff.
 
+### Final test/delivery correction — 2026-09-12
+
+Reviewed baseline: `30dc53230c208b7d556d42ac339276efc8875caa`.
+Chief accepted the production authentication/authorization implementation. This
+correction changes only five files: the ClientManagement startup fixture, its shared
+process-test helper, `.github/workflows/mvp-validation.yml`, the two duplicate using
+directives in AdminAreaManagement `Program.cs`, and this report. No package references,
+production authentication/authorization logic, persistence, deployment configuration,
+credentials, or repository settings changed. Ubongo was already current; ADR-002's
+integration-test responsibilities and the accepted authentication boundary are preserved.
+
+ClientManagement startup is now self-contained:
+
+- Each xUnit case owns a fresh Testcontainers network and `rabbitmq:3.13.7-alpine`
+  broker. It waits for RabbitMQ's startup-complete signal, then a successful
+  `rabbitmq-diagnostics -q check_port_connectivity` result.
+- The production adapter accepts only a hostname and uses AMQP port 5672. The real
+  compiled API therefore runs in `mcr.microsoft.com/dotnet/aspnet:8.0.30` on that
+  private network, with the broker's network alias. No broker host port is published
+  or selected, and no developer broker is reused. The API's HTTP port is mapped to
+  a random host port. This follows the existing Testcontainers approach without
+  introducing a package or changing production configuration binding.
+- The same shared test method still executes the actual entry point and asserts
+  startup, real HTTP response, nonzero exit on unknown configuration, and redacted
+  error text. Only process preparation/address translation gain test extension points;
+  no production registration or service is mocked or replaced. The tracked base
+  `appsettings.json` and isolated environment overrides remain the configuration inputs.
+- The successful case additionally queries this broker and requires one consumer on
+  the unique test queue. A listening HTTP host with a failed subscriber is insufficient.
+  API and broker containers and their network are disposed after each case, including
+  failure paths. Fresh broker creation and cleanup are visible in the startup log.
+
+The initial fixture attempt ran a diagnostics command before broker initialization
+completed, causing a fresh-container initialization race. Waiting for the server's
+startup-complete signal before diagnostics resolved it. No host credential, existing
+broker, or production implementation was modified.
+
+Required PR validation restores and runs the **entire ClientManagement
+Infrastructure.IntegrationTests project**, with no filter, in the existing Docker-enabled
+`postgresql` job. Testcontainers provisions and tears down its dependencies. The job ID,
+check name (`PostgreSQL Testcontainers`), and required `MVP Validation` aggregate are
+preserved. A failure in this suite sets the existing nonzero step result and fails the
+aggregate. No manually provisioned RabbitMQ service or CI credential is required.
+The workflow passes actionlint 1.7.12, including its bundled shell checks.
+Its exact integration-test `run` block was extracted unchanged and executed locally
+with Bash `--noprofile --norc -e -o pipefail`: exit 0, **202 tests passed** across
+the four listed projects (75 AuthManager infrastructure, 4 AdminAreaManagement
+application integration, 15 ClientManagement application integration, and all 108
+ClientManagement infrastructure cases). Evidence is retained in
+`%TEMP%/issue44-required-test-step.sh` and `%TEMP%/issue44-required-test-step.log`.
+This proves local execution of the required command block; no hosted GitHub Actions
+run is claimed and no PR was opened to trigger one.
+
+Verification with SDK 8.0.129:
+
+| Check | Result |
+| --- | --- |
+| Fresh ClientManagement real-host cases | 3 passed; test-owned broker/API/network, including actual broker consumer |
+| Focused AuthManager startup/authentication | 42 passed |
+| Focused AdminAreaManagement authentication | 48 passed |
+| Focused ClientManagement startup/authentication | 51 passed |
+| Complete Release suite, all 12 projects | 495 passed, 0 failed, 0 skipped |
+| Complete Release build | Exit 0; **23 warnings, 0 errors** |
+
+```text
+dotnet build zeka-web-api.sln -c Release --no-restore --verbosity quiet
+dotnet test zeka-web-api.sln -c Release --no-build --no-restore -m:1
+  --logger "trx;LogFileName=issue44-final-test-delivery.trx" --verbosity quiet
+```
+
+The 23 build warnings comprise two NU1903 advisories, one ASP0013, one ASP0014,
+four CS8600, three CS8602, two CS8603, four CS8604, five CS8625, and one xUnit2009.
+This is the exact count for this run, distinct from the historical runs above.
+Only the two authorized duplicate using directives were removed; remaining warnings
+were not suppressed or repaired outside scope.
+
+Raw evidence is retained in `%TEMP%/issue44-final-startup-retry.log`,
+`%TEMP%/issue44-final-focused.log`, `%TEMP%/issue44-final-build.log`,
+`%TEMP%/issue44-final-release-suite.log`, and each project's ignored
+`TestResults/issue44-final-test-delivery.trx`.
+
+The inventory remains **755 tracked files**. Generic scans are scoped to the current
+contents of the **280 Issue #44/correction delta files** relative to develop baseline
+`4bc9bc1e5b99ee49e6ae0d1f464debdd8ef24dde`, including this five-file correction.
+Both `sonar analyze secrets` and Gitleaks 8.30.1 (`dir`, default rules, `--redact`)
+pass this delta. The isolated scan snapshot excludes the known develop Kubernetes
+Secret. Delta checks also find zero private-key markers and zero key/certificate
+artifacts. This is not a generic-scanner-clean claim about the complete repository.
+The five-file correction also passes a separate delta scan. Final `git diff --check`
+and scope review pass; the worktree is checked clean after the single commit and push.
+The full 40-character SHA is provided in the handoff for Chief's remote review.
+No PR, merge, Issue #44 closure, credential/repository-setting change, or ADR-005 work
+is part of this delivery.
+
 ### Scope and security review
 
 Exact changed-file review is limited to the authentication component, three
@@ -316,12 +410,18 @@ registrations, AuthManager issuer/JWKS composition, corresponding tests/project
 references and documentation. Permission, current-membership, assignment, outbox,
 EF, migration and tenant-isolation production paths are unchanged.
 
-The final deterministic scanner passed all 752 tracked files, including every staged
-authentication file. Additional checks found zero tracked PEM private-key markers,
-zero tracked key/certificate artifacts and zero symmetric-fallback references in
-the production authentication component and three registrations. The staged
-`git diff --check` passed. Post-commit cleanliness is reported with the commit SHA.
-No credential value was read into the report.
+The current tracked-file count is **755** (`git ls-files`); this is an inventory
+count, not a repository-wide generic-scanner result. The Issue #44 and correction
+deltas pass generic secret scanning. Delta-only key checks find no private-key
+markers or key/certificate artifacts. The production authentication component and
+three registrations remain free of symmetric fallback. The staged `git diff --check`
+passed. Post-commit cleanliness is reported with the commit SHA.
+
+Chief identified a pre-existing Kubernetes Secret finding on `develop` in
+`Deployments/k8s/zekadb/zekadb-secret.yaml`. It is outside Issue #44's delta and this
+correction's scope. Its value was not inspected, reproduced, or modified. This report
+does **not** claim that the complete repository tree is generic-scanner clean.
+Remediation requires separate authorization; no credential value is included here.
 
 The accepted architecture is implemented; no new architecture decision remains
 within this contract. Deployment still requires independently authorized environment

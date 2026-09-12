@@ -93,6 +93,7 @@ jobs:
           exit "${test_status}"
 
   postgresql:
+    # Keep the existing required-check name; this job also owns RabbitMQ startup coverage.
     name: PostgreSQL Testcontainers
     needs: source_policy
     if: ${{ needs.source_policy.outputs.trusted == 'true' }}
@@ -112,7 +113,7 @@ jobs:
       - name: Verify Docker daemon availability
         run: docker info
 
-      - name: Restore PostgreSQL test projects with ephemeral package authentication
+      - name: Restore container-backed test projects with ephemeral package authentication
         env:
           PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
           PACKAGE_USERNAME: ${{ github.repository_owner }}
@@ -122,14 +123,18 @@ jobs:
           dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
           dotnet restore Services/AdminAreaManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --configfile nuget.config
           dotnet restore Services/ClientManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --configfile nuget.config
+          dotnet restore Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
 
-      - name: Run PostgreSQL-backed integration test projects
+      # AuthenticationStartupTests owns its RabbitMQ/API containers and private network;
+      # the runner needs Docker only, with no pre-provisioned broker or credentials.
+      - name: Run container-backed integration test projects including real ClientManagement startup
         shell: bash
         run: |
           test_projects=(
             "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj"
             "Services/AdminAreaManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj"
             "Services/ClientManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj"
+            "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj"
           )
           test_status=0
           for test_project in "${test_projects[@]}"; do

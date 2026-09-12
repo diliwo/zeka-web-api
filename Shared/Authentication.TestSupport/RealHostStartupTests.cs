@@ -14,6 +14,9 @@ public abstract class RealHostStartupTests
     protected abstract string ApiDirectory { get; }
     protected abstract string AssemblyName { get; }
     protected virtual bool IsIssuer => false;
+    protected virtual Task PrepareHostAsync(ProcessStartInfo start, CancellationToken cancellationToken) => Task.CompletedTask;
+    protected virtual string ResolveAddress(string address) => address;
+    protected virtual Task VerifyDependenciesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     [Theory]
     [InlineData(null)]
@@ -61,7 +64,6 @@ public abstract class RealHostStartupTests
             foreach (var (key, value) in fixture.Configuration().AsEnumerable())
                 if (value is not null) start.Environment[key.Replace(":", "__")] = value;
             start.Environment["TenantAuthorization__AuthManagementUrl"] = AuthenticationFixture.Issuer;
-            start.Environment["RabbitMq__HostName"] = "127.0.0.1";
             start.Environment["EventBus__QueueName"] = "startup-test-" + Guid.NewGuid().ToString("N");
             if (IsIssuer)
             {
@@ -73,6 +75,7 @@ public abstract class RealHostStartupTests
             }
             if (unexpectedKey is not null)
                 start.Environment["Authentication__" + unexpectedKey] = "unexpected-test-value";
+            await PrepareHostAsync(start, timeout.Token);
             process.StartInfo = start;
             started = process.Start();
             Assert.True(started);
@@ -101,7 +104,7 @@ public abstract class RealHostStartupTests
             {
                 Assert.True(address is not null, string.Join('\n', output) + (process.HasExited ? await stderr : ""));
                 using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
-                using var response = await http.GetAsync(address + (IsIssuer ? "/.well-known/jwks.json" : "/startup-test-not-found"), timeout.Token);
+                using var response = await http.GetAsync(ResolveAddress(address!) + (IsIssuer ? "/.well-known/jwks.json" : "/startup-test-not-found"), timeout.Token);
                 Assert.Equal(IsIssuer ? HttpStatusCode.OK : HttpStatusCode.NotFound, response.StatusCode);
                 if (IsIssuer)
                 {
@@ -110,6 +113,7 @@ public abstract class RealHostStartupTests
                         "The actual issuer must publish exactly the fixture's public JWKS.");
                 }
                 Assert.False(process.HasExited);
+                await VerifyDependenciesAsync(timeout.Token);
             }
         }
         finally
