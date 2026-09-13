@@ -67,6 +67,7 @@ public static class RlsSecurityManifestVerifier
             await VerifyTablesAndPolicies(connection, manifest, cancellationToken);
             await VerifyDatabaseAndSchemas(connection, manifest, cancellationToken);
             await VerifyTableAcls(connection, manifest, cancellationToken);
+            await VerifyColumnAcls(connection, manifest, cancellationToken);
             await VerifySequences(connection, manifest, cancellationToken);
             await VerifyFunctions(connection, manifest, cancellationToken);
             await VerifyDefaultPrivileges(connection, manifest, cancellationToken);
@@ -195,6 +196,26 @@ public static class RlsSecurityManifestVerifier
             .SelectMany(table => Dml.Select(privilege => $"{table}|{manifest.RuntimeRole}|{privilege}|false"))
             .Concat(Dml.Select(privilege => $"__EFMigrationsHistory|{manifest.MigratorRole}|{privilege}|false"));
         Equal(expected, rows.Select(row => string.Join('|', row)), "table ACLs");
+    }
+
+    private static async Task VerifyColumnAcls(DbConnection connection, RlsSecurityManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        var managedTables = manifest.ProtectedTables.Concat(manifest.ExcludedTables)
+            .Append("__EFMigrationsHistory").Distinct(StringComparer.Ordinal).ToArray();
+        var rows = await RowsAsync(connection, """
+            select n.nspname,c.relname,a.attname,coalesce(grantee.rolname,'PUBLIC'),
+              x.privilege_type,x.is_grantable::text
+            from pg_attribute a join pg_class c on c.oid=a.attrelid
+            join pg_namespace n on n.oid=c.relnamespace
+            cross join lateral aclexplode(a.attacl) x
+            left join pg_roles grantee on grantee.oid=x.grantee
+            -- Owners have inherent privileges and their identity is verified separately.
+            where n.nspname='public' and c.relkind in ('r','p') and c.relname=any(@tables)
+              and a.attnum>0 and not a.attisdropped and a.attacl is not null
+              and x.grantee<>c.relowner order by 1,2,3,4,5,6
+            """, cancellationToken, ("tables", managedTables));
+        Equal([], rows.Select(row => string.Join('|', row)), "column ACLs");
     }
 
     private static async Task VerifySequences(DbConnection connection, RlsSecurityManifest manifest,
