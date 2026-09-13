@@ -1,5 +1,7 @@
 using System.Data.Common;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -9,7 +11,8 @@ namespace Zeka.PersistenceSecurity;
 public sealed record RlsSecurityManifest(int SchemaVersion, string Service, string ModelContext,
     string MigrationId, string OwnerRole, string MigratorRole, string RuntimeRole,
     string[] ProtectedTables, string[] ExcludedTables, string[] Sequences,
-    string[] RuntimeFunctions, string PolicyPrefix, string? ContextFunction);
+    string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
+    string PolicyPrefix, string? ContextFunction);
 
 /// <summary>Deployment-only bidirectional comparison of the versioned model and effective PostgreSQL state.</summary>
 public static class RlsSecurityManifestVerifier
@@ -19,7 +22,7 @@ public static class RlsSecurityManifestVerifier
     public static RlsSecurityManifest Load(Assembly assembly)
     {
         var name = assembly.GetManifestResourceNames().Single(x =>
-            x.EndsWith("rls-manifest.v1.json", StringComparison.Ordinal));
+            x.EndsWith("rls-manifest.v2.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -34,8 +37,10 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken = default)
     {
         var manifest = Load(manifestAssembly);
-        if (manifest.SchemaVersion != 1 || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion != 2 || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
+        Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
+            "function definition inventory");
         if (manifest.ProtectedTables.Intersect(manifest.ExcludedTables, StringComparer.Ordinal).Any())
             throw new InvalidOperationException("Protected and excluded inventories overlap.");
         var mapped = database.Model.GetEntityTypes().Select(Table).Distinct(StringComparer.Ordinal).ToArray();
@@ -146,21 +151,26 @@ public static class RlsSecurityManifestVerifier
         Equal(schemas, owners.Select(row => row[0]), "schema inventory");
         if (owners.Any(row => row[1] != manifest.OwnerRole)) throw new InvalidOperationException("Schema owner drifted.");
         var databaseAcls = await RowsAsync(connection, """
-            select coalesce(grantee.rolname,'PUBLIC'),x.privilege_type
+            select coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
             from pg_database d cross join lateral aclexplode(coalesce(d.datacl,acldefault('d',d.datdba))) x
             left join pg_roles grantee on grantee.oid=x.grantee left join pg_roles owner on owner.oid=d.datdba
+            -- Owners have inherent privileges and their identity is verified separately.
             where d.datname=current_database() and x.grantee<>d.datdba order by 1,2
             """, cancellationToken);
-        Equal(new[] { $"{manifest.MigratorRole}|CONNECT", $"{manifest.RuntimeRole}|CONNECT" },
+        Equal(new[] { $"{manifest.MigratorRole}|CONNECT|false", $"{manifest.RuntimeRole}|CONNECT|false" },
             databaseAcls.Select(row => string.Join('|', row)), "database ACLs");
         var schemaAcls = await RowsAsync(connection, """
-            select n.nspname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type
+            select n.nspname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
             from pg_namespace n cross join lateral aclexplode(coalesce(n.nspacl,acldefault('n',n.nspowner))) x
             left join pg_roles grantee on grantee.oid=x.grantee
+            -- Owners have inherent privileges and their identity is verified separately.
             where n.nspname=any(@schemas) and x.grantee<>n.nspowner order by 1,2,3
             """, cancellationToken, ("schemas", schemas));
-        var expected = new[] { $"public|{manifest.MigratorRole}|USAGE", $"public|{manifest.RuntimeRole}|USAGE" }
-            .Concat(manifest.ContextFunction is null ? [] : new[] { $"zeka|{manifest.RuntimeRole}|USAGE" });
+        var expected = new[]
+            { $"public|{manifest.MigratorRole}|USAGE|false", $"public|{manifest.RuntimeRole}|USAGE|false" }
+            .Concat(manifest.ContextFunction is null
+                ? []
+                : new[] { $"zeka|{manifest.RuntimeRole}|USAGE|false" });
         Equal(expected, schemaAcls.Select(row => string.Join('|', row)), "schema ACLs");
     }
 
@@ -168,16 +178,16 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken)
     {
         var rows = await RowsAsync(connection, """
-            select c.relname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type
+            select c.relname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
             from pg_class c join pg_namespace n on n.oid=c.relnamespace
             cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) x
             left join pg_roles grantee on grantee.oid=x.grantee
             where n.nspname='public' and c.relkind in ('r','p')
-              and coalesce(grantee.rolname,'PUBLIC')=any(@roles) order by c.relname,2,3
-            """, cancellationToken, ("roles", new[] { manifest.RuntimeRole, manifest.MigratorRole, "PUBLIC" }));
+              and x.grantee<>c.relowner order by c.relname,2,3,4
+            """, cancellationToken);
         var expected = manifest.ProtectedTables.Concat(manifest.ExcludedTables)
-            .SelectMany(table => Dml.Select(privilege => $"{table}|{manifest.RuntimeRole}|{privilege}"))
-            .Concat(Dml.Select(privilege => $"__EFMigrationsHistory|{manifest.MigratorRole}|{privilege}"));
+            .SelectMany(table => Dml.Select(privilege => $"{table}|{manifest.RuntimeRole}|{privilege}|false"))
+            .Concat(Dml.Select(privilege => $"__EFMigrationsHistory|{manifest.MigratorRole}|{privilege}|false"));
         Equal(expected, rows.Select(row => string.Join('|', row)), "table ACLs");
     }
 
@@ -191,15 +201,15 @@ public static class RlsSecurityManifestVerifier
         Equal(manifest.Sequences, rows.Select(row => row[0]), "sequence inventory");
         if (rows.Any(row => row[1] != manifest.OwnerRole)) throw new InvalidOperationException("Sequence owner drifted.");
         var acls = await RowsAsync(connection, """
-            select c.relname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type
+            select c.relname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
             from pg_class c join pg_namespace n on n.oid=c.relnamespace
             cross join lateral aclexplode(coalesce(c.relacl,acldefault('S',c.relowner))) x
             left join pg_roles grantee on grantee.oid=x.grantee
             where n.nspname='public' and c.relkind='S'
-              and coalesce(grantee.rolname,'PUBLIC')=any(@roles) order by c.relname,2,3
-            """, cancellationToken, ("roles", new[] { manifest.RuntimeRole, "PUBLIC" }));
+              and x.grantee<>c.relowner order by c.relname,2,3,4
+            """, cancellationToken);
         var expected = manifest.Sequences.SelectMany(sequence => new[]
-            { $"{sequence}|{manifest.RuntimeRole}|SELECT", $"{sequence}|{manifest.RuntimeRole}|USAGE" });
+            { $"{sequence}|{manifest.RuntimeRole}|SELECT|false", $"{sequence}|{manifest.RuntimeRole}|USAGE|false" });
         Equal(expected, acls.Select(row => string.Join('|', row)), "sequence ACLs");
     }
 
@@ -209,7 +219,8 @@ public static class RlsSecurityManifestVerifier
         var schemas = manifest.ContextFunction is null ? new[] { "public" } : new[] { "public", "zeka" };
         var rows = await RowsAsync(connection, """
             select n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',owner.rolname,
-              l.lanname,p.prosecdef::text,p.proleakproof::text,p.provolatile::text,coalesce(array_to_string(p.proconfig,','),'')
+              l.lanname,p.prosecdef::text,p.proleakproof::text,p.provolatile::text,
+              coalesce(array_to_string(p.proconfig,','),''),pg_get_functiondef(p.oid)
             from pg_proc p join pg_namespace n on n.oid=p.pronamespace join pg_roles owner on owner.oid=p.proowner
             join pg_language l on l.oid=p.prolang where n.nspname=any(@schemas) order by 1
             """, cancellationToken, ("schemas", schemas));
@@ -222,16 +233,23 @@ public static class RlsSecurityManifestVerifier
             if (context[2] != "plpgsql" || context[5] != "v" || context[6] != "search_path=pg_catalog")
                 throw new InvalidOperationException("Context function definition drifted.");
         }
+        foreach (var row in rows)
+        {
+            var actual = DefinitionSha256(row[7]);
+            var expectedDefinition = manifest.RuntimeFunctionDefinitionSha256[row[0]];
+            if (!StringComparer.OrdinalIgnoreCase.Equals(expectedDefinition, actual))
+                throw new InvalidOperationException(
+                    $"Function body drifted for {row[0]}. Expected {expectedDefinition}, actual {actual}.");
+        }
         var acls = await RowsAsync(connection, """
             select n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',
-              coalesce(grantee.rolname,'PUBLIC'),x.privilege_type
+              coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
             from pg_proc p join pg_namespace n on n.oid=p.pronamespace
             cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) x
             left join pg_roles grantee on grantee.oid=x.grantee
-            where n.nspname=any(@schemas) and coalesce(grantee.rolname,'PUBLIC')=any(@roles) order by 1,2,3
-            """, cancellationToken, ("schemas", schemas),
-            ("roles", new[] { manifest.RuntimeRole, "PUBLIC" }));
-        Equal(manifest.RuntimeFunctions.Select(function => $"{function}|{manifest.RuntimeRole}|EXECUTE"),
+            where n.nspname=any(@schemas) and x.grantee<>p.proowner order by 1,2,3,4
+            """, cancellationToken, ("schemas", schemas));
+        Equal(manifest.RuntimeFunctions.Select(function => $"{function}|{manifest.RuntimeRole}|EXECUTE|false"),
             acls.Select(row => string.Join('|', row)), "function ACLs");
     }
 
@@ -239,16 +257,21 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken)
     {
         var rows = await RowsAsync(connection, """
-            select d.defaclobjtype::text,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type
+            select owner.rolname,n.nspname,d.defaclobjtype::text,coalesce(grantee.rolname,'PUBLIC'),
+              x.privilege_type,x.is_grantable::text
             from pg_default_acl d join pg_roles owner on owner.oid=d.defaclrole
             left join pg_namespace n on n.oid=d.defaclnamespace cross join lateral aclexplode(d.defaclacl) x
             left join pg_roles grantee on grantee.oid=x.grantee
             where owner.rolname=@owner and n.nspname='public'
-              and coalesce(grantee.rolname,'PUBLIC')=any(@roles) order by 1,2,3
-            """, cancellationToken, ("owner", manifest.OwnerRole),
-            ("roles", new[] { manifest.RuntimeRole, "PUBLIC" }));
-        var expected = Dml.Select(privilege => $"r|{manifest.RuntimeRole}|{privilege}")
-            .Concat(new[] { $"S|{manifest.RuntimeRole}|SELECT", $"S|{manifest.RuntimeRole}|USAGE" });
+              and x.grantee<>d.defaclrole order by 1,2,3,4,5,6
+            """, cancellationToken, ("owner", manifest.OwnerRole));
+        var prefix = $"{manifest.OwnerRole}|public|";
+        var expected = Dml.Select(privilege => $"{prefix}r|{manifest.RuntimeRole}|{privilege}|false")
+            .Concat(new[]
+            {
+                $"{prefix}S|{manifest.RuntimeRole}|SELECT|false",
+                $"{prefix}S|{manifest.RuntimeRole}|USAGE|false"
+            });
         Equal(expected, rows.Select(row => string.Join('|', row)), "default privileges");
     }
 
@@ -274,6 +297,14 @@ public static class RlsSecurityManifestVerifier
     private static string Normalize(string value) => string.Concat(value.Where(character =>
         !char.IsWhiteSpace(character) && character is not '(' and not ')')).Replace("\"", string.Empty,
         StringComparison.Ordinal);
+
+    private static string DefinitionSha256(string definition)
+    {
+        // pg_get_functiondef appends a presentation newline. Preserve all body whitespace: SQL function
+        // literals can contain NEL and Unicode line separators whose normalization would change semantics.
+        var canonical = definition.TrimEnd('\r', '\n');
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    }
 
     private static void Equal(IEnumerable<string> expected, IEnumerable<string> actual, string category)
     {

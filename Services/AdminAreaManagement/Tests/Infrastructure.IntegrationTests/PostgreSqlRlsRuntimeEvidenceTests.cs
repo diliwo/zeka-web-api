@@ -6,11 +6,13 @@ using AdminAreaManagement.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
+using Xunit.Abstractions;
 using Zeka.Extensions.MultiTenancy.Abstractions;
 using Zeka.PersistenceSecurity;
 
@@ -41,6 +43,8 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
         Username = "zeka_adminarea_migrator",
         Password = MigratorPassword
     }.ConnectionString;
+
+    public string DatabaseName => new NpgsqlConnectionStringBuilder(postgres.GetConnectionString()).Database!;
 
     public async Task InitializeAsync()
     {
@@ -115,7 +119,7 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
     }
 }
 
-public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDatabase database)
+public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDatabase database, ITestOutputHelper output)
     : IClassFixture<PostgreSqlRlsRuntimeDatabase>
 {
     private static readonly string[] ProtectedTables =
@@ -248,7 +252,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     }
 
     [Fact]
-    public async Task Pool_size_one_reuses_session_without_context_after_commit_rollback_and_exception_then_allows_b()
+    public async Task Pool_size_one_reuses_session_without_context_after_commit_and_rollback_then_allows_b()
     {
         await using var source = NpgsqlDataSource.Create(database.SingleConnectionRuntimeString);
         var a = Guid.NewGuid();
@@ -269,15 +273,6 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
             await using var transaction = await connection.BeginTransactionAsync();
             await SetTenantAsync(connection, transaction, a);
             await transaction.RollbackAsync();
-        }
-
-        await using (var connection = await source.OpenConnectionAsync())
-        {
-            Assert.Equal(pid, await BackendPidAsync(connection));
-            await AssertInvalidContextAsync(connection);
-            await using var transaction = await connection.BeginTransactionAsync();
-            await SetTenantAsync(connection, transaction, a);
-            await transaction.RollbackAsync(); // application exception cleanup
         }
 
         await using (var connection = await source.OpenConnectionAsync())
@@ -320,53 +315,97 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         }));
     }
 
-    [Fact]
-    public async Task Cancellation_never_leaves_a_reused_or_replacement_session_with_tenant_context()
+    [Theory]
+    [InlineData("application-exception")]
+    [InlineData("cancellation")]
+    [InlineData("command-timeout")]
+    public async Task Common_executor_failure_paths_prove_session_disposition_no_context_and_b_isolation(
+        string failurePath)
     {
-        await using var source = NpgsqlDataSource.Create(database.SingleConnectionRuntimeString);
-        int firstPid;
-        await using (var connection = await source.OpenConnectionAsync())
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var suffix = failurePath[..7];
+        await SeedTeamAsync(a, suffix);
+        await SeedTeamAsync(b, suffix);
+        await using var provider = CreateRuntimeProvider(database.SingleConnectionRuntimeString);
+        await using var aScope = provider.CreateAsyncScope();
+        EstablishTenant(aScope, a);
+        var aContext = aScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var aExecutor = aScope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
+        var aPids = new List<int>();
+        using var cancellation = new CancellationTokenSource();
+
+        async Task ExecuteFailingAttemptAsync()
         {
-            firstPid = await BackendPidAsync(connection);
-            await using var transaction = await connection.BeginTransactionAsync();
-            await SetTenantAsync(connection, transaction, Guid.NewGuid());
-            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await aExecutor.ExecuteAsync(async token =>
             {
-                await using var command = new NpgsqlCommand("SELECT pg_sleep(10)", connection, transaction);
-                await command.ExecuteNonQueryAsync(cancellation.Token);
-            });
-            await transaction.RollbackAsync(CancellationToken.None);
+                Assert.Equal([a], await aContext.Teams
+                    .Select(team => team.OrganisationId).Distinct().ToArrayAsync(token));
+                var connection = Assert.IsType<NpgsqlConnection>(aContext.Database.GetDbConnection());
+                aPids.Add(connection.ProcessID);
+                if (failurePath == "application-exception") throw new SyntheticApplicationException();
+                if (failurePath == "cancellation") cancellation.CancelAfter(TimeSpan.FromMilliseconds(100));
+                await using var command = new NpgsqlCommand(
+                    failurePath == "command-timeout" ? "SELECT pg_sleep(5)" : "SELECT pg_sleep(10)",
+                    connection,
+                    Assert.IsType<NpgsqlTransaction>(aContext.Database.CurrentTransaction!.GetDbTransaction()))
+                { CommandTimeout = failurePath == "command-timeout" ? 1 : 30 };
+                await command.ExecuteNonQueryAsync(token);
+                return true;
+            }, failurePath == "cancellation" ? cancellation.Token : CancellationToken.None);
         }
 
-        await using var next = await source.OpenConnectionAsync();
-        Assert.True(await BackendPidAsync(next) > 0); // cancellation may preserve or replace the provider session
-        await AssertInvalidContextAsync(next);
-    }
-
-    [Fact]
-    public async Task Command_timeout_never_leaves_a_reused_or_replacement_session_with_tenant_context()
-    {
-        await using var source = NpgsqlDataSource.Create(database.SingleConnectionRuntimeString);
-        int firstPid;
-        await using (var connection = await source.OpenConnectionAsync())
+        if (failurePath == "application-exception")
+            await Assert.ThrowsAsync<SyntheticApplicationException>(ExecuteFailingAttemptAsync);
+        else if (failurePath == "cancellation")
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(ExecuteFailingAttemptAsync);
+        else
         {
-            firstPid = await BackendPidAsync(connection);
-            await using var transaction = await connection.BeginTransactionAsync();
-            await SetTenantAsync(connection, transaction, Guid.NewGuid());
-            var timeout = await Assert.ThrowsAnyAsync<NpgsqlException>(async () =>
-            {
-                await using var command = new NpgsqlCommand("SELECT pg_sleep(5)", connection, transaction)
-                { CommandTimeout = 1 };
-                await command.ExecuteNonQueryAsync();
-            });
+            var retryLimit = await Assert.ThrowsAsync<RetryLimitExceededException>(ExecuteFailingAttemptAsync);
+            var timeout = Assert.IsType<NpgsqlException>(retryLimit.InnerException);
             Assert.True(timeout.IsTransient || timeout.InnerException is TimeoutException);
-            await transaction.RollbackAsync(CancellationToken.None);
         }
+        Assert.NotEmpty(aPids);
+        Assert.All(aPids, pid => Assert.True(pid > 0));
+        var aPid = aPids[^1];
 
-        await using var next = await source.OpenConnectionAsync();
-        Assert.True(firstPid > 0 && await BackendPidAsync(next) > 0);
-        await AssertInvalidContextAsync(next);
+        var nextConnection = Assert.IsType<NpgsqlConnection>(aContext.Database.GetDbConnection());
+        await nextConnection.OpenAsync();
+        var nextPid = nextConnection.ProcessID;
+        Assert.True(nextPid > 0);
+        if (failurePath == "application-exception") Assert.Equal(aPid, nextPid);
+        output.WriteLine("{0}: Organisation A attempt PIDs [{1}]; next PID {2}; disposition {3}.",
+            failurePath, string.Join(", ", aPids), nextPid,
+            aPid == nextPid ? "same-session reuse" : "physical-session replacement");
+        await AssertInvalidContextAsync(nextConnection);
+        await nextConnection.CloseAsync();
+
+        await using var bScope = provider.CreateAsyncScope();
+        EstablishTenant(bScope, b);
+        var bContext = bScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var bExecutor = bScope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
+        var observed = await bExecutor.ExecuteAsync(async token =>
+        {
+            var organisations = await bContext.Teams
+                .Select(team => team.OrganisationId).Distinct().ToArrayAsync(token);
+            Assert.Equal(nextPid, Assert.IsType<NpgsqlConnection>(bContext.Database.GetDbConnection()).ProcessID);
+            return organisations;
+        }, CancellationToken.None);
+        Assert.Equal([b], observed);
+
+        var mismatch = await Assert.ThrowsAsync<PostgresException>(() => bExecutor.ExecuteAsync(async token =>
+        {
+            var connection = Assert.IsType<NpgsqlConnection>(bContext.Database.GetDbConnection());
+            await using var command = new NpgsqlCommand("""
+                INSERT INTO "Teams" ("Name", "Acronym", "CreatedBy", "Created", "LastModifiedBy", "Softdelete", "OrganisationId")
+                VALUES ('mismatch', 'MIS', 'test', now(), 'test', false, @organisation)
+                """, connection,
+                Assert.IsType<NpgsqlTransaction>(bContext.Database.CurrentTransaction!.GetDbTransaction()));
+            command.Parameters.AddWithValue("organisation", a);
+            await command.ExecuteNonQueryAsync(token);
+            return true;
+        }, CancellationToken.None));
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, mismatch.SqlState);
     }
 
     [Fact]
@@ -443,6 +482,26 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     public async Task Catalog_verifier_fails_closed_for_each_managed_drift_category()
     {
         var policy = "rls_teams_organisation";
+        var contextFunction = """
+            CREATE OR REPLACE FUNCTION zeka.current_organisation_id() RETURNS uuid
+            LANGUAGE plpgsql SECURITY INVOKER
+            SET search_path = pg_catalog
+            AS $function$
+            DECLARE raw text; parsed uuid;
+            BEGIN
+              raw := current_setting('zeka.organisation_id', true);
+              IF raw IS NULL OR raw = '' THEN RAISE EXCEPTION 'Tenant database context is invalid.'; END IF;
+              BEGIN parsed := raw::uuid;
+              EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'Tenant database context is invalid.';
+              END;
+              IF raw <> lower(parsed::text) OR parsed = '00000000-0000-0000-0000-000000000000'::uuid THEN
+                RAISE EXCEPTION 'Tenant database context is invalid.';
+              END IF;
+              RETURN parsed;
+            END $function$;
+            """;
+        using var commandBuilder = new NpgsqlCommandBuilder();
+        var databaseIdentifier = commandBuilder.QuoteIdentifier(database.DatabaseName);
         var expectedPolicy = $"""
             CREATE POLICY {policy} ON "Teams" FOR ALL TO zeka_adminarea_runtime
               USING ("OrganisationId" = zeka.current_organisation_id())
@@ -450,8 +509,32 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
             """;
         var cases = new (string Mutation, string Restore)[]
         {
+            ($"GRANT CONNECT ON DATABASE {databaseIdentifier} TO zeka_adminarea_runtime WITH GRANT OPTION",
+                $"REVOKE GRANT OPTION FOR CONNECT ON DATABASE {databaseIdentifier} FROM zeka_adminarea_runtime"),
+            ("GRANT USAGE ON SCHEMA public TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "REVOKE GRANT OPTION FOR USAGE ON SCHEMA public FROM zeka_adminarea_runtime"),
             ("GRANT TRUNCATE ON TABLE \"Teams\" TO zeka_adminarea_runtime",
                 "REVOKE TRUNCATE ON TABLE \"Teams\" FROM zeka_adminarea_runtime"),
+            ("GRANT SELECT ON TABLE \"Teams\" TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "REVOKE GRANT OPTION FOR SELECT ON TABLE \"Teams\" FROM zeka_adminarea_runtime"),
+            ("GRANT USAGE ON SEQUENCE \"Teams_Id_seq\" TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "REVOKE GRANT OPTION FOR USAGE ON SEQUENCE \"Teams_Id_seq\" FROM zeka_adminarea_runtime"),
+            ("GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION zeka.current_organisation_id() FROM zeka_adminarea_runtime"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public GRANT SELECT ON TABLES TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE GRANT OPTION FOR SELECT ON TABLES FROM zeka_adminarea_runtime"),
+            ($"CREATE ROLE zeka_issue45_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; GRANT CONNECT ON DATABASE {databaseIdentifier} TO zeka_issue45_unexpected",
+                $"REVOKE CONNECT ON DATABASE {databaseIdentifier} FROM zeka_issue45_unexpected; DROP ROLE zeka_issue45_unexpected"),
+            ("CREATE ROLE zeka_issue45_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; GRANT USAGE ON SCHEMA public TO zeka_issue45_unexpected",
+                "REVOKE USAGE ON SCHEMA public FROM zeka_issue45_unexpected; DROP ROLE zeka_issue45_unexpected"),
+            ("CREATE ROLE zeka_issue45_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; GRANT SELECT ON TABLE \"Teams\" TO zeka_issue45_unexpected",
+                "REVOKE SELECT ON TABLE \"Teams\" FROM zeka_issue45_unexpected; DROP ROLE zeka_issue45_unexpected"),
+            ("CREATE ROLE zeka_issue45_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; GRANT USAGE ON SEQUENCE \"Teams_Id_seq\" TO zeka_issue45_unexpected",
+                "REVOKE USAGE ON SEQUENCE \"Teams_Id_seq\" FROM zeka_issue45_unexpected; DROP ROLE zeka_issue45_unexpected"),
+            ("CREATE ROLE zeka_issue45_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_issue45_unexpected",
+                "REVOKE EXECUTE ON FUNCTION zeka.current_organisation_id() FROM zeka_issue45_unexpected; DROP ROLE zeka_issue45_unexpected"),
+            ("CREATE ROLE zeka_issue45_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public GRANT SELECT ON TABLES TO zeka_issue45_unexpected",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE SELECT ON TABLES FROM zeka_issue45_unexpected; DROP ROLE zeka_issue45_unexpected"),
             ("REVOKE SELECT ON TABLE \"Teams\" FROM zeka_adminarea_runtime",
                 "GRANT SELECT ON TABLE \"Teams\" TO zeka_adminarea_runtime"),
             ("GRANT zeka_adminarea_owner TO zeka_adminarea_runtime WITH INHERIT FALSE, SET TRUE, ADMIN FALSE",
@@ -469,6 +552,15 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
                 $"DROP POLICY {policy} ON \"Teams\"; {expectedPolicy}"),
             ("ALTER FUNCTION zeka.current_organisation_id() SECURITY DEFINER",
                 "ALTER FUNCTION zeka.current_organisation_id() SECURITY INVOKER"),
+            ("""
+                CREATE OR REPLACE FUNCTION zeka.current_organisation_id() RETURNS uuid
+                LANGUAGE plpgsql SECURITY INVOKER
+                SET search_path = pg_catalog
+                AS $function$
+                BEGIN
+                  RETURN '11111111-1111-1111-1111-111111111111'::uuid;
+                END $function$;
+                """, contextFunction),
             ("GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO PUBLIC",
                 "REVOKE EXECUTE ON FUNCTION zeka.current_organisation_id() FROM PUBLIC")
         };
@@ -497,6 +589,23 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
 
     private Task SeedTeamAsync(Guid organisation, string suffix) =>
         database.SeedTeamAsAdministratorAsync(organisation, suffix);
+
+    private static ServiceProvider CreateRuntimeProvider(string connectionString)
+    {
+        var configuration = new ConfigurationManager();
+        configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:ClientApiConnection"] = connectionString
+        });
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
+        return services.BuildServiceProvider();
+    }
+
+    private static void EstablishTenant(AsyncServiceScope scope, Guid organisation) =>
+        scope.ServiceProvider.GetRequiredService<ITenantContextInitializer>()
+            .Establish(new TenantContext(new TenantId(organisation), "test-subject"));
 
     private static async Task SetTenantAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid organisation)
     {
@@ -547,4 +656,6 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         Assert.Equal(PostgresErrorCodes.RaiseException, exception.SqlState);
         Assert.DoesNotContain("organisation", exception.MessageText, StringComparison.OrdinalIgnoreCase);
     }
+
+    private sealed class SyntheticApplicationException : Exception;
 }

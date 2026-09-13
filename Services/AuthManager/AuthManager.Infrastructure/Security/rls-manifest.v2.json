@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "service": "AuthManagement",
   "modelContext": "AuthManager.Infrastructure.Persistence.AuthDbContext",
   "migrationId": "20260912180002_PostgreSqlRuntimeRoles",
@@ -10,6 +10,7 @@
   "excludedTables": ["AspNetRoleClaims", "AspNetRoles", "AspNetUserClaims", "AspNetUserLogins", "AspNetUserRoles", "AspNetUserTokens", "AspNetUsers", "AuditEntries", "IdempotencyRecords", "OrganisationMemberships", "Organisations", "OutboxMessages", "PermissionSets"],
   "sequences": ["AspNetRoleClaims_Id_seq", "AspNetUserClaims_Id_seq"],
   "runtimeFunctions": [],
+  "runtimeFunctionDefinitionSha256": {},
   "policyPrefix": "rls_",
   "contextFunction": null
 }

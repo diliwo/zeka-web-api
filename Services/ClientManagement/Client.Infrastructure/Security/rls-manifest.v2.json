@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "service": "ClientManagement",
   "modelContext": "ClientManagement.Infrastructure.Persistence.DeploymentDbContext",
   "migrationId": "20260912180001_PostgreSqlRlsAndRuntimeRoles",
@@ -10,6 +10,9 @@
   "excludedTables": ["Languages", "MonitoringActions", "NatureOfContract", "Profession", "School", "Training", "TrainingField", "TrainingType"],
   "sequences": ["Assessments_AssessmentId_seq", "Clients_Id_seq", "Languages_LanguageId_seq", "MonitoringActions_ActionId_seq", "MonitoringReports_Id_seq", "NatureOfContract_NatureOfContractId_seq", "Profession_Id_seq", "ProfessionalAssessments_Id_seq", "ProfessionnalExperience_ProfessionnalExperienceId_seq", "SchoolRegistrations_SchoolRegistrationId_seq", "School_Id_seq", "SocialCases_SchoolRegistrationId_seq", "SocialWorkers_SocialWorkerId_seq", "TrainingField_Id_seq", "TrainingType_Id_seq", "Training_Id_seq"],
   "runtimeFunctions": ["zeka.current_organisation_id()"],
+  "runtimeFunctionDefinitionSha256": {
+    "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b"
+  },
   "policyPrefix": "rls_",
   "contextFunction": "zeka.current_organisation_id"
 }
