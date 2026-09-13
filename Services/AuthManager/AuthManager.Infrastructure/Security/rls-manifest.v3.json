@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 3,
+  "service": "AuthManagement",
+  "modelContext": "AuthManager.Infrastructure.Persistence.AuthDbContext",
+  "migrationId": "20260912180002_PostgreSqlRuntimeRoles",
+  "ownerRole": "zeka_auth_owner",
+  "migratorRole": "zeka_auth_migrator",
+  "runtimeRole": "zeka_auth_runtime",
+  "protectedTables": [],
+  "excludedTables": ["AspNetRoleClaims", "AspNetRoles", "AspNetUserClaims", "AspNetUserLogins", "AspNetUserRoles", "AspNetUserTokens", "AspNetUsers", "AuditEntries", "IdempotencyRecords", "OrganisationMemberships", "Organisations", "OutboxMessages", "PermissionSets"],
+  "sequences": ["AspNetRoleClaims_Id_seq", "AspNetUserClaims_Id_seq"],
+  "runtimeFunctions": [],
+  "runtimeFunctionDefinitionSha256": {},
+  "defaultPrivileges": [
+    { "owner": "zeka_auth_owner", "objectType": "FUNCTION", "scope": "GLOBAL", "grants": [] },
+    { "owner": "zeka_auth_owner", "objectType": "RELATION", "scope": "GLOBAL", "grants": [] },
+    { "owner": "zeka_auth_owner", "objectType": "SEQUENCE", "scope": "GLOBAL", "grants": [] },
+    { "owner": "zeka_auth_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "public", "grants": [] },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "RELATION",
+      "scope": "SCHEMA",
+      "schema": "public",
+      "grants": [
+        { "grantee": "zeka_auth_runtime", "privilege": "DELETE", "grantable": false },
+        { "grantee": "zeka_auth_runtime", "privilege": "INSERT", "grantable": false },
+        { "grantee": "zeka_auth_runtime", "privilege": "SELECT", "grantable": false },
+        { "grantee": "zeka_auth_runtime", "privilege": "UPDATE", "grantable": false }
+      ]
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "SEQUENCE",
+      "scope": "SCHEMA",
+      "schema": "public",
+      "grants": [
+        { "grantee": "zeka_auth_runtime", "privilege": "SELECT", "grantable": false },
+        { "grantee": "zeka_auth_runtime", "privilege": "USAGE", "grantable": false }
+      ]
+    }
+  ],
+  "policyPrefix": "rls_",
+  "contextFunction": null
+}

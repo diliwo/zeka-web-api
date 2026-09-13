@@ -521,6 +521,8 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
                 "REVOKE GRANT OPTION FOR USAGE ON SEQUENCE \"Teams_Id_seq\" FROM zeka_adminarea_runtime"),
             ("GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_adminarea_runtime WITH GRANT OPTION",
                 "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION zeka.current_organisation_id() FROM zeka_adminarea_runtime"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner GRANT SELECT ON TABLES TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE SELECT ON TABLES FROM zeka_adminarea_runtime"),
             ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public GRANT SELECT ON TABLES TO zeka_adminarea_runtime WITH GRANT OPTION",
                 "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE GRANT OPTION FOR SELECT ON TABLES FROM zeka_adminarea_runtime"),
             ($"CREATE ROLE zeka_issue45_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; GRANT CONNECT ON DATABASE {databaseIdentifier} TO zeka_issue45_unexpected",

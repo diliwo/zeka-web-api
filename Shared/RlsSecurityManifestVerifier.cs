@@ -8,11 +8,16 @@ using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Zeka.PersistenceSecurity;
 
+public sealed record DefaultPrivilegeGrant(string Grantee, string Privilege, bool Grantable);
+
+public sealed record DefaultPrivilegeState(string Owner, string ObjectType, string Scope, string? Schema,
+    DefaultPrivilegeGrant[] Grants);
+
 public sealed record RlsSecurityManifest(int SchemaVersion, string Service, string ModelContext,
     string MigrationId, string OwnerRole, string MigratorRole, string RuntimeRole,
     string[] ProtectedTables, string[] ExcludedTables, string[] Sequences,
     string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
-    string PolicyPrefix, string? ContextFunction);
+    DefaultPrivilegeState[] DefaultPrivileges, string PolicyPrefix, string? ContextFunction);
 
 /// <summary>Deployment-only bidirectional comparison of the versioned model and effective PostgreSQL state.</summary>
 public static class RlsSecurityManifestVerifier
@@ -22,7 +27,7 @@ public static class RlsSecurityManifestVerifier
     public static RlsSecurityManifest Load(Assembly assembly)
     {
         var name = assembly.GetManifestResourceNames().Single(x =>
-            x.EndsWith("rls-manifest.v2.json", StringComparison.Ordinal));
+            x.EndsWith("rls-manifest.v3.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -37,10 +42,11 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken = default)
     {
         var manifest = Load(manifestAssembly);
-        if (manifest.SchemaVersion != 2 || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion != 3 || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
             "function definition inventory");
+        ValidateDefaultPrivilegeManifest(manifest);
         if (manifest.ProtectedTables.Intersect(manifest.ExcludedTables, StringComparer.Ordinal).Any())
             throw new InvalidOperationException("Protected and excluded inventories overlap.");
         var mapped = database.Model.GetEntityTypes().Select(Table).Distinct(StringComparer.Ordinal).ToArray();
@@ -257,23 +263,65 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken)
     {
         var rows = await RowsAsync(connection, """
-            select owner.rolname,n.nspname,d.defaclobjtype::text,coalesce(grantee.rolname,'PUBLIC'),
-              x.privilege_type,x.is_grantable::text
-            from pg_default_acl d join pg_roles owner on owner.oid=d.defaclrole
-            left join pg_namespace n on n.oid=d.defaclnamespace cross join lateral aclexplode(d.defaclacl) x
-            left join pg_roles grantee on grantee.oid=x.grantee
-            where owner.rolname=@owner and n.nspname='public'
-              and x.grantee<>d.defaclrole order by 1,2,3,4,5,6
+            with managed_types(code,name) as (
+              values ('r'::"char",'RELATION'),('S'::"char",'SEQUENCE'),('f'::"char",'FUNCTION')
+            ), managed_owner as (
+              select oid,rolname from pg_roles where rolname=@owner
+            ), effective_global as (
+              select owner.rolname,'GLOBAL' scope,type.name object_type,
+                coalesce(grantee.rolname,'PUBLIC') grantee,x.privilege_type,x.is_grantable::text grantable
+              from managed_owner owner cross join managed_types type
+              left join pg_default_acl d on d.defaclrole=owner.oid and d.defaclnamespace=0
+                and d.defaclobjtype=type.code
+              cross join lateral aclexplode(coalesce(d.defaclacl,acldefault(type.code,owner.oid))) x
+              left join pg_roles grantee on grantee.oid=x.grantee
+              -- Owners have inherent privileges and their identity is verified separately.
+              where x.grantee<>owner.oid
+            ), schema_additions as (
+              select owner.rolname,'SCHEMA '||n.nspname scope,type.name object_type,
+                coalesce(grantee.rolname,'PUBLIC') grantee,x.privilege_type,x.is_grantable::text grantable
+              from pg_default_acl d join managed_owner owner on owner.oid=d.defaclrole
+              join pg_namespace n on n.oid=d.defaclnamespace
+              join managed_types type on type.code=d.defaclobjtype
+              cross join lateral aclexplode(d.defaclacl) x
+              left join pg_roles grantee on grantee.oid=x.grantee
+              -- Schema ACLs are additions to global defaults; compare them independently.
+              where n.nspname='public' and x.grantee<>owner.oid
+            )
+            select * from effective_global union all select * from schema_additions
+            order by 1,2,3,4,5,6
             """, cancellationToken, ("owner", manifest.OwnerRole));
-        var prefix = $"{manifest.OwnerRole}|public|";
-        var expected = Dml.Select(privilege => $"{prefix}r|{manifest.RuntimeRole}|{privilege}|false")
-            .Concat(new[]
-            {
-                $"{prefix}S|{manifest.RuntimeRole}|SELECT|false",
-                $"{prefix}S|{manifest.RuntimeRole}|USAGE|false"
-            });
+        var expected = manifest.DefaultPrivileges.SelectMany(state => state.Grants.Select(grant =>
+            $"{state.Owner}|{DefaultPrivilegeScope(state)}|{state.ObjectType}|{grant.Grantee}|{grant.Privilege}|{grant.Grantable.ToString().ToLowerInvariant()}"));
         Equal(expected, rows.Select(row => string.Join('|', row)), "default privileges");
     }
+
+    private static void ValidateDefaultPrivilegeManifest(RlsSecurityManifest manifest)
+    {
+        var expectedScopes = new[] { "GLOBAL", "SCHEMA public" }.SelectMany(scope =>
+            new[] { "FUNCTION", "RELATION", "SEQUENCE" }.Select(type =>
+                $"{manifest.OwnerRole}|{scope}|{type}"));
+        Equal(expectedScopes, manifest.DefaultPrivileges.Select(state =>
+            $"{state.Owner}|{DefaultPrivilegeScope(state)}|{state.ObjectType}"),
+            "default privilege scope inventory");
+        foreach (var state in manifest.DefaultPrivileges)
+        {
+            if (state.Grants.Any(grant => grant.Grantee == manifest.OwnerRole))
+                throw new InvalidOperationException("Default privilege owner grants must use the reviewed owner exception.");
+            Equal(state.Grants.Select(grant =>
+                    $"{grant.Grantee}|{grant.Privilege}|{grant.Grantable}"),
+                state.Grants.Distinct().Select(grant =>
+                    $"{grant.Grantee}|{grant.Privilege}|{grant.Grantable}"),
+                "default privilege grants");
+        }
+    }
+
+    private static string DefaultPrivilegeScope(DefaultPrivilegeState state) => state.Scope switch
+    {
+        "GLOBAL" when state.Schema is null => "GLOBAL",
+        "SCHEMA" when state.Schema == "public" => "SCHEMA public",
+        _ => throw new InvalidOperationException("Default privilege scope is invalid.")
+    };
 
     private static string Table(IEntityType type)
     {

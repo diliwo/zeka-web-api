@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "service": "ClientManagement",
   "modelContext": "ClientManagement.Infrastructure.Persistence.DeploymentDbContext",
   "migrationId": "20260912180001_PostgreSqlRlsAndRuntimeRoles",
@@ -13,6 +13,34 @@
   "runtimeFunctionDefinitionSha256": {
     "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b"
   },
+  "defaultPrivileges": [
+    { "owner": "zeka_client_owner", "objectType": "FUNCTION", "scope": "GLOBAL", "grants": [] },
+    { "owner": "zeka_client_owner", "objectType": "RELATION", "scope": "GLOBAL", "grants": [] },
+    { "owner": "zeka_client_owner", "objectType": "SEQUENCE", "scope": "GLOBAL", "grants": [] },
+    { "owner": "zeka_client_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "public", "grants": [] },
+    {
+      "owner": "zeka_client_owner",
+      "objectType": "RELATION",
+      "scope": "SCHEMA",
+      "schema": "public",
+      "grants": [
+        { "grantee": "zeka_client_runtime", "privilege": "DELETE", "grantable": false },
+        { "grantee": "zeka_client_runtime", "privilege": "INSERT", "grantable": false },
+        { "grantee": "zeka_client_runtime", "privilege": "SELECT", "grantable": false },
+        { "grantee": "zeka_client_runtime", "privilege": "UPDATE", "grantable": false }
+      ]
+    },
+    {
+      "owner": "zeka_client_owner",
+      "objectType": "SEQUENCE",
+      "scope": "SCHEMA",
+      "schema": "public",
+      "grants": [
+        { "grantee": "zeka_client_runtime", "privilege": "SELECT", "grantable": false },
+        { "grantee": "zeka_client_runtime", "privilege": "USAGE", "grantable": false }
+      ]
+    }
+  ],
   "policyPrefix": "rls_",
   "contextFunction": "zeka.current_organisation_id"
 }
