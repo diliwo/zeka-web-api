@@ -100,6 +100,10 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
         await ExecuteAsync(connection, null, sql);
     }
 
+    public Task<(string Stdout, string Stderr)> GetLogsAsync(DateTime since, DateTime until,
+        CancellationToken cancellationToken = default) =>
+        postgres.GetLogsAsync(since, until, false, cancellationToken);
+
     private static async Task ExecuteAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql,
         params NpgsqlParameter[] parameters)
     {

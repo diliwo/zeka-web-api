@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using AdminAreaManagement.Application.Common.Authorization;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Zeka.PersistenceSecurity;
 
 
@@ -27,6 +28,7 @@ public static class DependencyInjection
         services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
 
         services.AddTenantEnforcement(configuration);
+        services.TryAddSingleton<ITenantAttemptOrderObserver, NullTenantAttemptOrderObserver>();
         var runtimeConnection = configuration.GetConnectionString("ClientApiConnection");
         if (!string.IsNullOrWhiteSpace(runtimeConnection))
             services.AddSingleton<IHostedService>(_ => new RuntimeDatabaseIdentityValidator(
