@@ -46,6 +46,8 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
 
     public string DatabaseName => new NpgsqlConnectionStringBuilder(postgres.GetConnectionString()).Database!;
 
+    public string AdministratorConnectionString => postgres.GetConnectionString();
+
     public async Task InitializeAsync()
     {
         await postgres.StartAsync();
@@ -589,6 +591,83 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     }
 
     [Fact]
+    public async Task Managed_schema_and_default_privilege_drift_fails_closed_and_full_restoration_returns_green()
+    {
+        var manifest = RlsSecurityManifestVerifier.Load(typeof(ApplicationDbContext).Assembly);
+        Assert.Equal(["public", "zeka"], manifest.ManagedSchemas);
+        Assert.Equal(13, manifest.DefaultPrivileges.Length);
+
+        await VerifyCatalogAsync();
+        await AssertOwnerCreatedZekaProbesHaveNoNonOwnerPrivilegesAsync();
+
+        await database.ExecuteAdministratorAsync(
+            "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka GRANT EXECUTE ON FUNCTIONS TO PUBLIC");
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+            await database.ExecuteAdministratorAsync("""
+                SET ROLE zeka_adminarea_owner;
+                CREATE FUNCTION zeka.issue45_default_function_probe() RETURNS integer LANGUAGE sql AS 'SELECT 1';
+                RESET ROLE;
+                """);
+            Assert.True(await ExecuteAdministratorScalarAsync<bool>("""
+                SELECT EXISTS (
+                  SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                  CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) x
+                  WHERE n.nspname='zeka' AND p.proname='issue45_default_function_probe'
+                    AND x.grantee=0 AND x.privilege_type='EXECUTE')
+                """));
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("""
+                ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka
+                  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+                DROP FUNCTION IF EXISTS zeka.issue45_default_function_probe();
+                """);
+        }
+        await VerifyCatalogAsync();
+
+        var cases = new (string Mutation, string Restore)[]
+        {
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner GRANT USAGE ON TYPES TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE USAGE ON TYPES FROM zeka_adminarea_runtime"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner GRANT USAGE ON SCHEMAS TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE USAGE ON SCHEMAS FROM zeka_adminarea_runtime"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka GRANT SELECT ON TABLES TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE SELECT ON TABLES FROM zeka_adminarea_runtime"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka GRANT USAGE ON SEQUENCES TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE USAGE ON SEQUENCES FROM zeka_adminarea_runtime"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka GRANT USAGE ON TYPES TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE USAGE ON TYPES FROM zeka_adminarea_runtime"),
+            ("CREATE ROLE zeka_issue45_default_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka GRANT USAGE ON TYPES TO zeka_issue45_default_unexpected",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE USAGE ON TYPES FROM zeka_issue45_default_unexpected; DROP ROLE zeka_issue45_default_unexpected"),
+            ("CREATE SCHEMA zeka_issue45_unreviewed AUTHORIZATION zeka_adminarea_owner",
+                "DROP SCHEMA zeka_issue45_unreviewed"),
+            ("ALTER SCHEMA zeka OWNER TO postgres",
+                "ALTER SCHEMA zeka OWNER TO zeka_adminarea_owner"),
+            ("CREATE SCHEMA zeka_issue45_acl_unreviewed AUTHORIZATION postgres; ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka_issue45_acl_unreviewed GRANT SELECT ON TABLES TO zeka_adminarea_runtime",
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka_issue45_acl_unreviewed REVOKE SELECT ON TABLES FROM zeka_adminarea_runtime; DROP SCHEMA zeka_issue45_acl_unreviewed"),
+            ("ALTER SCHEMA zeka RENAME TO zeka_issue45_missing",
+                "ALTER SCHEMA zeka_issue45_missing RENAME TO zeka")
+        };
+
+        foreach (var (mutation, restore) in cases)
+        {
+            await database.ExecuteAdministratorAsync(mutation);
+            try
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+            }
+            finally
+            {
+                await database.ExecuteAdministratorAsync(restore);
+            }
+            await VerifyCatalogAsync();
+        }
+    }
+
+    [Fact]
     public async Task Parameter_privilege_drift_fails_deployment_and_runtime_validation_and_full_revoke_restores_safety()
     {
         await VerifyCatalogAsync();
@@ -651,6 +730,59 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     private Task ValidateRuntimeIdentityAsync() =>
         new RuntimeDatabaseIdentityValidator(database.RuntimeConnectionString, "zeka_adminarea_runtime")
             .StartAsync(default);
+
+    private async Task AssertOwnerCreatedZekaProbesHaveNoNonOwnerPrivilegesAsync()
+    {
+        await database.ExecuteAdministratorAsync("""
+            SET ROLE zeka_adminarea_owner;
+            CREATE TABLE zeka.issue45_relation_probe (id integer);
+            CREATE SEQUENCE zeka.issue45_sequence_probe;
+            CREATE FUNCTION zeka.issue45_function_probe() RETURNS integer LANGUAGE sql AS 'SELECT 1';
+            CREATE TYPE zeka.issue45_type_probe AS ENUM ('value');
+            RESET ROLE;
+            """);
+        try
+        {
+            var count = await ExecuteAdministratorScalarAsync<long>("""
+                WITH object_acls AS (
+                  SELECT x.grantee,c.relowner owner
+                  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                  CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl,
+                    acldefault(CASE WHEN c.relkind='S' THEN 'S'::"char" ELSE 'r'::"char" END,c.relowner))) x
+                  WHERE n.nspname='zeka' AND c.relname IN ('issue45_relation_probe','issue45_sequence_probe')
+                  UNION ALL
+                  SELECT x.grantee,p.proowner
+                  FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                  CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) x
+                  WHERE n.nspname='zeka' AND p.proname='issue45_function_probe'
+                  UNION ALL
+                  SELECT x.grantee,t.typowner
+                  FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
+                  CROSS JOIN LATERAL aclexplode(COALESCE(t.typacl,acldefault('T',t.typowner))) x
+                  WHERE n.nspname='zeka' AND t.typname='issue45_type_probe'
+                )
+                SELECT count(*) FROM object_acls WHERE grantee<>owner
+                """);
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("""
+                DROP TABLE IF EXISTS zeka.issue45_relation_probe;
+                DROP SEQUENCE IF EXISTS zeka.issue45_sequence_probe;
+                DROP FUNCTION IF EXISTS zeka.issue45_function_probe();
+                DROP TYPE IF EXISTS zeka.issue45_type_probe;
+                """);
+        }
+    }
+
+    private async Task<T> ExecuteAdministratorScalarAsync<T>(string sql)
+    {
+        await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        return (T)(await command.ExecuteScalarAsync())!;
+    }
 
     private async Task ExecuteRuntimeTransactionAsync(string sql)
     {

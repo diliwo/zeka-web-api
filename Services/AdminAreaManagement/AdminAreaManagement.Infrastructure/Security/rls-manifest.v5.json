@@ -1,11 +1,12 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "service": "AdminAreaManagement",
   "modelContext": "AdminAreaManagement.Infrastructure.Persistence.DeploymentDbContext",
   "migrationId": "20260912180000_PostgreSqlRlsAndRuntimeRoles",
   "ownerRole": "zeka_adminarea_owner",
   "migratorRole": "zeka_adminarea_migrator",
   "runtimeRole": "zeka_adminarea_runtime",
+  "managedSchemas": ["public", "zeka"],
   "protectedTables": ["ContactPersons", "DocumentPartners", "Emails", "Partners", "StaffMembers", "StaffProjectionOutbox", "Teams"],
   "excludedTables": ["Cities", "Nationalities", "Professions", "Schools", "TrainingFields", "TrainingTypes", "Trainings"],
   "sequences": ["Cities_CityId_seq", "DocumentPartners_Id_seq", "Emails_Id_seq", "Nationalities_NationalityId_seq", "Partners_Id_seq", "Professions_Id_seq", "Schools_Id_seq", "StaffMembers_Id_seq", "StaffProjectionOutbox_Id_seq", "Teams_Id_seq", "TrainingFields_TrainingFieldId_seq", "TrainingTypes_TrainingTypeId_seq", "Trainings_Id_seq"],
@@ -19,7 +20,10 @@
     { "owner": "zeka_adminarea_owner", "objectType": "FUNCTION", "scope": "GLOBAL", "grants": [] },
     { "owner": "zeka_adminarea_owner", "objectType": "RELATION", "scope": "GLOBAL", "grants": [] },
     { "owner": "zeka_adminarea_owner", "objectType": "SEQUENCE", "scope": "GLOBAL", "grants": [] },
+    { "owner": "zeka_adminarea_owner", "objectType": "TYPE", "scope": "GLOBAL", "grants": [] },
+    { "owner": "zeka_adminarea_owner", "objectType": "SCHEMA", "scope": "GLOBAL", "grants": [] },
     { "owner": "zeka_adminarea_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "public", "grants": [] },
+    { "owner": "zeka_adminarea_owner", "objectType": "TYPE", "scope": "SCHEMA", "schema": "public", "grants": [] },
     {
       "owner": "zeka_adminarea_owner",
       "objectType": "RELATION",
@@ -41,7 +45,11 @@
         { "grantee": "zeka_adminarea_runtime", "privilege": "SELECT", "grantable": false },
         { "grantee": "zeka_adminarea_runtime", "privilege": "USAGE", "grantable": false }
       ]
-    }
+    },
+    { "owner": "zeka_adminarea_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
+    { "owner": "zeka_adminarea_owner", "objectType": "RELATION", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
+    { "owner": "zeka_adminarea_owner", "objectType": "SEQUENCE", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
+    { "owner": "zeka_adminarea_owner", "objectType": "TYPE", "scope": "SCHEMA", "schema": "zeka", "grants": [] }
   ],
   "parameterPrivileges": [],
   "policyPrefix": "rls_",

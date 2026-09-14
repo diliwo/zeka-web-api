@@ -17,6 +17,7 @@ public sealed record ParameterPrivilegeGrant(string Parameter, string Grantee, s
 
 public sealed record RlsSecurityManifest(int SchemaVersion, string Service, string ModelContext,
     string MigrationId, string OwnerRole, string MigratorRole, string RuntimeRole,
+    string[] ManagedSchemas,
     string[] ProtectedTables, string[] ExcludedTables, string[] Sequences,
     string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
     DefaultPrivilegeState[] DefaultPrivileges, ParameterPrivilegeGrant[] ParameterPrivileges,
@@ -30,7 +31,7 @@ public static class RlsSecurityManifestVerifier
     public static RlsSecurityManifest Load(Assembly assembly)
     {
         var name = assembly.GetManifestResourceNames().Single(x =>
-            x.EndsWith("rls-manifest.v4.json", StringComparison.Ordinal));
+            x.EndsWith("rls-manifest.v5.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -45,7 +46,7 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken = default)
     {
         var manifest = Load(manifestAssembly);
-        if (manifest.SchemaVersion != 4 || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion != 5 || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
             "function definition inventory");
@@ -173,13 +174,18 @@ public static class RlsSecurityManifestVerifier
     private static async Task VerifyDatabaseAndSchemas(DbConnection connection, RlsSecurityManifest manifest,
         CancellationToken cancellationToken)
     {
-        var schemas = manifest.ContextFunction is null ? new[] { "public" } : new[] { "public", "zeka" };
         var owners = await RowsAsync(connection, """
             select n.nspname,owner.rolname from pg_namespace n join pg_roles owner on owner.oid=n.nspowner
             where n.nspname=any(@schemas) order by n.nspname
-            """, cancellationToken, ("schemas", schemas));
-        Equal(schemas, owners.Select(row => row[0]), "schema inventory");
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+        Equal(manifest.ManagedSchemas, owners.Select(row => row[0]), "schema inventory");
         if (owners.Any(row => row[1] != manifest.OwnerRole)) throw new InvalidOperationException("Schema owner drifted.");
+        var ownerSchemas = await RowsAsync(connection, """
+            select n.nspname from pg_namespace n join pg_roles owner on owner.oid=n.nspowner
+            where owner.rolname=@owner and n.nspname!~'^pg_' and n.nspname<>'information_schema'
+            order by n.nspname
+            """, cancellationToken, ("owner", manifest.OwnerRole));
+        Equal(manifest.ManagedSchemas, ownerSchemas.Select(row => row[0]), "managed owner schema inventory");
         var databaseAcls = await RowsAsync(connection, """
             select coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
             from pg_database d cross join lateral aclexplode(coalesce(d.datacl,acldefault('d',d.datdba))) x
@@ -195,12 +201,12 @@ public static class RlsSecurityManifestVerifier
             left join pg_roles grantee on grantee.oid=x.grantee
             -- Owners have inherent privileges and their identity is verified separately.
             where n.nspname=any(@schemas) and x.grantee<>n.nspowner order by 1,2,3
-            """, cancellationToken, ("schemas", schemas));
-        var expected = new[]
-            { $"public|{manifest.MigratorRole}|USAGE|false", $"public|{manifest.RuntimeRole}|USAGE|false" }
-            .Concat(manifest.ContextFunction is null
-                ? []
-                : new[] { $"zeka|{manifest.RuntimeRole}|USAGE|false" });
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+        // The ordered inventory starts with the service persistence/migration schema.
+        var migrationSchema = manifest.ManagedSchemas[0];
+        var expected = manifest.ManagedSchemas
+            .Select(schema => $"{schema}|{manifest.RuntimeRole}|USAGE|false")
+            .Append($"{migrationSchema}|{manifest.MigratorRole}|USAGE|false");
         Equal(expected, schemaAcls.Select(row => string.Join('|', row)), "schema ACLs");
     }
 
@@ -306,15 +312,32 @@ public static class RlsSecurityManifestVerifier
     private static async Task VerifyDefaultPrivileges(DbConnection connection, RlsSecurityManifest manifest,
         CancellationToken cancellationToken)
     {
+        var schemaScopes = await RowsAsync(connection, """
+            select distinct n.nspname from pg_default_acl d
+            join pg_roles owner on owner.oid=d.defaclrole
+            join pg_namespace n on n.oid=d.defaclnamespace
+            where owner.rolname=@owner and d.defaclnamespace<>0
+            order by n.nspname
+            """, cancellationToken, ("owner", manifest.OwnerRole));
+        var undeclaredScopes = schemaScopes.Select(row => row[0])
+            .Except(manifest.ManagedSchemas, StringComparer.Ordinal).ToArray();
+        if (undeclaredScopes.Length != 0)
+            throw new InvalidOperationException(
+                $"Default privileges target undeclared schemas: [{string.Join(", ", undeclaredScopes)}].");
+
         var rows = await RowsAsync(connection, """
-            with managed_types(code,name) as (
-              values ('r'::"char",'RELATION'),('S'::"char",'SEQUENCE'),('f'::"char",'FUNCTION')
+            with global_types(code,name) as (
+              values ('r'::"char",'RELATION'),('S'::"char",'SEQUENCE'),('f'::"char",'FUNCTION'),
+                ('T'::"char",'TYPE'),('n'::"char",'SCHEMA')
+            ), schema_types(code,name) as (
+              values ('r'::"char",'RELATION'),('S'::"char",'SEQUENCE'),('f'::"char",'FUNCTION'),
+                ('T'::"char",'TYPE')
             ), managed_owner as (
               select oid,rolname from pg_roles where rolname=@owner
             ), effective_global as (
               select owner.rolname,'GLOBAL' scope,type.name object_type,
                 coalesce(grantee.rolname,'PUBLIC') grantee,x.privilege_type,x.is_grantable::text grantable
-              from managed_owner owner cross join managed_types type
+              from managed_owner owner cross join global_types type
               left join pg_default_acl d on d.defaclrole=owner.oid and d.defaclnamespace=0
                 and d.defaclobjtype=type.code
               cross join lateral aclexplode(coalesce(d.defaclacl,acldefault(type.code,owner.oid))) x
@@ -326,11 +349,11 @@ public static class RlsSecurityManifestVerifier
                 coalesce(grantee.rolname,'PUBLIC') grantee,x.privilege_type,x.is_grantable::text grantable
               from pg_default_acl d join managed_owner owner on owner.oid=d.defaclrole
               join pg_namespace n on n.oid=d.defaclnamespace
-              join managed_types type on type.code=d.defaclobjtype
+              join schema_types type on type.code=d.defaclobjtype
               cross join lateral aclexplode(d.defaclacl) x
               left join pg_roles grantee on grantee.oid=x.grantee
               -- Schema ACLs are additions to global defaults; compare them independently.
-              where n.nspname='public' and x.grantee<>owner.oid
+              where x.grantee<>owner.oid
             )
             select * from effective_global union all select * from schema_additions
             order by 1,2,3,4,5,6
@@ -342,9 +365,17 @@ public static class RlsSecurityManifestVerifier
 
     private static void ValidateDefaultPrivilegeManifest(RlsSecurityManifest manifest)
     {
-        var expectedScopes = new[] { "GLOBAL", "SCHEMA public" }.SelectMany(scope =>
-            new[] { "FUNCTION", "RELATION", "SEQUENCE" }.Select(type =>
-                $"{manifest.OwnerRole}|{scope}|{type}"));
+        if (manifest.ManagedSchemas.Length == 0
+            || !manifest.ManagedSchemas.SequenceEqual(
+                manifest.ManagedSchemas.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal),
+                StringComparer.Ordinal)
+            || manifest.ManagedSchemas.Any(string.IsNullOrWhiteSpace))
+            throw new InvalidOperationException("Managed schema inventory is invalid.");
+        var expectedScopes = new[] { "RELATION", "SEQUENCE", "FUNCTION", "TYPE", "SCHEMA" }
+            .Select(type => $"{manifest.OwnerRole}|GLOBAL|{type}")
+            .Concat(manifest.ManagedSchemas.SelectMany(schema =>
+                new[] { "RELATION", "SEQUENCE", "FUNCTION", "TYPE" }.Select(type =>
+                    $"{manifest.OwnerRole}|SCHEMA {schema}|{type}")));
         Equal(expectedScopes, manifest.DefaultPrivileges.Select(state =>
             $"{state.Owner}|{DefaultPrivilegeScope(state)}|{state.ObjectType}"),
             "default privilege scope inventory");
@@ -382,7 +413,7 @@ public static class RlsSecurityManifestVerifier
     private static string DefaultPrivilegeScope(DefaultPrivilegeState state) => state.Scope switch
     {
         "GLOBAL" when state.Schema is null => "GLOBAL",
-        "SCHEMA" when state.Schema == "public" => "SCHEMA public",
+        "SCHEMA" when !string.IsNullOrWhiteSpace(state.Schema) => $"SCHEMA {state.Schema}",
         _ => throw new InvalidOperationException("Default privilege scope is invalid.")
     };
 
