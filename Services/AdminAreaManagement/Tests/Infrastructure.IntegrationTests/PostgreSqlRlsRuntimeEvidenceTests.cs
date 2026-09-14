@@ -668,6 +668,124 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     }
 
     [Fact]
+    public async Task Managed_schema_object_inventory_rls_policy_and_acl_drift_fails_closed_and_restores_green()
+    {
+        var manifest = RlsSecurityManifestVerifier.Load(typeof(ApplicationDbContext).Assembly);
+        Assert.All(manifest.ProtectedTables.Concat(manifest.ExcludedTables),
+            table => Assert.Equal("public", table.Schema));
+        Assert.Equal(new ManagedObjectIdentity("public", "__EFMigrationsHistory"),
+            manifest.MigrationHistoryTable);
+        Assert.All(manifest.Sequences, sequence => Assert.Equal("public", sequence.Schema));
+        await VerifyCatalogAsync();
+
+        await AssertCatalogMutationFailsAndRestoresAsync("""
+            SET ROLE zeka_adminarea_owner;
+            CREATE TABLE zeka.issue45_unclassified_without_tenant (id integer);
+            RESET ROLE;
+            """, "DROP TABLE zeka.issue45_unclassified_without_tenant");
+
+        await database.ExecuteAdministratorAsync("""
+            SET ROLE zeka_adminarea_owner;
+            CREATE TABLE zeka.issue45_unclassified_tenant (
+              id integer PRIMARY KEY,
+              "OrganisationId" uuid NOT NULL);
+            INSERT INTO zeka.issue45_unclassified_tenant VALUES
+              (1,'11111111-1111-1111-1111-111111111111'),
+              (2,'22222222-2222-2222-2222-222222222222');
+            RESET ROLE;
+            GRANT SELECT ON TABLE zeka.issue45_unclassified_tenant TO zeka_adminarea_runtime;
+            """);
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+            Assert.False(await ExecuteAdministratorScalarAsync<bool>("""
+                SELECT c.relrowsecurity OR c.relforcerowsecurity
+                FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname='zeka' AND c.relname='issue45_unclassified_tenant'
+                """));
+            await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await SetTenantAsync(connection, transaction,
+                Guid.Parse("11111111-1111-1111-1111-111111111111"));
+            await using var command = new NpgsqlCommand("""
+                SELECT count(*) FROM zeka.issue45_unclassified_tenant
+                WHERE "OrganisationId"<>zeka.current_organisation_id()
+                """, connection, transaction);
+            Assert.Equal(1L, await command.ExecuteScalarAsync());
+            await transaction.RollbackAsync();
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("DROP TABLE zeka.issue45_unclassified_tenant");
+        }
+        await VerifyCatalogAsync();
+
+        await AssertCatalogMutationFailsAndRestoresAsync("""
+            SET ROLE zeka_adminarea_owner;
+            CREATE TABLE zeka."Teams" (id integer);
+            RESET ROLE;
+            """, "DROP TABLE zeka.\"Teams\"");
+
+        await database.ExecuteAdministratorAsync("""
+            ALTER TABLE public."Teams" SET SCHEMA zeka;
+            SET ROLE zeka_adminarea_owner;
+            CREATE TABLE public."Teams" (id integer);
+            RESET ROLE;
+            """);
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("""
+                DROP TABLE public."Teams";
+                ALTER TABLE zeka."Teams" SET SCHEMA public;
+                """);
+        }
+        await VerifyCatalogAsync();
+
+        await AssertCatalogMutationFailsAndRestoresAsync(
+            "CREATE POLICY issue45_excluded_policy ON public.\"Cities\" USING (true)",
+            "DROP POLICY issue45_excluded_policy ON public.\"Cities\"");
+        await AssertCatalogMutationFailsAndRestoresAsync(
+            "CREATE POLICY issue45_history_policy ON public.\"__EFMigrationsHistory\" USING (true)",
+            "DROP POLICY issue45_history_policy ON public.\"__EFMigrationsHistory\"");
+
+        await AssertCatalogMutationFailsAndRestoresAsync("""
+            CREATE ROLE zeka_issue45_object_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT;
+            SET ROLE zeka_adminarea_owner;
+            CREATE TABLE zeka.issue45_acl_probe (id integer, value text);
+            RESET ROLE;
+            GRANT SELECT ON TABLE zeka.issue45_acl_probe TO zeka_adminarea_runtime WITH GRANT OPTION;
+            GRANT UPDATE (value) ON TABLE zeka.issue45_acl_probe TO zeka_issue45_object_unexpected WITH GRANT OPTION;
+            """, """
+            DROP TABLE zeka.issue45_acl_probe;
+            DROP ROLE zeka_issue45_object_unexpected;
+            """);
+
+        await AssertCatalogMutationFailsAndRestoresAsync("""
+            SET ROLE zeka_adminarea_owner;
+            CREATE FUNCTION public.issue45_unallowlisted_public() RETURNS integer LANGUAGE sql AS 'SELECT 1';
+            RESET ROLE;
+            """, "DROP FUNCTION public.issue45_unallowlisted_public()");
+        await AssertCatalogMutationFailsAndRestoresAsync("""
+            SET ROLE zeka_adminarea_owner;
+            CREATE FUNCTION zeka.issue45_unallowlisted_zeka() RETURNS integer LANGUAGE sql AS 'SELECT 1';
+            RESET ROLE;
+            """, "DROP FUNCTION zeka.issue45_unallowlisted_zeka()");
+
+        await AssertCatalogMutationFailsAndRestoresAsync("""
+            SET ROLE zeka_adminarea_owner;
+            CREATE SEQUENCE zeka.issue45_unallowlisted_sequence;
+            RESET ROLE;
+            GRANT SELECT, USAGE ON SEQUENCE zeka.issue45_unallowlisted_sequence
+              TO zeka_adminarea_runtime WITH GRANT OPTION;
+            """, "DROP SEQUENCE zeka.issue45_unallowlisted_sequence");
+    }
+
+    [Fact]
     public async Task Parameter_privilege_drift_fails_deployment_and_runtime_validation_and_full_revoke_restores_safety()
     {
         await VerifyCatalogAsync();
@@ -730,6 +848,20 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     private Task ValidateRuntimeIdentityAsync() =>
         new RuntimeDatabaseIdentityValidator(database.RuntimeConnectionString, "zeka_adminarea_runtime")
             .StartAsync(default);
+
+    private async Task AssertCatalogMutationFailsAndRestoresAsync(string mutation, string restore)
+    {
+        await database.ExecuteAdministratorAsync(mutation);
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync(restore);
+        }
+        await VerifyCatalogAsync();
+    }
 
     private async Task AssertOwnerCreatedZekaProbesHaveNoNonOwnerPrivilegesAsync()
     {

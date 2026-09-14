@@ -15,10 +15,13 @@ public sealed record DefaultPrivilegeState(string Owner, string ObjectType, stri
 
 public sealed record ParameterPrivilegeGrant(string Parameter, string Grantee, string Privilege, bool Grantable);
 
+public sealed record ManagedObjectIdentity(string Schema, string Name);
+
 public sealed record RlsSecurityManifest(int SchemaVersion, string Service, string ModelContext,
     string MigrationId, string OwnerRole, string MigratorRole, string RuntimeRole,
     string[] ManagedSchemas,
-    string[] ProtectedTables, string[] ExcludedTables, string[] Sequences,
+    ManagedObjectIdentity[] ProtectedTables, ManagedObjectIdentity[] ExcludedTables,
+    ManagedObjectIdentity MigrationHistoryTable, ManagedObjectIdentity[] Sequences,
     string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
     DefaultPrivilegeState[] DefaultPrivileges, ParameterPrivilegeGrant[] ParameterPrivileges,
     string PolicyPrefix, string? ContextFunction);
@@ -31,34 +34,42 @@ public static class RlsSecurityManifestVerifier
     public static RlsSecurityManifest Load(Assembly assembly)
     {
         var name = assembly.GetManifestResourceNames().Single(x =>
-            x.EndsWith("rls-manifest.v5.json", StringComparison.Ordinal));
+            x.EndsWith("rls-manifest.v6.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
         { PropertyNameCaseInsensitive = true }) ?? throw new InvalidOperationException("RLS manifest is malformed.");
     }
 
-    public static IReadOnlyCollection<string> GenerateProtectedInventory(DbContext database) => database.Model
+    public static IReadOnlyCollection<ManagedObjectIdentity> GenerateProtectedInventory(DbContext database) => database.Model
         .GetEntityTypes().Where(type => IsTenantOwned(type.ClrType))
-        .Select(Table).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        .Select(Table).Distinct().OrderBy(identity => identity.Schema, StringComparer.Ordinal)
+        .ThenBy(identity => identity.Name, StringComparer.Ordinal).ToArray();
 
     public static async Task VerifyAsync(DbContext database, Assembly manifestAssembly,
         CancellationToken cancellationToken = default)
     {
         var manifest = Load(manifestAssembly);
-        if (manifest.SchemaVersion != 5 || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion != 6 || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
             "function definition inventory");
         ValidateDefaultPrivilegeManifest(manifest);
         ValidateParameterPrivilegeManifest(manifest);
-        if (manifest.ProtectedTables.Intersect(manifest.ExcludedTables, StringComparer.Ordinal).Any())
+        ValidateManagedObjectManifest(manifest);
+        if (manifest.ProtectedTables.Intersect(manifest.ExcludedTables).Any()
+            || manifest.ProtectedTables.Contains(manifest.MigrationHistoryTable)
+            || manifest.ExcludedTables.Contains(manifest.MigrationHistoryTable))
             throw new InvalidOperationException("Protected and excluded inventories overlap.");
-        var mapped = database.Model.GetEntityTypes().Select(Table).Distinct(StringComparer.Ordinal).ToArray();
-        Equal(manifest.ProtectedTables, GenerateProtectedInventory(database), "EF protected inventory");
-        Equal(manifest.ProtectedTables.Concat(manifest.ExcludedTables), mapped, "EF complete classification");
+        var mapped = database.Model.GetEntityTypes().Select(Table).Distinct().ToArray();
+        if (mapped.Any(identity => !manifest.ManagedSchemas.Contains(identity.Schema, StringComparer.Ordinal)))
+            throw new InvalidOperationException("An EF mapping targets an undeclared managed schema.");
+        Equal(manifest.ProtectedTables.Select(ObjectKey), GenerateProtectedInventory(database).Select(ObjectKey),
+            "EF protected inventory");
+        Equal(manifest.ProtectedTables.Concat(manifest.ExcludedTables).Select(ObjectKey), mapped.Select(ObjectKey),
+            "EF complete classification");
         foreach (var type in database.Model.GetEntityTypes().Where(type =>
-                     manifest.ProtectedTables.Contains(Table(type), StringComparer.Ordinal)))
+                     manifest.ProtectedTables.Contains(Table(type))))
             if (type.FindProperty("OrganisationId")?.ClrType != typeof(Guid)
                 || !IsTenantOwned(type.ClrType))
                 throw new InvalidOperationException("A protected mapping lacks tenant ownership or UUID OrganisationId.");
@@ -133,41 +144,66 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken)
     {
         var tables = await RowsAsync(connection, """
-            select c.relname,owner.rolname,c.relrowsecurity::text,c.relforcerowsecurity::text
+            select n.nspname,c.relname,owner.rolname,c.relrowsecurity::text,c.relforcerowsecurity::text
             from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_roles owner on owner.oid=c.relowner
-            where n.nspname='public' and c.relkind in ('r','p') and c.relname<>'__EFMigrationsHistory' order by c.relname
-            """, cancellationToken);
-        Equal(manifest.ProtectedTables.Concat(manifest.ExcludedTables), tables.Select(row => row[0]), "catalog tables");
+            where n.nspname=any(@schemas) and c.relkind in ('r','p') order by n.nspname,c.relname
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+        var expectedTables = manifest.ProtectedTables.Concat(manifest.ExcludedTables)
+            .Append(manifest.MigrationHistoryTable).Select(ObjectKey);
+        Equal(expectedTables, tables.Select(row => ObjectKey(row[0], row[1])), "catalog tables");
         foreach (var row in tables)
         {
-            var tenant = manifest.ProtectedTables.Contains(row[0], StringComparer.Ordinal);
-            if (row[1] != manifest.OwnerRole || row[2] != tenant.ToString().ToLowerInvariant()
-                || row[3] != tenant.ToString().ToLowerInvariant())
+            var identity = new ManagedObjectIdentity(row[0], row[1]);
+            var tenant = manifest.ProtectedTables.Contains(identity);
+            if (row[2] != manifest.OwnerRole || row[3] != tenant.ToString().ToLowerInvariant()
+                || row[4] != tenant.ToString().ToLowerInvariant())
                 throw new InvalidOperationException("Table ownership or RLS state drifted.");
         }
-        var history = await RowsAsync(connection, """
-            select owner.rolname,
-              (select h."MigrationId" from "__EFMigrationsHistory" h order by h."MigrationId" desc limit 1)
+
+        var organisationColumns = await RowsAsync(connection, """
+            select n.nspname,c.relname,format_type(a.atttypid,a.atttypmod),a.attnotnull::text
+            from pg_attribute a join pg_class c on c.oid=a.attrelid
+            join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname=any(@schemas) and c.relkind in ('r','p')
+              and a.attnum>0 and not a.attisdropped and a.attname='OrganisationId'
+            order by n.nspname,c.relname
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+        var classified = manifest.ProtectedTables.Concat(manifest.ExcludedTables).ToHashSet();
+        if (organisationColumns.Any(row => !classified.Contains(new ManagedObjectIdentity(row[0], row[1]))))
+            throw new InvalidOperationException("An OrganisationId table lacks a reviewed classification.");
+        foreach (var table in manifest.ProtectedTables)
+        {
+            var column = organisationColumns.SingleOrDefault(row => row[0] == table.Schema && row[1] == table.Name);
+            if (column is null || column[2] != "uuid" || column[3] != "true")
+                throw new InvalidOperationException("A protected table lacks non-null UUID OrganisationId.");
+        }
+
+        var historyIdentity = manifest.MigrationHistoryTable;
+        var history = await RowsAsync(connection, $"""
+            select owner.rolname,c.relrowsecurity::text,c.relforcerowsecurity::text,
+              (select h."MigrationId" from {QualifiedSql(historyIdentity)} h order by h."MigrationId" desc limit 1)
             from pg_class c join pg_namespace n on n.oid=c.relnamespace
             join pg_roles owner on owner.oid=c.relowner
-            where n.nspname='public' and c.relname='__EFMigrationsHistory' and c.relkind='r'
-            """, cancellationToken);
+            where n.nspname=@schema and c.relname=@table and c.relkind='r'
+            """, cancellationToken, ("schema", historyIdentity.Schema), ("table", historyIdentity.Name));
         if (history.Count != 1 || history[0][0] != manifest.OwnerRole
-            || history[0][1] != manifest.MigrationId)
+            || history[0][1] != "false" || history[0][2] != "false"
+            || history[0][3] != manifest.MigrationId)
             throw new InvalidOperationException("Migration-history identity or ownership drifted.");
         var policies = await RowsAsync(connection, """
-            select c.relname,p.polname,p.polcmd::text,p.polpermissive::text,
+            select n.nspname,c.relname,p.polname,p.polcmd::text,p.polpermissive::text,
                    pg_get_expr(p.polqual,p.polrelid),pg_get_expr(p.polwithcheck,p.polrelid),
                    array_to_string(array(select rolname from pg_roles where oid=any(p.polroles) order by rolname),',')
             from pg_policy p join pg_class c on c.oid=p.polrelid join pg_namespace n on n.oid=c.relnamespace
-            where n.nspname='public' order by c.relname,p.polname
-            """, cancellationToken);
-        Equal(manifest.ProtectedTables, policies.Select(row => row[0]), "RLS policy targets");
+            where n.nspname=any(@schemas) order by n.nspname,c.relname,p.polname
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+        Equal(manifest.ProtectedTables.Select(ObjectKey),
+            policies.Select(row => ObjectKey(row[0], row[1])), "RLS policy targets");
         var expression = Normalize("\"OrganisationId\" = zeka.current_organisation_id()");
         foreach (var row in policies)
-            if (row[1] != manifest.PolicyPrefix + row[0].ToLowerInvariant() + "_organisation"
-                || row[2] != "*" || row[3] != "true" || row[6] != manifest.RuntimeRole
-                || Normalize(row[4]) != expression || Normalize(row[5]) != expression)
+            if (row[2] != manifest.PolicyPrefix + row[1].ToLowerInvariant() + "_organisation"
+                || row[3] != "*" || row[4] != "true" || row[7] != manifest.RuntimeRole
+                || Normalize(row[5]) != expression || Normalize(row[6]) != expression)
                 throw new InvalidOperationException("RLS policy definition drifted.");
     }
 
@@ -214,24 +250,24 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken)
     {
         var rows = await RowsAsync(connection, """
-            select c.relname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
+            select n.nspname,c.relname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
             from pg_class c join pg_namespace n on n.oid=c.relnamespace
             cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) x
             left join pg_roles grantee on grantee.oid=x.grantee
-            where n.nspname='public' and c.relkind in ('r','p')
-              and x.grantee<>c.relowner order by c.relname,2,3,4
-            """, cancellationToken);
+            where n.nspname=any(@schemas) and c.relkind in ('r','p')
+              and x.grantee<>c.relowner order by n.nspname,c.relname,3,4,5
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
         var expected = manifest.ProtectedTables.Concat(manifest.ExcludedTables)
-            .SelectMany(table => Dml.Select(privilege => $"{table}|{manifest.RuntimeRole}|{privilege}|false"))
-            .Concat(Dml.Select(privilege => $"__EFMigrationsHistory|{manifest.MigratorRole}|{privilege}|false"));
+            .SelectMany(table => Dml.Select(privilege =>
+                $"{ObjectKey(table)}|{manifest.RuntimeRole}|{privilege}|false"))
+            .Concat(Dml.Select(privilege =>
+                $"{ObjectKey(manifest.MigrationHistoryTable)}|{manifest.MigratorRole}|{privilege}|false"));
         Equal(expected, rows.Select(row => string.Join('|', row)), "table ACLs");
     }
 
     private static async Task VerifyColumnAcls(DbConnection connection, RlsSecurityManifest manifest,
         CancellationToken cancellationToken)
     {
-        var managedTables = manifest.ProtectedTables.Concat(manifest.ExcludedTables)
-            .Append("__EFMigrationsHistory").Distinct(StringComparer.Ordinal).ToArray();
         var rows = await RowsAsync(connection, """
             select n.nspname,c.relname,a.attname,coalesce(grantee.rolname,'PUBLIC'),
               x.privilege_type,x.is_grantable::text
@@ -240,10 +276,10 @@ public static class RlsSecurityManifestVerifier
             cross join lateral aclexplode(a.attacl) x
             left join pg_roles grantee on grantee.oid=x.grantee
             -- Owners have inherent privileges and their identity is verified separately.
-            where n.nspname='public' and c.relkind in ('r','p') and c.relname=any(@tables)
+            where n.nspname=any(@schemas) and c.relkind in ('r','p')
               and a.attnum>0 and not a.attisdropped and a.attacl is not null
               and x.grantee<>c.relowner order by 1,2,3,4,5,6
-            """, cancellationToken, ("tables", managedTables));
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
         Equal([], rows.Select(row => string.Join('|', row)), "column ACLs");
     }
 
@@ -251,35 +287,37 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken)
     {
         var rows = await RowsAsync(connection, """
-            select c.relname,owner.rolname from pg_class c join pg_namespace n on n.oid=c.relnamespace
-            join pg_roles owner on owner.oid=c.relowner where n.nspname='public' and c.relkind='S' order by c.relname
-            """, cancellationToken);
-        Equal(manifest.Sequences, rows.Select(row => row[0]), "sequence inventory");
-        if (rows.Any(row => row[1] != manifest.OwnerRole)) throw new InvalidOperationException("Sequence owner drifted.");
+            select n.nspname,c.relname,owner.rolname from pg_class c join pg_namespace n on n.oid=c.relnamespace
+            join pg_roles owner on owner.oid=c.relowner
+            where n.nspname=any(@schemas) and c.relkind='S' order by n.nspname,c.relname
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+        Equal(manifest.Sequences.Select(ObjectKey), rows.Select(row => ObjectKey(row[0], row[1])),
+            "sequence inventory");
+        if (rows.Any(row => row[2] != manifest.OwnerRole)) throw new InvalidOperationException("Sequence owner drifted.");
         var acls = await RowsAsync(connection, """
-            select c.relname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
+            select n.nspname,c.relname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
             from pg_class c join pg_namespace n on n.oid=c.relnamespace
             cross join lateral aclexplode(coalesce(c.relacl,acldefault('S',c.relowner))) x
             left join pg_roles grantee on grantee.oid=x.grantee
-            where n.nspname='public' and c.relkind='S'
-              and x.grantee<>c.relowner order by c.relname,2,3,4
-            """, cancellationToken);
+            where n.nspname=any(@schemas) and c.relkind='S'
+              and x.grantee<>c.relowner order by n.nspname,c.relname,3,4,5
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
         var expected = manifest.Sequences.SelectMany(sequence => new[]
-            { $"{sequence}|{manifest.RuntimeRole}|SELECT|false", $"{sequence}|{manifest.RuntimeRole}|USAGE|false" });
+            { $"{ObjectKey(sequence)}|{manifest.RuntimeRole}|SELECT|false",
+                $"{ObjectKey(sequence)}|{manifest.RuntimeRole}|USAGE|false" });
         Equal(expected, acls.Select(row => string.Join('|', row)), "sequence ACLs");
     }
 
     private static async Task VerifyFunctions(DbConnection connection, RlsSecurityManifest manifest,
         CancellationToken cancellationToken)
     {
-        var schemas = manifest.ContextFunction is null ? new[] { "public" } : new[] { "public", "zeka" };
         var rows = await RowsAsync(connection, """
             select n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',owner.rolname,
               l.lanname,p.prosecdef::text,p.proleakproof::text,p.provolatile::text,
               coalesce(array_to_string(p.proconfig,','),''),pg_get_functiondef(p.oid)
             from pg_proc p join pg_namespace n on n.oid=p.pronamespace join pg_roles owner on owner.oid=p.proowner
             join pg_language l on l.oid=p.prolang where n.nspname=any(@schemas) order by 1
-            """, cancellationToken, ("schemas", schemas));
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
         Equal(manifest.RuntimeFunctions, rows.Select(row => row[0]), "function inventory");
         if (rows.Any(row => row[1] != manifest.OwnerRole || row[3] != "false" || row[4] != "false"))
             throw new InvalidOperationException("Function owner/security drifted.");
@@ -304,7 +342,7 @@ public static class RlsSecurityManifestVerifier
             cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) x
             left join pg_roles grantee on grantee.oid=x.grantee
             where n.nspname=any(@schemas) and x.grantee<>p.proowner order by 1,2,3,4
-            """, cancellationToken, ("schemas", schemas));
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
         Equal(manifest.RuntimeFunctions.Select(function => $"{function}|{manifest.RuntimeRole}|EXECUTE|false"),
             acls.Select(row => string.Join('|', row)), "function ACLs");
     }
@@ -410,6 +448,31 @@ public static class RlsSecurityManifestVerifier
             "parameter privilege grants");
     }
 
+    private static void ValidateManagedObjectManifest(RlsSecurityManifest manifest)
+    {
+        ValidateIdentities(manifest.ProtectedTables, "protected table");
+        ValidateIdentities(manifest.ExcludedTables, "excluded table");
+        ValidateIdentities(manifest.Sequences, "sequence");
+        var history = manifest.MigrationHistoryTable;
+        if (string.IsNullOrWhiteSpace(history.Schema) || string.IsNullOrWhiteSpace(history.Name)
+            || !manifest.ManagedSchemas.Contains(history.Schema, StringComparer.Ordinal))
+            throw new InvalidOperationException("Migration-history table identity is invalid.");
+
+        void ValidateIdentities(IEnumerable<ManagedObjectIdentity> identities, string category)
+        {
+            var keys = identities.Select(identity =>
+            {
+                if (string.IsNullOrWhiteSpace(identity.Schema) || string.IsNullOrWhiteSpace(identity.Name)
+                    || !manifest.ManagedSchemas.Contains(identity.Schema, StringComparer.Ordinal))
+                    throw new InvalidOperationException($"A {category} identity is invalid.");
+                return ObjectKey(identity);
+            }).ToArray();
+            if (!keys.SequenceEqual(keys.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal),
+                    StringComparer.Ordinal))
+                throw new InvalidOperationException($"The {category} inventory is invalid.");
+        }
+    }
+
     private static string DefaultPrivilegeScope(DefaultPrivilegeState state) => state.Scope switch
     {
         "GLOBAL" when state.Schema is null => "GLOBAL",
@@ -417,12 +480,19 @@ public static class RlsSecurityManifestVerifier
         _ => throw new InvalidOperationException("Default privilege scope is invalid.")
     };
 
-    private static string Table(IEntityType type)
+    private static ManagedObjectIdentity Table(IEntityType type)
     {
         if (type.IsOwned()) throw new InvalidOperationException("Owned entity mapping is not allowed.");
-        if (type.GetSchema() is not null and not "public") throw new InvalidOperationException("Unexpected mapped schema.");
-        return type.GetTableName() ?? throw new InvalidOperationException("Entity is not mapped to a table.");
+        return new ManagedObjectIdentity(type.GetSchema() ?? "public",
+            type.GetTableName() ?? throw new InvalidOperationException("Entity is not mapped to a table."));
     }
+
+    private static string ObjectKey(ManagedObjectIdentity identity) => ObjectKey(identity.Schema, identity.Name);
+
+    private static string ObjectKey(string schema, string name) => $"{schema}|{name}";
+
+    private static string QualifiedSql(ManagedObjectIdentity identity) =>
+        $"\"{identity.Schema.Replace("\"", "\"\"", StringComparison.Ordinal)}\".\"{identity.Name.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
 
     private static bool IsTenantOwned(Type type) => type.GetInterfaces().Any(contract =>
         contract.FullName == "Zeka.Extensions.MultiTenancy.Abstractions.ITenantOwnedEntity");

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "service": "AuthManagement",
   "modelContext": "AuthManager.Infrastructure.Persistence.AuthDbContext",
   "migrationId": "20260912180002_PostgreSqlRuntimeRoles",
@@ -8,8 +8,26 @@
   "runtimeRole": "zeka_auth_runtime",
   "managedSchemas": ["public"],
   "protectedTables": [],
-  "excludedTables": ["AspNetRoleClaims", "AspNetRoles", "AspNetUserClaims", "AspNetUserLogins", "AspNetUserRoles", "AspNetUserTokens", "AspNetUsers", "AuditEntries", "IdempotencyRecords", "OrganisationMemberships", "Organisations", "OutboxMessages", "PermissionSets"],
-  "sequences": ["AspNetRoleClaims_Id_seq", "AspNetUserClaims_Id_seq"],
+  "excludedTables": [
+    { "schema": "public", "name": "AspNetRoleClaims" },
+    { "schema": "public", "name": "AspNetRoles" },
+    { "schema": "public", "name": "AspNetUserClaims" },
+    { "schema": "public", "name": "AspNetUserLogins" },
+    { "schema": "public", "name": "AspNetUserRoles" },
+    { "schema": "public", "name": "AspNetUserTokens" },
+    { "schema": "public", "name": "AspNetUsers" },
+    { "schema": "public", "name": "AuditEntries" },
+    { "schema": "public", "name": "IdempotencyRecords" },
+    { "schema": "public", "name": "OrganisationMemberships" },
+    { "schema": "public", "name": "Organisations" },
+    { "schema": "public", "name": "OutboxMessages" },
+    { "schema": "public", "name": "PermissionSets" }
+  ],
+  "migrationHistoryTable": { "schema": "public", "name": "__EFMigrationsHistory" },
+  "sequences": [
+    { "schema": "public", "name": "AspNetRoleClaims_Id_seq" },
+    { "schema": "public", "name": "AspNetUserClaims_Id_seq" }
+  ],
   "runtimeFunctions": [],
   "runtimeFunctionDefinitionSha256": {},
   "defaultPrivileges": [

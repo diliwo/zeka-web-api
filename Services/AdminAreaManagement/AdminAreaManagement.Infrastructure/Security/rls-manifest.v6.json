@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "service": "AdminAreaManagement",
   "modelContext": "AdminAreaManagement.Infrastructure.Persistence.DeploymentDbContext",
   "migrationId": "20260912180000_PostgreSqlRlsAndRuntimeRoles",
@@ -7,9 +7,40 @@
   "migratorRole": "zeka_adminarea_migrator",
   "runtimeRole": "zeka_adminarea_runtime",
   "managedSchemas": ["public", "zeka"],
-  "protectedTables": ["ContactPersons", "DocumentPartners", "Emails", "Partners", "StaffMembers", "StaffProjectionOutbox", "Teams"],
-  "excludedTables": ["Cities", "Nationalities", "Professions", "Schools", "TrainingFields", "TrainingTypes", "Trainings"],
-  "sequences": ["Cities_CityId_seq", "DocumentPartners_Id_seq", "Emails_Id_seq", "Nationalities_NationalityId_seq", "Partners_Id_seq", "Professions_Id_seq", "Schools_Id_seq", "StaffMembers_Id_seq", "StaffProjectionOutbox_Id_seq", "Teams_Id_seq", "TrainingFields_TrainingFieldId_seq", "TrainingTypes_TrainingTypeId_seq", "Trainings_Id_seq"],
+  "protectedTables": [
+    { "schema": "public", "name": "ContactPersons" },
+    { "schema": "public", "name": "DocumentPartners" },
+    { "schema": "public", "name": "Emails" },
+    { "schema": "public", "name": "Partners" },
+    { "schema": "public", "name": "StaffMembers" },
+    { "schema": "public", "name": "StaffProjectionOutbox" },
+    { "schema": "public", "name": "Teams" }
+  ],
+  "excludedTables": [
+    { "schema": "public", "name": "Cities" },
+    { "schema": "public", "name": "Nationalities" },
+    { "schema": "public", "name": "Professions" },
+    { "schema": "public", "name": "Schools" },
+    { "schema": "public", "name": "TrainingFields" },
+    { "schema": "public", "name": "TrainingTypes" },
+    { "schema": "public", "name": "Trainings" }
+  ],
+  "migrationHistoryTable": { "schema": "public", "name": "__EFMigrationsHistory" },
+  "sequences": [
+    { "schema": "public", "name": "Cities_CityId_seq" },
+    { "schema": "public", "name": "DocumentPartners_Id_seq" },
+    { "schema": "public", "name": "Emails_Id_seq" },
+    { "schema": "public", "name": "Nationalities_NationalityId_seq" },
+    { "schema": "public", "name": "Partners_Id_seq" },
+    { "schema": "public", "name": "Professions_Id_seq" },
+    { "schema": "public", "name": "Schools_Id_seq" },
+    { "schema": "public", "name": "StaffMembers_Id_seq" },
+    { "schema": "public", "name": "StaffProjectionOutbox_Id_seq" },
+    { "schema": "public", "name": "Teams_Id_seq" },
+    { "schema": "public", "name": "TrainingFields_TrainingFieldId_seq" },
+    { "schema": "public", "name": "TrainingTypes_TrainingTypeId_seq" },
+    { "schema": "public", "name": "Trainings_Id_seq" }
+  ],
   "runtimeFunctions": ["public.zeka_city_key(value text)", "public.zeka_city_text(value text)", "zeka.current_organisation_id()"],
   "runtimeFunctionDefinitionSha256": {
     "public.zeka_city_key(value text)": "1e61247f9533c12565d1cff73f8370e9f1a926b9e2e91ab0fe6de2e30ecbbe6e",
