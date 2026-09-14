@@ -15,7 +15,11 @@ public sealed class RuntimeDatabaseIdentityValidator(string connectionString, st
             select r.rolname,r.rolcanlogin,r.rolsuper,r.rolbypassrls,r.rolcreatedb,r.rolcreaterole,
                    r.rolinherit,r.rolreplication,r.rolconfig is null,
                    not exists(select 1 from pg_auth_members m where m.member=r.oid or m.roleid=r.oid),
-                   not exists(select 1 from pg_db_role_setting s where s.setrole=r.oid)
+                   not exists(select 1 from pg_db_role_setting s where s.setrole=r.oid),
+                   not exists(
+                     select 1 from pg_parameter_acl parameter
+                     where has_parameter_privilege(current_user,parameter.parname,'SET')
+                        or has_parameter_privilege(current_user,parameter.parname,'ALTER SYSTEM'))
             from pg_roles r where r.rolname=current_user
             """;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -23,7 +27,8 @@ public sealed class RuntimeDatabaseIdentityValidator(string connectionString, st
             || !reader.GetBoolean(1) || reader.GetBoolean(2) || reader.GetBoolean(3)
             || reader.GetBoolean(4) || reader.GetBoolean(5) || reader.GetBoolean(6)
             || reader.GetBoolean(7) || !reader.GetBoolean(8) || !reader.GetBoolean(9)
-            || !reader.GetBoolean(10) || await reader.ReadAsync(cancellationToken))
+            || !reader.GetBoolean(10) || !reader.GetBoolean(11)
+            || await reader.ReadAsync(cancellationToken))
             throw new InvalidOperationException("The configured database credential is not the approved restricted runtime identity.");
     }
 

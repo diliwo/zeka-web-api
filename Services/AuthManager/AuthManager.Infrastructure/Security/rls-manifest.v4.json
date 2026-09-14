@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "service": "AuthManagement",
   "modelContext": "AuthManager.Infrastructure.Persistence.AuthDbContext",
   "migrationId": "20260912180002_PostgreSqlRuntimeRoles",
@@ -39,6 +39,7 @@
       ]
     }
   ],
+  "parameterPrivileges": [],
   "policyPrefix": "rls_",
   "contextFunction": null
 }

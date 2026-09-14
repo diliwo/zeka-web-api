@@ -13,11 +13,14 @@ public sealed record DefaultPrivilegeGrant(string Grantee, string Privilege, boo
 public sealed record DefaultPrivilegeState(string Owner, string ObjectType, string Scope, string? Schema,
     DefaultPrivilegeGrant[] Grants);
 
+public sealed record ParameterPrivilegeGrant(string Parameter, string Grantee, string Privilege, bool Grantable);
+
 public sealed record RlsSecurityManifest(int SchemaVersion, string Service, string ModelContext,
     string MigrationId, string OwnerRole, string MigratorRole, string RuntimeRole,
     string[] ProtectedTables, string[] ExcludedTables, string[] Sequences,
     string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
-    DefaultPrivilegeState[] DefaultPrivileges, string PolicyPrefix, string? ContextFunction);
+    DefaultPrivilegeState[] DefaultPrivileges, ParameterPrivilegeGrant[] ParameterPrivileges,
+    string PolicyPrefix, string? ContextFunction);
 
 /// <summary>Deployment-only bidirectional comparison of the versioned model and effective PostgreSQL state.</summary>
 public static class RlsSecurityManifestVerifier
@@ -27,7 +30,7 @@ public static class RlsSecurityManifestVerifier
     public static RlsSecurityManifest Load(Assembly assembly)
     {
         var name = assembly.GetManifestResourceNames().Single(x =>
-            x.EndsWith("rls-manifest.v3.json", StringComparison.Ordinal));
+            x.EndsWith("rls-manifest.v4.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -42,11 +45,12 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken = default)
     {
         var manifest = Load(manifestAssembly);
-        if (manifest.SchemaVersion != 3 || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion != 4 || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
             "function definition inventory");
         ValidateDefaultPrivilegeManifest(manifest);
+        ValidateParameterPrivilegeManifest(manifest);
         if (manifest.ProtectedTables.Intersect(manifest.ExcludedTables, StringComparer.Ordinal).Any())
             throw new InvalidOperationException("Protected and excluded inventories overlap.");
         var mapped = database.Model.GetEntityTypes().Select(Table).Distinct(StringComparer.Ordinal).ToArray();
@@ -64,6 +68,7 @@ public static class RlsSecurityManifestVerifier
         try
         {
             await VerifyRoles(connection, manifest, cancellationToken);
+            await VerifyParameterPrivileges(connection, manifest, cancellationToken);
             await VerifyTablesAndPolicies(connection, manifest, cancellationToken);
             await VerifyDatabaseAndSchemas(connection, manifest, cancellationToken);
             await VerifyTableAcls(connection, manifest, cancellationToken);
@@ -73,6 +78,24 @@ public static class RlsSecurityManifestVerifier
             await VerifyDefaultPrivileges(connection, manifest, cancellationToken);
         }
         finally { if (close) await connection.CloseAsync(); }
+    }
+
+    private static async Task VerifyParameterPrivileges(DbConnection connection, RlsSecurityManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        var managed = new[] { manifest.OwnerRole, manifest.MigratorRole, manifest.RuntimeRole };
+        var rows = await RowsAsync(connection, """
+            select lower(parameter.parname),coalesce(grantee.rolname,'PUBLIC'),
+              acl.privilege_type,acl.is_grantable::text
+            from pg_parameter_acl parameter
+            cross join lateral aclexplode(parameter.paracl) acl
+            left join pg_roles grantee on grantee.oid=acl.grantee
+            where acl.grantee=0 or grantee.rolname=any(@roles)
+            order by 1,2,3,4
+            """, cancellationToken, ("roles", managed));
+        var expected = manifest.ParameterPrivileges.Select(grant =>
+            $"{grant.Parameter.ToLowerInvariant()}|{grant.Grantee}|{grant.Privilege}|{grant.Grantable.ToString().ToLowerInvariant()}");
+        Equal(expected, rows.Select(row => string.Join('|', row)), "parameter privileges");
     }
 
     private static async Task VerifyRoles(DbConnection connection, RlsSecurityManifest manifest,
@@ -335,6 +358,25 @@ public static class RlsSecurityManifestVerifier
                     $"{grant.Grantee}|{grant.Privilege}|{grant.Grantable}"),
                 "default privilege grants");
         }
+    }
+
+    private static void ValidateParameterPrivilegeManifest(RlsSecurityManifest manifest)
+    {
+        var managed = new[] { "PUBLIC", manifest.OwnerRole, manifest.MigratorRole, manifest.RuntimeRole };
+        foreach (var grant in manifest.ParameterPrivileges)
+        {
+            if (string.IsNullOrWhiteSpace(grant.Parameter)
+                || !managed.Contains(grant.Grantee, StringComparer.Ordinal)
+                || grant.Privilege is not ("SET" or "ALTER SYSTEM"))
+                throw new InvalidOperationException("Parameter privilege manifest entry is invalid.");
+        }
+        Equal(manifest.ParameterPrivileges.Select(grant =>
+                $"{grant.Parameter.ToLowerInvariant()}|{grant.Grantee}|{grant.Privilege}|{grant.Grantable}"),
+            manifest.ParameterPrivileges.DistinctBy(grant =>
+                $"{grant.Parameter.ToLowerInvariant()}|{grant.Grantee}|{grant.Privilege}|{grant.Grantable}")
+                .Select(grant =>
+                    $"{grant.Parameter.ToLowerInvariant()}|{grant.Grantee}|{grant.Privilege}|{grant.Grantable}"),
+            "parameter privilege grants");
     }
 
     private static string DefaultPrivilegeScope(DefaultPrivilegeState state) => state.Scope switch

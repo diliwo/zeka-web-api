@@ -588,11 +588,78 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         }
     }
 
+    [Fact]
+    public async Task Parameter_privilege_drift_fails_deployment_and_runtime_validation_and_full_revoke_restores_safety()
+    {
+        await VerifyCatalogAsync();
+        await ValidateRuntimeIdentityAsync();
+
+        var cases = new (string Mutation, string Restore, bool ProveReplicaMode)[]
+        {
+            ("GRANT SET ON PARAMETER session_replication_role TO zeka_adminarea_runtime",
+                "REVOKE SET ON PARAMETER session_replication_role FROM zeka_adminarea_runtime", true),
+            ("GRANT SET ON PARAMETER session_replication_role TO zeka_adminarea_runtime WITH GRANT OPTION",
+                "REVOKE SET ON PARAMETER session_replication_role FROM zeka_adminarea_runtime", false),
+            ("GRANT SET ON PARAMETER session_replication_role TO PUBLIC",
+                "REVOKE SET ON PARAMETER session_replication_role FROM PUBLIC", false),
+            ("GRANT ALTER SYSTEM ON PARAMETER work_mem TO zeka_adminarea_runtime",
+                "REVOKE ALTER SYSTEM ON PARAMETER work_mem FROM zeka_adminarea_runtime", false),
+            ("GRANT SET ON PARAMETER \"zeka.organisation_id\" TO zeka_adminarea_runtime",
+                "REVOKE SET ON PARAMETER \"zeka.organisation_id\" FROM zeka_adminarea_runtime", false)
+        };
+
+        foreach (var (mutation, restore, proveReplicaMode) in cases)
+        {
+            await database.ExecuteAdministratorAsync(mutation);
+            try
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+                await Assert.ThrowsAsync<InvalidOperationException>(ValidateRuntimeIdentityAsync);
+                if (proveReplicaMode)
+                    await ExecuteRuntimeTransactionAsync("SET LOCAL session_replication_role = replica");
+            }
+            finally
+            {
+                await database.ExecuteAdministratorAsync(restore);
+            }
+
+            await VerifyCatalogAsync();
+            await ValidateRuntimeIdentityAsync();
+        }
+
+        var denied = await Assert.ThrowsAsync<PostgresException>(() =>
+            ExecuteRuntimeTransactionAsync("SET LOCAL session_replication_role = replica"));
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, denied.SqlState);
+
+        var organisation = Guid.NewGuid();
+        await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetTenantAsync(connection, transaction, organisation);
+        await using var command = new NpgsqlCommand("SELECT zeka.current_organisation_id()", connection, transaction);
+        Assert.Equal(organisation, await command.ExecuteScalarAsync());
+        await transaction.RollbackAsync();
+    }
+
     private async Task VerifyCatalogAsync()
     {
         await using var deployment = new DeploymentDbContext(
             new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(database.MigratorConnectionString).Options);
         await RlsSecurityManifestVerifier.VerifyAsync(deployment, typeof(ApplicationDbContext).Assembly);
+    }
+
+    private Task ValidateRuntimeIdentityAsync() =>
+        new RuntimeDatabaseIdentityValidator(database.RuntimeConnectionString, "zeka_adminarea_runtime")
+            .StartAsync(default);
+
+    private async Task ExecuteRuntimeTransactionAsync(string sql)
+    {
+        await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        await command.ExecuteNonQueryAsync();
+        await transaction.RollbackAsync();
     }
 
     private Task SeedTeamAsync(Guid organisation, string suffix) =>

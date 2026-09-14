@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "service": "ClientManagement",
   "modelContext": "ClientManagement.Infrastructure.Persistence.DeploymentDbContext",
   "migrationId": "20260912180001_PostgreSqlRlsAndRuntimeRoles",
@@ -41,6 +41,7 @@
       ]
     }
   ],
+  "parameterPrivileges": [],
   "policyPrefix": "rls_",
   "contextFunction": "zeka.current_organisation_id"
 }
