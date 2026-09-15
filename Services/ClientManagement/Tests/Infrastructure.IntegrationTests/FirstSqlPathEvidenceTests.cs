@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
@@ -48,7 +49,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
 
         var get = await client.GetAsync("/api/Clients");
         Assert.Equal(HttpStatusCode.OK, get.StatusCode);
-        AssertCompleteAttempts(evidence.Snapshot(), TenantAttemptCommandCategory.EfRead, 1);
+        AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfRead, 1);
 
         evidence.Clear();
         var post = await client.PostAsJsonAsync("/api/Clients", new AddClientCommand
@@ -68,7 +69,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
             Address = new Address("1", "Test street", "1000", "Test city", "Test country")
         });
         Assert.Equal(HttpStatusCode.OK, post.StatusCode);
-        AssertCompleteAttempts(evidence.Snapshot(), TenantAttemptCommandCategory.EfWrite, 1);
+        AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfWrite, 1);
     }
 
     [Fact]
@@ -81,6 +82,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         var services = new ServiceCollection().AddLogging();
         services.AddSingleton<IConfiguration>(configuration);
         ClientManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
+        services.AddSingleton<IInterceptor>(evidence);
         services.RemoveAll<IHostedService>();
         services.RemoveAll<ITenantAttemptOrderObserver>();
         services.AddSingleton<ITenantAttemptOrderObserver>(evidence);
@@ -91,7 +93,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         await consumer.Handle(new StaffProjectionChangedV1(organisation, membership, 1, true,
             "Synthetic", "Consumer", "consumer", "Team", "T"));
 
-        var attempts = AssertCompleteAttempts(evidence.Snapshot(), TenantAttemptCommandCategory.EfRead, 2);
+        var attempts = AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfRead, 2);
         Assert.Contains(attempts[1], item => item.Category == TenantAttemptCommandCategory.EfWrite);
     }
 
@@ -114,6 +116,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         builder.Services.AddAuthorization();
         ClientManagement.Application.DependencyInjection.AddApplication(builder.Services);
         ClientManagement.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration);
+        builder.Services.AddSingleton<IInterceptor>(evidence);
         builder.Services.RemoveAll<IHostedService>();
         builder.Services.RemoveAll<ITenantAttemptOrderObserver>();
         builder.Services.AddSingleton<ITenantAttemptOrderObserver>(evidence);
@@ -143,27 +146,10 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         return configuration;
     }
 
-    private static TenantAttemptOrderEvent[][] AssertCompleteAttempts(TenantAttemptOrderEvent[] events,
-        TenantAttemptCommandCategory required, int expectedAttempts)
-    {
-        var attempts = events.Where(item => item.AttemptId.HasValue).GroupBy(item => item.AttemptId)
-            .Select(group => group.OrderBy(item => item.Sequence).ToArray()).ToArray();
-        Assert.Equal(expectedAttempts, attempts.Length);
-        foreach (var attempt in attempts)
-        {
-            Assert.Equal(TenantAttemptCommandCategory.Begin, attempt[0].Category);
-            Assert.Equal(TenantAttemptCommandCategory.ContextInitialized, attempt[1].Category);
-            Assert.Contains(attempt, item => item.Category == required);
-            Assert.All(attempt, item =>
-            {
-                Assert.Equal(attempt[0].TransactionId, item.TransactionId);
-                Assert.Equal(attempt[0].BackendProcessId, item.BackendProcessId);
-                Assert.True(item.TransactionId.HasValue && item.TransactionId != Guid.Empty);
-                Assert.True(item.BackendProcessId > 0);
-            });
-        }
-        return attempts;
-    }
+    private static TenantAttemptOrderEvent[][] AssertCompleteAttempts(TenantAttemptEvidenceCollector evidence,
+        TenantAttemptCommandCategory required, int expectedAttempts) =>
+        TenantAttemptEvidenceAssertions.CompleteAttempts(evidence.Snapshot(), evidence.BackendPids(),
+            required, expectedAttempts);
 
     private static void SetTenantHeaders(HttpClient client, Guid organisation)
     {

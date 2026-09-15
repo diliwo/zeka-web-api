@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -48,12 +49,12 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
 
         var get = await client.GetAsync("/api/Teams?Filter=path&OrderBy=Name&PageNumber=1&PageSize=10");
         Assert.Equal(HttpStatusCode.OK, get.StatusCode);
-        AssertCompleteAttempts(evidence.Snapshot(), TenantAttemptCommandCategory.EfRead, expectedAttempts: 1);
+        AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfRead, expectedAttempts: 1);
 
         evidence.Clear();
         var post = await client.PostAsJsonAsync("/api/Teams", new { Name = "Path evidence", Acronym = "PTH" });
         Assert.Equal(HttpStatusCode.OK, post.StatusCode);
-        AssertCompleteAttempts(evidence.Snapshot(), TenantAttemptCommandCategory.EfWrite, expectedAttempts: 1);
+        AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfWrite, expectedAttempts: 1);
     }
 
     [Fact]
@@ -70,7 +71,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         var response = await client.PostAsJsonAsync("/api/Teams", new { Name = "Retry path", Acronym = "RTP" });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var attempts = AssertCompleteAttempts(evidence.Snapshot(), TenantAttemptCommandCategory.EfWrite,
+        var attempts = AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfWrite,
             expectedAttempts: 2);
         Assert.NotEqual(attempts[0][0].AttemptId, attempts[1][0].AttemptId);
         Assert.NotEqual(attempts[0][0].TransactionId, attempts[1][0].TransactionId);
@@ -105,6 +106,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         var services = new ServiceCollection().AddLogging();
         services.AddSingleton<IConfiguration>(configuration);
         AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
+        services.AddSingleton<IInterceptor>(evidence);
         services.RemoveAll<IHostedService>();
         services.RemoveAll<ITenantAttemptOrderObserver>();
         services.AddSingleton<ITenantAttemptOrderObserver>(evidence);
@@ -132,17 +134,20 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
             Microsoft.Extensions.Logging.Abstractions.NullLogger<StaffProjectionRetryWorker>.Instance);
         Assert.False(await worker.DispatchCycleAsync(default));
         Assert.Single(publisher.Messages);
-        AssertCompleteAttempts(evidence.Snapshot(), TenantAttemptCommandCategory.EfRead, expectedAttempts: 1,
+        AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfRead, expectedAttempts: 1,
             additionallyRequired: TenantAttemptCommandCategory.EfWrite);
     }
 
     [Fact]
     public async Task Failed_context_initialization_never_records_or_dispatches_tenant_sql()
     {
+        const string positiveMarker = "issue45_initializer_capture_positive_8a6f27";
+        const string rejectedMarker = "issue45_initializer_work_rejected_1d54c9";
         var organisation = Guid.NewGuid();
         var evidence = new TenantAttemptEvidenceCollector();
         await database.ExecuteAdministratorAsync(
             "REVOKE EXECUTE ON FUNCTION pg_catalog.set_config(text,text,boolean) FROM PUBLIC");
+        var captureStart = await BeginStatementCaptureAsync(positiveMarker);
         try
         {
             await using var provider = BuildRuntimeProvider(organisation, evidence);
@@ -152,8 +157,11 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
             var executor = scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
             var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-            await Assert.ThrowsAsync<PostgresException>(() => executor.ExecuteAsync(
-                token => context.Teams.AsNoTracking().CountAsync(token), default));
+            await Assert.ThrowsAsync<PostgresException>(() => executor.ExecuteAsync(async token =>
+            {
+                await context.Database.ExecuteSqlRawAsync($"SELECT 1 /* {rejectedMarker} */", token);
+                return await context.Teams.AsNoTracking().CountAsync(token);
+            }, default));
 
             var events = evidence.Snapshot();
             Assert.Equal([TenantAttemptCommandCategory.Begin, TenantAttemptCommandCategory.Rollback],
@@ -164,9 +172,12 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         }
         finally
         {
+            await EndStatementCaptureAsync();
             await database.ExecuteAdministratorAsync(
                 "GRANT EXECUTE ON FUNCTION pg_catalog.set_config(text,text,boolean) TO PUBLIC");
         }
+
+        await AssertFunctioningCaptureExcludesAsync(captureStart, positiveMarker, rejectedMarker);
     }
 
     [Fact]
@@ -195,13 +206,14 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         var events = evidence.Snapshot();
         Assert.Contains(events, item => item.Category == TenantAttemptCommandCategory.RejectedBeforeDispatch
             && item.AttemptId is null && item.TransactionId is null && item.BackendProcessId is null);
-        AssertCompleteAttempts(events, TenantAttemptCommandCategory.EfRead, expectedAttempts: 1);
+        AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfRead, expectedAttempts: 1);
     }
 
     [Fact]
     public async Task Rejected_first_sql_is_absent_from_ephemeral_server_capture()
     {
-        const string marker = "issue45_server_non_dispatch_4bc65f";
+        const string positiveMarker = "issue45_server_capture_positive_b731a4";
+        const string rejectedMarker = "issue45_server_non_dispatch_4bc65f";
         var organisation = Guid.NewGuid();
         var evidence = new TenantAttemptEvidenceCollector();
         await using var provider = BuildRuntimeProvider(organisation, evidence);
@@ -209,30 +221,18 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         scope.ServiceProvider.GetRequiredService<ITenantContextInitializer>()
             .Establish(new TenantContext(new TenantId(organisation), "capture"));
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var captureStart = DateTime.UtcNow;
-
-        await database.ExecuteAdministratorAsync("""
-            ALTER SYSTEM SET log_parameter_max_length = 0;
-            ALTER SYSTEM SET log_parameter_max_length_on_error = 0;
-            ALTER SYSTEM SET log_statement = 'all';
-            SELECT pg_reload_conf();
-            """);
+        var captureStart = await BeginStatementCaptureAsync(positiveMarker);
         try
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                context.Database.ExecuteSqlRawAsync($"SELECT 1 /* {marker} */"));
+                context.Database.ExecuteSqlRawAsync($"SELECT 1 /* {rejectedMarker} */"));
         }
         finally
         {
-            await database.ExecuteAdministratorAsync("""
-                ALTER SYSTEM SET log_statement = 'none';
-                SELECT pg_reload_conf();
-                """);
+            await EndStatementCaptureAsync();
         }
 
-        var logs = await database.GetLogsAsync(captureStart, DateTime.UtcNow.AddSeconds(1));
-        Assert.DoesNotContain(marker, logs.Stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain(marker, logs.Stderr, StringComparison.Ordinal);
+        await AssertFunctioningCaptureExcludesAsync(captureStart, positiveMarker, rejectedMarker);
         Assert.Single(evidence.Snapshot(), item => item.Category == TenantAttemptCommandCategory.RejectedBeforeDispatch);
     }
 
@@ -249,6 +249,28 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
 
         var count = await executor.ExecuteAsync(token => context.Teams.AsNoTracking().CountAsync(token), default);
         Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task Deliberately_false_backend_pid_correlation_fails_conformance_evidence()
+    {
+        var organisation = Guid.NewGuid();
+        var evidence = new TenantAttemptEvidenceCollector();
+        await using var app = await StartHttpApplicationAsync(organisation, evidence);
+        using var client = app.GetTestClient();
+        SetTenantHeaders(client, organisation);
+
+        var response = await client.GetAsync("/api/Teams?Filter=pid&OrderBy=Name&PageNumber=1&PageSize=10");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfRead, expectedAttempts: 1);
+
+        var falseEvents = evidence.Snapshot().Select(item => item.AttemptId.HasValue
+            ? item with { BackendProcessId = int.MaxValue }
+            : item).ToArray();
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            TenantAttemptEvidenceAssertions.CompleteAttempts(falseEvents, evidence.BackendPids(),
+                TenantAttemptCommandCategory.EfRead, expectedAttempts: 1));
+        Assert.Contains("does not match independent pg_backend_pid()", exception.Message, StringComparison.Ordinal);
     }
 
     private async Task<WebApplication> StartHttpApplicationAsync(Guid organisation,
@@ -270,6 +292,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         builder.Services.AddAuthorization();
         AdminAreaManagement.Application.DependencyInjection.AddApplication(builder.Services);
         AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration);
+        builder.Services.AddSingleton<IInterceptor>(evidence);
         builder.Services.RemoveAll<IHostedService>();
         builder.Services.RemoveAll<ITenantAttemptOrderObserver>();
         builder.Services.AddSingleton<ITenantAttemptOrderObserver>(evidence);
@@ -314,6 +337,8 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         var services = new ServiceCollection().AddLogging();
         services.AddSingleton<IConfiguration>(configuration);
         AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
+        if (observer is TenantAttemptEvidenceCollector evidence)
+            services.AddSingleton<IInterceptor>(evidence);
         services.RemoveAll<IHostedService>();
         services.RemoveAll<ITenantAttemptOrderObserver>();
         services.AddSingleton(observer);
@@ -331,33 +356,53 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
-    private static TenantAttemptOrderEvent[][] AssertCompleteAttempts(TenantAttemptOrderEvent[] events,
-        TenantAttemptCommandCategory required, int expectedAttempts,
-        TenantAttemptCommandCategory? additionallyRequired = null)
+    private async Task<DateTime> BeginStatementCaptureAsync(string positiveMarker)
     {
-        var attempts = events.Where(item => item.AttemptId.HasValue)
-            .GroupBy(item => item.AttemptId).Select(group => group.OrderBy(item => item.Sequence).ToArray()).ToArray();
-        Assert.Equal(expectedAttempts, attempts.Length);
-        foreach (var attempt in attempts)
+        var captureStart = DateTime.UtcNow;
+        await database.ExecuteAdministratorAsync("""
+            ALTER SYSTEM SET log_parameter_max_length = 0;
+            ALTER SYSTEM SET log_parameter_max_length_on_error = 0;
+            ALTER SYSTEM SET log_statement = 'all';
+            SELECT pg_reload_conf();
+            """);
+
+        await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+        await connection.OpenAsync();
+        for (var attempt = 0; attempt < 20; attempt++)
         {
-            Assert.Equal(TenantAttemptCommandCategory.Begin, attempt[0].Category);
-            Assert.Equal(TenantAttemptCommandCategory.ContextInitialized, attempt[1].Category);
-            Assert.Contains(attempt, item => item.Category == required);
-            if (additionallyRequired.HasValue)
-                Assert.Contains(attempt, item => item.Category == additionallyRequired.Value);
-            Assert.All(attempt, item =>
-            {
-                Assert.Equal(attempt[0].AttemptId, item.AttemptId);
-                Assert.Equal(attempt[0].TransactionId, item.TransactionId);
-                Assert.Equal(attempt[0].BackendProcessId, item.BackendProcessId);
-                Assert.True(item.TransactionId.HasValue && item.TransactionId != Guid.Empty);
-                Assert.True(item.BackendProcessId > 0);
-            });
-            Assert.Equal(Enumerable.Range(1, attempt.Length).Select(value => (long)value),
-                attempt.Select(item => item.Sequence));
+            await using var readiness = new NpgsqlCommand("show log_statement", connection);
+            if (string.Equals(Convert.ToString(await readiness.ExecuteScalarAsync()), "all",
+                    StringComparison.Ordinal))
+                break;
+            if (attempt == 19)
+                throw new InvalidOperationException("PostgreSQL statement capture did not become active.");
+            await Task.Delay(TimeSpan.FromMilliseconds(25));
         }
-        return attempts;
+
+        await using var positiveControl = new NpgsqlCommand($"SELECT 1 /* {positiveMarker} */", connection);
+        await positiveControl.ExecuteScalarAsync();
+        return captureStart;
     }
+
+    private Task EndStatementCaptureAsync() => database.ExecuteAdministratorAsync("""
+        ALTER SYSTEM SET log_statement = 'none';
+        SELECT pg_reload_conf();
+        """);
+
+    private async Task AssertFunctioningCaptureExcludesAsync(DateTime captureStart, string positiveMarker,
+        string rejectedMarker)
+    {
+        var logs = await database.GetLogsAsync(captureStart, DateTime.UtcNow.AddSeconds(1));
+        var capture = string.Concat(logs.Stdout, logs.Stderr);
+        Assert.Contains(positiveMarker, capture, StringComparison.Ordinal);
+        Assert.DoesNotContain(rejectedMarker, capture, StringComparison.Ordinal);
+    }
+
+    private static TenantAttemptOrderEvent[][] AssertCompleteAttempts(TenantAttemptEvidenceCollector evidence,
+        TenantAttemptCommandCategory required, int expectedAttempts,
+        TenantAttemptCommandCategory? additionallyRequired = null) =>
+        TenantAttemptEvidenceAssertions.CompleteAttempts(evidence.Snapshot(), evidence.BackendPids(),
+            required, expectedAttempts, additionallyRequired);
 
     private static void SetTenantHeaders(HttpClient client, Guid organisation)
     {

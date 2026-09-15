@@ -9,6 +9,7 @@ using AdminAreaManagement.Infrastructure.Persistence.Helpers;
 using AdminAreaManagement.Infrastructure.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -42,7 +43,8 @@ public static class DependencyInjection
                 configuration.GetConnectionString("ClientApiConnection"),
                 builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
                     .EnableRetryOnFailure(3, TimeSpan.FromMilliseconds(200), null))
-                .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>()));
+                .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>())
+                .AddInterceptors(provider.GetServices<IInterceptor>()));
 
 
 

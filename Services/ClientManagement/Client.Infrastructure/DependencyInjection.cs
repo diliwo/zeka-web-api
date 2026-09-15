@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using ClientManagement.Application.Common.Authorization;
 using Microsoft.Extensions.Hosting;
 using Zeka.PersistenceSecurity;
@@ -36,7 +37,8 @@ public static class DependencyInjection
                 configuration.GetConnectionString("ClientApiConnection"),
                 builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
                     .EnableRetryOnFailure(3, TimeSpan.FromMilliseconds(200), null))
-                .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>()));
+                .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>())
+                .AddInterceptors(provider.GetServices<IInterceptor>()));
 
         services.AddTransient<IMonitoringActionRepository, MonitoringActionRepository>(); ;
         services.AddTransient<ILanguageRepository, LanguageRepository>();
