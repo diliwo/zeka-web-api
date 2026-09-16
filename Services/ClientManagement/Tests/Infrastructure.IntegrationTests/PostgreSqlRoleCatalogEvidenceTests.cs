@@ -40,6 +40,14 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(ApplicationDbContext).Assembly);
         await new RuntimeDatabaseIdentityValidator(Connection("zeka_client_runtime", RuntimePassword),
             "zeka_client_runtime").StartAsync(default);
+
+        var maskedAdministrator = new NpgsqlConnectionStringBuilder(postgres.GetConnectionString())
+        {
+            Options = "-c role=zeka_client_runtime",
+            Pooling = false
+        }.ConnectionString;
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new RuntimeDatabaseIdentityValidator(maskedAdministrator, "zeka_client_runtime").StartAsync(default));
     }
 
     private static DeploymentDbContext Deployment(string connectionString) => new(

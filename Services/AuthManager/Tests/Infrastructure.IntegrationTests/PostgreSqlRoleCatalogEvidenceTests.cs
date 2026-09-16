@@ -36,6 +36,14 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(AuthDbContext).Assembly);
         await new RuntimeDatabaseIdentityValidator(Connection("zeka_auth_runtime", RuntimePassword),
             "zeka_auth_runtime").StartAsync(default);
+
+        var maskedAdministrator = new NpgsqlConnectionStringBuilder(postgres.GetConnectionString())
+        {
+            Options = "-c role=zeka_auth_runtime",
+            Pooling = false
+        }.ConnectionString;
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new RuntimeDatabaseIdentityValidator(maskedAdministrator, "zeka_auth_runtime").StartAsync(default));
     }
 
     private static AuthDbContext Context(string connectionString) => new(

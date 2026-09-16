@@ -194,6 +194,54 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     }
 
     [Fact]
+    public async Task Startup_identity_validation_rejects_privileged_session_masked_as_runtime_role()
+    {
+        const string expectedRole = "zeka_adminarea_runtime";
+        var administratorRole = new NpgsqlConnectionStringBuilder(database.AdministratorConnectionString).Username!;
+
+        await ValidateRuntimeIdentityAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new RuntimeDatabaseIdentityValidator(database.AdministratorConnectionString, expectedRole)
+                .StartAsync(default));
+
+        var maskedAdministrator = new NpgsqlConnectionStringBuilder(database.AdministratorConnectionString)
+        {
+            Options = $"-c role={expectedRole}",
+            Pooling = false
+        }.ConnectionString;
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new RuntimeDatabaseIdentityValidator(maskedAdministrator, expectedRole).StartAsync(default));
+
+        await using var connection = new NpgsqlConnection(maskedAdministrator);
+        await connection.OpenAsync();
+        await using (var maskedIdentity = new NpgsqlCommand("select session_user,current_user", connection))
+        await using (var reader = await maskedIdentity.ExecuteReaderAsync())
+        {
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(administratorRole, reader.GetString(0));
+            Assert.Equal(expectedRole, reader.GetString(1));
+        }
+
+        await using (var reset = new NpgsqlCommand("set role none", connection))
+            await reset.ExecuteNonQueryAsync();
+        await using (var restoredAuthority = new NpgsqlCommand("""
+            select current_user,r.rolsuper,r.rolbypassrls,
+                   (select count(*) from public."Teams")
+            from pg_roles r where r.rolname=current_user
+            """, connection))
+        await using (var reader = await restoredAuthority.ExecuteReaderAsync())
+        {
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(administratorRole, reader.GetString(0));
+            Assert.True(reader.GetBoolean(1));
+            Assert.True(reader.GetBoolean(2));
+            Assert.True(reader.GetInt64(3) >= 0);
+        }
+
+        await VerifyCatalogAsync();
+    }
+
+    [Fact]
     public async Task Versioned_manifest_matches_EF_classification_and_effective_catalog_bidirectionally()
     {
         await using var deployment = new DeploymentDbContext(
