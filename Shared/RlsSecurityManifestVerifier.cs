@@ -19,7 +19,7 @@ public sealed record ManagedObjectIdentity(string Schema, string Name);
 
 public sealed record RlsSecurityManifest(int SchemaVersion, string Service, string ModelContext,
     string MigrationId, string OwnerRole, string MigratorRole, string RuntimeRole,
-    string[] ManagedSchemas,
+    string[] ManagedSchemas, string[] ProhibitedRelationKinds,
     ManagedObjectIdentity[] ProtectedTables, ManagedObjectIdentity[] ExcludedTables,
     ManagedObjectIdentity MigrationHistoryTable, ManagedObjectIdentity[] Sequences,
     string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
@@ -30,11 +30,17 @@ public sealed record RlsSecurityManifest(int SchemaVersion, string Service, stri
 public static class RlsSecurityManifestVerifier
 {
     private static readonly string[] Dml = ["DELETE", "INSERT", "SELECT", "UPDATE"];
+    private static readonly string[] ProhibitedRelationKinds =
+    [
+        "FOREIGN_TABLE",
+        "MATERIALIZED_VIEW",
+        "VIEW"
+    ];
 
     public static RlsSecurityManifest Load(Assembly assembly)
     {
         var name = assembly.GetManifestResourceNames().Single(x =>
-            x.EndsWith("rls-manifest.v6.json", StringComparison.Ordinal));
+            x.EndsWith("rls-manifest.v7.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -50,7 +56,7 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken = default)
     {
         var manifest = Load(manifestAssembly);
-        if (manifest.SchemaVersion != 6 || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion != 7 || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
             "function definition inventory");
@@ -81,6 +87,7 @@ public static class RlsSecurityManifestVerifier
         {
             await VerifyRoles(connection, manifest, cancellationToken);
             await VerifyParameterPrivileges(connection, manifest, cancellationToken);
+            await VerifyProhibitedRelationSurfaces(connection, manifest, cancellationToken);
             await VerifyTablesAndPolicies(connection, manifest, cancellationToken);
             await VerifyDatabaseAndSchemas(connection, manifest, cancellationToken);
             await VerifyTableAcls(connection, manifest, cancellationToken);
@@ -90,6 +97,26 @@ public static class RlsSecurityManifestVerifier
             await VerifyDefaultPrivileges(connection, manifest, cancellationToken);
         }
         finally { if (close) await connection.CloseAsync(); }
+    }
+
+    private static async Task VerifyProhibitedRelationSurfaces(DbConnection connection,
+        RlsSecurityManifest manifest, CancellationToken cancellationToken)
+    {
+        var rows = await RowsAsync(connection, """
+            select n.nspname,c.relname,
+              case c.relkind
+                when 'f' then 'FOREIGN_TABLE'
+                when 'm' then 'MATERIALIZED_VIEW'
+                when 'v' then 'VIEW'
+              end,
+              owner.rolname
+            from pg_class c
+            join pg_namespace n on n.oid=c.relnamespace
+            join pg_roles owner on owner.oid=c.relowner
+            where n.nspname=any(@schemas) and c.relkind in ('f','m','v')
+            order by n.nspname,c.relname
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+        Equal([], rows.Select(row => string.Join('|', row)), "prohibited relation surfaces");
     }
 
     private static async Task VerifyParameterPrivileges(DbConnection connection, RlsSecurityManifest manifest,
@@ -450,6 +477,8 @@ public static class RlsSecurityManifestVerifier
 
     private static void ValidateManagedObjectManifest(RlsSecurityManifest manifest)
     {
+        Equal(ProhibitedRelationKinds, manifest.ProhibitedRelationKinds,
+            "prohibited relation kind inventory");
         ValidateIdentities(manifest.ProtectedTables, "protected table");
         ValidateIdentities(manifest.ExcludedTables, "excluded table");
         ValidateIdentities(manifest.Sequences, "sequence");

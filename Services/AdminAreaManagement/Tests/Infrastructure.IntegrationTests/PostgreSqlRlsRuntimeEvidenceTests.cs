@@ -244,9 +244,127 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     [Fact]
     public async Task Versioned_manifest_matches_EF_classification_and_effective_catalog_bidirectionally()
     {
+        var manifest = RlsSecurityManifestVerifier.Load(typeof(ApplicationDbContext).Assembly);
+        Assert.Equal(7, manifest.SchemaVersion);
+        Assert.Equal(["FOREIGN_TABLE", "MATERIALIZED_VIEW", "VIEW"], manifest.ProhibitedRelationKinds);
         await using var deployment = new DeploymentDbContext(
             new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(database.MigratorConnectionString).Options);
         await RlsSecurityManifestVerifier.VerifyAsync(deployment, typeof(ApplicationDbContext).Assembly);
+    }
+
+    [Fact]
+    public async Task Undeclared_privileged_view_is_rejected_and_restoration_returns_green()
+    {
+        var organisationA = Guid.NewGuid();
+        var organisationB = Guid.NewGuid();
+        await database.SeedTeamAsAdministratorAsync(organisationA, "ViewA");
+        await database.SeedTeamAsAdministratorAsync(organisationB, "ViewB");
+        await VerifyCatalogAsync();
+
+        await database.ExecuteAdministratorAsync("""
+            CREATE VIEW public.issue45_review_view AS
+              SELECT "OrganisationId" FROM public."Teams";
+            GRANT SELECT ON TABLE public.issue45_review_view TO zeka_adminarea_runtime;
+            """);
+        try
+        {
+            var drift = await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+            Assert.Contains("prohibited relation surfaces drifted", drift.Message, StringComparison.Ordinal);
+
+            await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+            await connection.OpenAsync();
+            await using (var transaction = await connection.BeginTransactionAsync())
+            {
+                await SetTenantAsync(connection, transaction, organisationA);
+                await using var protectedTable = new NpgsqlCommand("""
+                    SELECT count(*) FROM public."Teams"
+                    WHERE "OrganisationId"=@organisation
+                    """, connection, transaction);
+                protectedTable.Parameters.AddWithValue("organisation", organisationB);
+                Assert.Equal(0L, await protectedTable.ExecuteScalarAsync());
+
+                await using var view = new NpgsqlCommand("""
+                    SELECT count(*) FROM public.issue45_review_view
+                    WHERE "OrganisationId"=@organisation
+                    """, connection, transaction);
+                view.Parameters.AddWithValue("organisation", organisationB);
+                Assert.Equal(1L, await view.ExecuteScalarAsync());
+                await transaction.RollbackAsync();
+            }
+
+            await using var withoutContext = new NpgsqlCommand("""
+                SELECT count(*) FROM public.issue45_review_view
+                WHERE "OrganisationId"=@organisation
+                """, connection);
+            withoutContext.Parameters.AddWithValue("organisation", organisationB);
+            Assert.Equal(1L, await withoutContext.ExecuteScalarAsync());
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("DROP VIEW public.issue45_review_view");
+        }
+
+        await VerifyCatalogAsync();
+    }
+
+    [Fact]
+    public async Task Undeclared_materialized_view_and_foreign_table_are_rejected_and_restore_green()
+    {
+        var organisation = Guid.NewGuid();
+        await database.SeedTeamAsAdministratorAsync(organisation, "SurfAce");
+        await VerifyCatalogAsync();
+
+        await database.ExecuteAdministratorAsync("""
+            CREATE MATERIALIZED VIEW zeka.issue45_review_materialized_view AS
+              SELECT "OrganisationId" FROM public."Teams";
+            GRANT SELECT ON TABLE zeka.issue45_review_materialized_view TO zeka_adminarea_runtime;
+            """);
+        try
+        {
+            var drift = await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+            Assert.Contains("prohibited relation surfaces drifted", drift.Message, StringComparison.Ordinal);
+            await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand("""
+                SELECT count(*) FROM zeka.issue45_review_materialized_view
+                WHERE "OrganisationId"=@organisation
+                """, connection);
+            command.Parameters.AddWithValue("organisation", organisation);
+            Assert.Equal(1L, await command.ExecuteScalarAsync());
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync(
+                "DROP MATERIALIZED VIEW zeka.issue45_review_materialized_view");
+        }
+        await VerifyCatalogAsync();
+
+        await database.ExecuteAdministratorAsync("""
+            CREATE EXTENSION file_fdw;
+            CREATE SERVER issue45_review_file_server FOREIGN DATA WRAPPER file_fdw;
+            CREATE FOREIGN TABLE zeka.issue45_review_foreign_table ("OrganisationId" uuid)
+              SERVER issue45_review_file_server OPTIONS (filename '/dev/null', format 'csv');
+            GRANT USAGE ON FOREIGN SERVER issue45_review_file_server TO zeka_adminarea_runtime;
+            GRANT SELECT ON TABLE zeka.issue45_review_foreign_table TO zeka_adminarea_runtime;
+            """);
+        try
+        {
+            var drift = await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+            Assert.Contains("prohibited relation surfaces drifted", drift.Message, StringComparison.Ordinal);
+            await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand(
+                "SELECT count(*) FROM zeka.issue45_review_foreign_table", connection);
+            Assert.Equal(0L, await command.ExecuteScalarAsync());
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("""
+                DROP SERVER IF EXISTS issue45_review_file_server CASCADE;
+                DROP EXTENSION IF EXISTS file_fdw;
+                """);
+        }
+        await VerifyCatalogAsync();
     }
 
     [Theory]

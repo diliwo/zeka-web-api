@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "service": "AdminAreaManagement",
   "modelContext": "AdminAreaManagement.Infrastructure.Persistence.DeploymentDbContext",
   "migrationId": "20260912180000_PostgreSqlRlsAndRuntimeRoles",
@@ -7,6 +7,7 @@
   "migratorRole": "zeka_adminarea_migrator",
   "runtimeRole": "zeka_adminarea_runtime",
   "managedSchemas": ["public", "zeka"],
+  "prohibitedRelationKinds": ["FOREIGN_TABLE", "MATERIALIZED_VIEW", "VIEW"],
   "protectedTables": [
     { "schema": "public", "name": "ContactPersons" },
     { "schema": "public", "name": "DocumentPartners" },
