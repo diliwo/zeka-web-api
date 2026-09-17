@@ -28,7 +28,8 @@ public sealed record RlsSecurityManifest(int SchemaVersion, string Service, stri
     ManagedObjectIdentity MigrationHistoryTable, ManagedObjectIdentity[] Sequences,
     string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
     DefaultPrivilegeState[] DefaultPrivileges, ParameterPrivilegeGrant[] ParameterPrivileges,
-    string PolicyPrefix, string? ContextFunction);
+    string PolicyPrefix, string? PolicyUsingExpression, string? PolicyWithCheckExpression,
+    string? ContextFunction);
 
 /// <summary>Deployment-only bidirectional comparison of the versioned model and effective PostgreSQL state.</summary>
 public static class RlsSecurityManifestVerifier
@@ -44,7 +45,7 @@ public static class RlsSecurityManifestVerifier
     public static RlsSecurityManifest Load(Assembly assembly)
     {
         var name = assembly.GetManifestResourceNames().Single(x =>
-            x.EndsWith("rls-manifest.v8.json", StringComparison.Ordinal));
+            x.EndsWith("rls-manifest.v9.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -60,7 +61,7 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken = default)
     {
         var manifest = Load(manifestAssembly);
-        if (manifest.SchemaVersion != 8 || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion != 9 || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
             "function definition inventory");
@@ -246,18 +247,20 @@ public static class RlsSecurityManifestVerifier
             throw new InvalidOperationException("Migration-history identity or ownership drifted.");
         var policies = await RowsAsync(connection, """
             select n.nspname,c.relname,p.polname,p.polcmd::text,p.polpermissive::text,
-                   pg_get_expr(p.polqual,p.polrelid),pg_get_expr(p.polwithcheck,p.polrelid),
+                   pg_get_expr(p.polqual,p.polrelid,false),pg_get_expr(p.polwithcheck,p.polrelid,false),
                    array_to_string(array(select rolname from pg_roles where oid=any(p.polroles) order by rolname),',')
             from pg_policy p join pg_class c on c.oid=p.polrelid join pg_namespace n on n.oid=c.relnamespace
             where n.nspname=any(@schemas) order by n.nspname,c.relname,p.polname
             """, cancellationToken, ("schemas", manifest.ManagedSchemas));
         Equal(manifest.ProtectedTables.Select(ObjectKey),
             policies.Select(row => ObjectKey(row[0], row[1])), "RLS policy targets");
-        var expression = Normalize("\"OrganisationId\" = zeka.current_organisation_id()");
+        // PostgreSQL 17's non-pretty deparser removes parser-level presentation differences while retaining
+        // identifiers, qualification, calls, operators, constants, casts, and boolean structure. Compare its
+        // complete output exactly; character filtering would destroy quoted-identifier semantics.
         foreach (var row in policies)
             if (row[2] != manifest.PolicyPrefix + row[1].ToLowerInvariant() + "_organisation"
                 || row[3] != "*" || row[4] != "true" || row[7] != manifest.RuntimeRole
-                || Normalize(row[5]) != expression || Normalize(row[6]) != expression)
+                || row[5] != manifest.PolicyUsingExpression || row[6] != manifest.PolicyWithCheckExpression)
                 throw new InvalidOperationException("RLS policy definition drifted.");
     }
 
@@ -509,6 +512,10 @@ public static class RlsSecurityManifestVerifier
         if (manifest.RelationTopology.Length != 0)
             throw new InvalidOperationException(
                 "The current security model prohibits inheritance and partition topology.");
+        var requiresPolicies = manifest.ProtectedTables.Length != 0;
+        if (requiresPolicies != !string.IsNullOrWhiteSpace(manifest.PolicyUsingExpression)
+            || requiresPolicies != !string.IsNullOrWhiteSpace(manifest.PolicyWithCheckExpression))
+            throw new InvalidOperationException("Reviewed policy expressions are invalid.");
         ValidateIdentities(manifest.ProtectedTables, "protected table");
         ValidateIdentities(manifest.ExcludedTables, "excluded table");
         ValidateIdentities(manifest.Sequences, "sequence");
@@ -564,10 +571,6 @@ public static class RlsSecurityManifestVerifier
             throw new InvalidOperationException(
                 $"Database role attributes drifted for {role}: [{string.Join(", ", row.Skip(1))}].");
     }
-
-    private static string Normalize(string value) => string.Concat(value.Where(character =>
-        !char.IsWhiteSpace(character) && character is not '(' and not ')')).Replace("\"", string.Empty,
-        StringComparison.Ordinal);
 
     private static string DefinitionSha256(string definition)
     {

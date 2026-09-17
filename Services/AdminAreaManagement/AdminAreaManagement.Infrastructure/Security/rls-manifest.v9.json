@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "service": "AdminAreaManagement",
   "modelContext": "AdminAreaManagement.Infrastructure.Persistence.DeploymentDbContext",
   "migrationId": "20260912180000_PostgreSqlRlsAndRuntimeRoles",
@@ -86,5 +86,7 @@
   ],
   "parameterPrivileges": [],
   "policyPrefix": "rls_",
+  "policyUsingExpression": "(\"OrganisationId\" = zeka.current_organisation_id())",
+  "policyWithCheckExpression": "(\"OrganisationId\" = zeka.current_organisation_id())",
   "contextFunction": "zeka.current_organisation_id"
 }

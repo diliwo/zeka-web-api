@@ -245,12 +245,156 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     public async Task Versioned_manifest_matches_EF_classification_and_effective_catalog_bidirectionally()
     {
         var manifest = RlsSecurityManifestVerifier.Load(typeof(ApplicationDbContext).Assembly);
-        Assert.Equal(8, manifest.SchemaVersion);
+        Assert.Equal(9, manifest.SchemaVersion);
         Assert.Equal(["FOREIGN_TABLE", "MATERIALIZED_VIEW", "VIEW"], manifest.ProhibitedRelationKinds);
         Assert.Empty(manifest.RelationTopology);
+        Assert.Equal("(\"OrganisationId\" = zeka.current_organisation_id())",
+            manifest.PolicyUsingExpression);
+        Assert.Equal(manifest.PolicyUsingExpression, manifest.PolicyWithCheckExpression);
         await using var deployment = new DeploymentDbContext(
             new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(database.MigratorConnectionString).Options);
         await RlsSecurityManifestVerifier.VerifyAsync(deployment, typeof(ApplicationDbContext).Assembly);
+    }
+
+    [Fact]
+    public async Task Policy_comparison_preserves_quoted_identifier_identity()
+    {
+        var organisationA = Guid.NewGuid();
+        var organisationB = Guid.NewGuid();
+        await SeedTeamAsync(organisationB, "PolB");
+        await VerifyCatalogAsync();
+
+        await database.ExecuteAdministratorAsync($"""
+            ALTER TABLE public."Teams" ADD COLUMN "Organisation Id" uuid;
+            UPDATE public."Teams" SET "Organisation Id" = '{organisationA:D}'
+              WHERE "OrganisationId" = '{organisationB:D}';
+            ALTER POLICY rls_teams_organisation ON public."Teams"
+              USING ("Organisation Id" = zeka.current_organisation_id())
+              WITH CHECK ("Organisation Id" = zeka.current_organisation_id());
+            """);
+        try
+        {
+            var emitted = await ExecuteAdministratorScalarAsync<string>("""
+                SELECT pg_get_expr(p.polqual,p.polrelid)
+                FROM pg_policy p
+                WHERE p.polrelid='public."Teams"'::regclass
+                  AND p.polname='rls_teams_organisation'
+                """);
+            Assert.Equal("(\"Organisation Id\" = zeka.current_organisation_id())", emitted);
+
+            var drift = await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+            Assert.Contains("RLS policy definition drifted", drift.Message, StringComparison.Ordinal);
+
+            await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await SetTenantAsync(connection, transaction, organisationA);
+            await using var exposed = new NpgsqlCommand("""
+                SELECT count(*) FROM public."Teams"
+                WHERE "OrganisationId"=@organisation
+                """, connection, transaction);
+            exposed.Parameters.AddWithValue("organisation", organisationB);
+            Assert.Equal(1L, await exposed.ExecuteScalarAsync());
+            await transaction.RollbackAsync();
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("""
+                ALTER POLICY rls_teams_organisation ON public."Teams"
+                  USING ("OrganisationId" = zeka.current_organisation_id())
+                  WITH CHECK ("OrganisationId" = zeka.current_organisation_id());
+                ALTER TABLE public."Teams" DROP COLUMN "Organisation Id";
+                DELETE FROM public."Teams" WHERE "Name"='PolB';
+                """);
+        }
+
+        await VerifyCatalogAsync();
+    }
+
+    [Fact]
+    public async Task Policy_comparison_accepts_only_PostgreSql_canonical_presentation_and_rejects_semantic_drift()
+    {
+        const string expected = "(\"OrganisationId\" = zeka.current_organisation_id())";
+        const string restore = """
+            ALTER POLICY rls_teams_organisation ON public."Teams"
+              USING ("OrganisationId" = zeka.current_organisation_id())
+              WITH CHECK ("OrganisationId" = zeka.current_organisation_id());
+            """;
+        await VerifyCatalogAsync();
+        Assert.Equal($"{expected}|{expected}", await ReadTeamPolicyExpressionsAsync());
+
+        await database.ExecuteAdministratorAsync("""
+            ALTER POLICY rls_teams_organisation ON public."Teams"
+              USING ((( "OrganisationId"=zeka.current_organisation_id() )))
+              WITH CHECK (((("OrganisationId" = zeka.current_organisation_id()))));
+            """);
+        await VerifyCatalogAsync();
+        Assert.Equal($"{expected}|{expected}", await ReadTeamPolicyExpressionsAsync());
+        await database.ExecuteAdministratorAsync(restore);
+
+        var cases = new (string Mutation, string Cleanup)[]
+        {
+            ("""
+                ALTER TABLE public."Teams" ADD COLUMN "organisationid" uuid;
+                ALTER POLICY rls_teams_organisation ON public."Teams"
+                  USING ("organisationid" = zeka.current_organisation_id())
+                  WITH CHECK ("organisationid" = zeka.current_organisation_id());
+                """, "ALTER TABLE public.\"Teams\" DROP COLUMN \"organisationid\";"),
+            ("""
+                CREATE FUNCTION public.issue45_policy_context() RETURNS uuid
+                  LANGUAGE sql STABLE AS 'SELECT zeka.current_organisation_id()';
+                ALTER POLICY rls_teams_organisation ON public."Teams"
+                  USING ("OrganisationId" = public.issue45_policy_context())
+                  WITH CHECK ("OrganisationId" = public.issue45_policy_context());
+                """, "DROP FUNCTION public.issue45_policy_context();"),
+            ("""
+                CREATE FUNCTION zeka.issue45_current_organisation_id() RETURNS uuid
+                  LANGUAGE sql STABLE AS 'SELECT zeka.current_organisation_id()';
+                ALTER POLICY rls_teams_organisation ON public."Teams"
+                  USING ("OrganisationId" = zeka.issue45_current_organisation_id())
+                  WITH CHECK ("OrganisationId" = zeka.issue45_current_organisation_id());
+                """, "DROP FUNCTION zeka.issue45_current_organisation_id();"),
+            ("""
+                ALTER POLICY rls_teams_organisation ON public."Teams"
+                  USING ("OrganisationId" IS NOT DISTINCT FROM zeka.current_organisation_id())
+                  WITH CHECK ("OrganisationId" IS NOT DISTINCT FROM zeka.current_organisation_id());
+                """, string.Empty),
+            ("""
+                ALTER POLICY rls_teams_organisation ON public."Teams"
+                  USING (("OrganisationId" = zeka.current_organisation_id()) AND true)
+                  WITH CHECK (("OrganisationId" = zeka.current_organisation_id()) AND true);
+                """, string.Empty),
+            ("""
+                ALTER POLICY rls_teams_organisation ON public."Teams"
+                  USING (true)
+                  WITH CHECK ("OrganisationId" = zeka.current_organisation_id());
+                """, string.Empty),
+            ("""
+                ALTER POLICY rls_teams_organisation ON public."Teams"
+                  USING ("OrganisationId" = zeka.current_organisation_id())
+                  WITH CHECK (true);
+                """, string.Empty),
+            ("""
+                ALTER POLICY rls_teams_organisation ON public."Teams"
+                  USING ("OrganisationId" = '11111111-1111-1111-1111-111111111111'::uuid)
+                  WITH CHECK ("OrganisationId" = '11111111-1111-1111-1111-111111111111'::uuid);
+                """, string.Empty)
+        };
+
+        foreach (var (mutation, cleanup) in cases)
+        {
+            await database.ExecuteAdministratorAsync(mutation);
+            try
+            {
+                var drift = await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+                Assert.Contains("RLS policy definition drifted", drift.Message, StringComparison.Ordinal);
+            }
+            finally
+            {
+                await database.ExecuteAdministratorAsync(restore + cleanup);
+            }
+            await VerifyCatalogAsync();
+        }
     }
 
     [Fact]
@@ -1216,6 +1360,14 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         await using var command = new NpgsqlCommand(sql, connection);
         return (T)(await command.ExecuteScalarAsync())!;
     }
+
+    private Task<string> ReadTeamPolicyExpressionsAsync() => ExecuteAdministratorScalarAsync<string>("""
+        SELECT pg_get_expr(p.polqual,p.polrelid,false) || '|' ||
+               pg_get_expr(p.polwithcheck,p.polrelid,false)
+        FROM pg_policy p
+        WHERE p.polrelid='public."Teams"'::regclass
+          AND p.polname='rls_teams_organisation'
+        """);
 
     private async Task ExecuteRuntimeTransactionAsync(string sql)
     {
