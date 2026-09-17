@@ -36,15 +36,24 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
             CancellationToken.None);
         var database = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var transactions = scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
-        var currentRevision = await transactions.ExecuteAsync(async cancellationToken =>
+        var current = await transactions.ExecuteAsync(async cancellationToken =>
             await database.SocialWorkers.AsNoTracking()
                 .Where(x => x.OrganisationMembershipId == message.OrganisationMembershipId)
-                .Select(x => (long?)x.ProjectionVersion)
+                .Select(x => new { x.ProjectionVersion, x.LastProjectionEventId })
                 .SingleOrDefaultAsync(cancellationToken), CancellationToken.None);
         // A previously accepted delivery is already authoritative. Avoid rejecting harmless duplicate or
         // out-of-order redelivery merely because the membership was subsequently made inactive.
-        if (currentRevision is not null && message.Revision < currentRevision)
-            return;
+        if (current is not null)
+        {
+            if (message.Revision < current.ProjectionVersion)
+                return;
+            if (message.Revision == current.ProjectionVersion)
+            {
+                if (message.Id == current.LastProjectionEventId)
+                    return;
+                throw new InvalidOperationException("Conflicting staff projection revision.");
+            }
+        }
         // Membership verification is an external authorization call. Complete it before opening the
         // database transaction so an EF execution-strategy retry never replays network I/O.
         if (!await new StaffMembershipClient(http, identity).VerifyAsync(message.OrganisationId,

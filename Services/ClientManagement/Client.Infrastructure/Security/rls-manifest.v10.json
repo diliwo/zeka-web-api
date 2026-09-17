@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "service": "ClientManagement",
   "modelContext": "ClientManagement.Infrastructure.Persistence.DeploymentDbContext",
   "migrationId": "20260912180001_PostgreSqlRlsAndRuntimeRoles",
@@ -48,6 +48,42 @@
     { "schema": "public", "name": "TrainingType_Id_seq" },
     { "schema": "public", "name": "Training_Id_seq" }
   ],
+  "tablePrivileges": [
+    { "object": { "schema": "public", "name": "Assessments" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Clients" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Languages" }, "privileges": ["SELECT"] },
+    { "object": { "schema": "public", "name": "MonitoringActions" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "MonitoringReports" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "NatureOfContract" }, "privileges": ["SELECT"] },
+    { "object": { "schema": "public", "name": "Profession" }, "privileges": ["SELECT"] },
+    { "object": { "schema": "public", "name": "ProfessionalAssessments" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "ProfessionnalExperience" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "School" }, "privileges": ["SELECT"] },
+    { "object": { "schema": "public", "name": "SchoolRegistrations" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "SocialCases" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "SocialWorkers" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Training" }, "privileges": ["SELECT"] },
+    { "object": { "schema": "public", "name": "TrainingField" }, "privileges": ["SELECT"] },
+    { "object": { "schema": "public", "name": "TrainingType" }, "privileges": ["SELECT"] }
+  ],
+  "sequencePrivileges": [
+    { "object": { "schema": "public", "name": "Assessments_AssessmentId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "Clients_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "Languages_LanguageId_seq" }, "privileges": [] },
+    { "object": { "schema": "public", "name": "MonitoringActions_ActionId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "MonitoringReports_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "NatureOfContract_NatureOfContractId_seq" }, "privileges": [] },
+    { "object": { "schema": "public", "name": "Profession_Id_seq" }, "privileges": [] },
+    { "object": { "schema": "public", "name": "ProfessionalAssessments_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "ProfessionnalExperience_ProfessionnalExperienceId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "SchoolRegistrations_SchoolRegistrationId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "School_Id_seq" }, "privileges": [] },
+    { "object": { "schema": "public", "name": "SocialCases_SchoolRegistrationId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "SocialWorkers_SocialWorkerId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "TrainingField_Id_seq" }, "privileges": [] },
+    { "object": { "schema": "public", "name": "TrainingType_Id_seq" }, "privileges": [] },
+    { "object": { "schema": "public", "name": "Training_Id_seq" }, "privileges": [] }
+  ],
   "runtimeFunctions": ["zeka.current_organisation_id()"],
   "runtimeFunctionDefinitionSha256": {
     "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b"
@@ -60,28 +96,8 @@
     { "owner": "zeka_client_owner", "objectType": "SCHEMA", "scope": "GLOBAL", "grants": [] },
     { "owner": "zeka_client_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "public", "grants": [] },
     { "owner": "zeka_client_owner", "objectType": "TYPE", "scope": "SCHEMA", "schema": "public", "grants": [] },
-    {
-      "owner": "zeka_client_owner",
-      "objectType": "RELATION",
-      "scope": "SCHEMA",
-      "schema": "public",
-      "grants": [
-        { "grantee": "zeka_client_runtime", "privilege": "DELETE", "grantable": false },
-        { "grantee": "zeka_client_runtime", "privilege": "INSERT", "grantable": false },
-        { "grantee": "zeka_client_runtime", "privilege": "SELECT", "grantable": false },
-        { "grantee": "zeka_client_runtime", "privilege": "UPDATE", "grantable": false }
-      ]
-    },
-    {
-      "owner": "zeka_client_owner",
-      "objectType": "SEQUENCE",
-      "scope": "SCHEMA",
-      "schema": "public",
-      "grants": [
-        { "grantee": "zeka_client_runtime", "privilege": "SELECT", "grantable": false },
-        { "grantee": "zeka_client_runtime", "privilege": "USAGE", "grantable": false }
-      ]
-    },
+    { "owner": "zeka_client_owner", "objectType": "RELATION", "scope": "SCHEMA", "schema": "public", "grants": [] },
+    { "owner": "zeka_client_owner", "objectType": "SEQUENCE", "scope": "SCHEMA", "schema": "public", "grants": [] },
     { "owner": "zeka_client_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
     { "owner": "zeka_client_owner", "objectType": "RELATION", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
     { "owner": "zeka_client_owner", "objectType": "SEQUENCE", "scope": "SCHEMA", "schema": "zeka", "grants": [] },

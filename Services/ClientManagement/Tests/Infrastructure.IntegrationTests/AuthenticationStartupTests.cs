@@ -3,13 +3,17 @@ using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Configurations;
 using DotNet.Testcontainers.Containers;
 using DotNet.Testcontainers.Networks;
+using Npgsql;
+using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace Infrastructure.IntegrationTests;
 
 public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealHostStartupTests, IAsyncLifetime
 {
+    private const string RuntimePassword = "startup-runtime-password";
     private readonly INetwork network = new NetworkBuilder().Build();
+    private PostgreSqlContainer? postgres;
     private IContainer? broker;
     private IContainer? host;
     private string queueName = "";
@@ -21,6 +25,10 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         await network.CreateAsync(timeout.Token);
+        postgres = new PostgreSqlBuilder("postgres:17-alpine")
+            .WithNetwork(network)
+            .WithNetworkAliases("startup-postgres")
+            .Build();
         broker = new ContainerBuilder("rabbitmq:3.13.7-alpine")
             .WithNetwork(network)
             .WithNetworkAliases("startup-rabbitmq")
@@ -28,7 +36,15 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
                 .UntilMessageIsLogged("Server startup complete")
                 .UntilCommandIsCompleted("rabbitmq-diagnostics", "-q", "check_port_connectivity"))
             .Build();
+        await postgres.StartAsync(timeout.Token);
         await broker.StartAsync(timeout.Token);
+
+        await using var connection = new NpgsqlConnection(postgres.GetConnectionString());
+        await connection.OpenAsync(timeout.Token);
+        await using var command = new NpgsqlCommand(ReadBootstrapScript(), connection);
+        await command.ExecuteNonQueryAsync(timeout.Token);
+        command.CommandText = $"ALTER ROLE zeka_client_runtime PASSWORD '{RuntimePassword}'";
+        await command.ExecuteNonQueryAsync(timeout.Token);
     }
 
     protected override async Task PrepareHostAsync(ProcessStartInfo start, CancellationToken cancellationToken)
@@ -43,6 +59,14 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
                 || pair.Key is "ASPNETCORE_ENVIRONMENT" or "DOTNET_ENVIRONMENT")
             .ToDictionary(pair => pair.Key, pair => pair.Value!);
         environment["RabbitMq__HostName"] = "startup-rabbitmq";
+        environment["ConnectionStrings__ClientApiConnection"] = new NpgsqlConnectionStringBuilder(
+            postgres!.GetConnectionString())
+        {
+            Host = "startup-postgres",
+            Port = 5432,
+            Username = "zeka_client_runtime",
+            Password = RuntimePassword
+        }.ConnectionString;
         environment["ASPNETCORE_URLS"] = "http://0.0.0.0:8080";
         host = new ContainerBuilder("mcr.microsoft.com/dotnet/aspnet:8.0.30")
             .WithNetwork(network)
@@ -96,7 +120,23 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
         finally
         {
             try { if (broker is not null) await broker.DisposeAsync(); }
-            finally { await network.DisposeAsync(); }
+            finally
+            {
+                try { if (postgres is not null) await postgres.DisposeAsync(); }
+                finally { await network.DisposeAsync(); }
+            }
         }
+    }
+
+    private static string ReadBootstrapScript()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "Deployments", "database", "bootstrap-client-roles.sql");
+            if (File.Exists(candidate)) return File.ReadAllText(candidate);
+            directory = directory.Parent;
+        }
+        throw new FileNotFoundException("The reviewed Client role bootstrap script was not found.");
     }
 }

@@ -17,6 +17,19 @@ ALTER ROLE zeka_auth_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATER
 ALTER ROLE zeka_auth_migrator RESET ALL;
 ALTER ROLE zeka_auth_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
 ALTER ROLE zeka_auth_runtime RESET ALL;
+DO $settings$
+DECLARE setting record;
+BEGIN
+  FOR setting IN
+    SELECT role.rolname, database.datname
+    FROM pg_catalog.pg_db_role_setting role_setting
+    JOIN pg_catalog.pg_roles role ON role.oid=role_setting.setrole
+    JOIN pg_catalog.pg_database database ON database.oid=role_setting.setdatabase
+    WHERE role.rolname IN ('zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime')
+  LOOP
+    EXECUTE pg_catalog.format('ALTER ROLE %I IN DATABASE %I RESET ALL', setting.rolname, setting.datname);
+  END LOOP;
+END $settings$;
 DO $database$ BEGIN
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO zeka_auth_migrator, zeka_auth_runtime', current_database());
@@ -66,5 +79,21 @@ ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON
 ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON TYPES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO zeka_auth_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO zeka_auth_runtime;
+DO $existing_objects$
+DECLARE object_name text;
+BEGIN
+  FOREACH object_name IN ARRAY ARRAY[
+    'AspNetRoleClaims','AspNetRoles','AspNetUserClaims','AspNetUserLogins','AspNetUserRoles',
+    'AspNetUserTokens','AspNetUsers','AuditEntries','IdempotencyRecords','OrganisationMemberships',
+    'Organisations','OutboxMessages','PermissionSets'
+  ] LOOP
+    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO zeka_auth_runtime', object_name);
+    END IF;
+  END LOOP;
+  FOREACH object_name IN ARRAY ARRAY['AspNetRoleClaims_Id_seq','AspNetUserClaims_Id_seq'] LOOP
+    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('GRANT SELECT, USAGE ON SEQUENCE public.%I TO zeka_auth_runtime', object_name);
+    END IF;
+  END LOOP;
+END $existing_objects$;

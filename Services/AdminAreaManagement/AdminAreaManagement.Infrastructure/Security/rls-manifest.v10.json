@@ -1,8 +1,8 @@
 {
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "service": "AdminAreaManagement",
   "modelContext": "AdminAreaManagement.Infrastructure.Persistence.DeploymentDbContext",
-  "migrationId": "20260912180000_PostgreSqlRlsAndRuntimeRoles",
+  "migrationId": "20260917212648_DurableDocumentFileOperations",
   "ownerRole": "zeka_adminarea_owner",
   "migratorRole": "zeka_adminarea_migrator",
   "runtimeRole": "zeka_adminarea_runtime",
@@ -43,6 +43,37 @@
     { "schema": "public", "name": "TrainingTypes_TrainingTypeId_seq" },
     { "schema": "public", "name": "Trainings_Id_seq" }
   ],
+  "tablePrivileges": [
+    { "object": { "schema": "public", "name": "Cities" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "ContactPersons" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "DocumentPartners" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Emails" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Nationalities" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Partners" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Professions" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Schools" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "StaffMembers" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "StaffProjectionOutbox" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Teams" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "TrainingFields" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "TrainingTypes" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Trainings" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] }
+  ],
+  "sequencePrivileges": [
+    { "object": { "schema": "public", "name": "Cities_CityId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "DocumentPartners_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "Emails_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "Nationalities_NationalityId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "Partners_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "Professions_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "Schools_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "StaffMembers_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "StaffProjectionOutbox_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "Teams_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "TrainingFields_TrainingFieldId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "TrainingTypes_TrainingTypeId_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "Trainings_Id_seq" }, "privileges": ["SELECT", "USAGE"] }
+  ],
   "runtimeFunctions": ["public.zeka_city_key(value text)", "public.zeka_city_text(value text)", "zeka.current_organisation_id()"],
   "runtimeFunctionDefinitionSha256": {
     "public.zeka_city_key(value text)": "1e61247f9533c12565d1cff73f8370e9f1a926b9e2e91ab0fe6de2e30ecbbe6e",
@@ -57,28 +88,8 @@
     { "owner": "zeka_adminarea_owner", "objectType": "SCHEMA", "scope": "GLOBAL", "grants": [] },
     { "owner": "zeka_adminarea_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "public", "grants": [] },
     { "owner": "zeka_adminarea_owner", "objectType": "TYPE", "scope": "SCHEMA", "schema": "public", "grants": [] },
-    {
-      "owner": "zeka_adminarea_owner",
-      "objectType": "RELATION",
-      "scope": "SCHEMA",
-      "schema": "public",
-      "grants": [
-        { "grantee": "zeka_adminarea_runtime", "privilege": "DELETE", "grantable": false },
-        { "grantee": "zeka_adminarea_runtime", "privilege": "INSERT", "grantable": false },
-        { "grantee": "zeka_adminarea_runtime", "privilege": "SELECT", "grantable": false },
-        { "grantee": "zeka_adminarea_runtime", "privilege": "UPDATE", "grantable": false }
-      ]
-    },
-    {
-      "owner": "zeka_adminarea_owner",
-      "objectType": "SEQUENCE",
-      "scope": "SCHEMA",
-      "schema": "public",
-      "grants": [
-        { "grantee": "zeka_adminarea_runtime", "privilege": "SELECT", "grantable": false },
-        { "grantee": "zeka_adminarea_runtime", "privilege": "USAGE", "grantable": false }
-      ]
-    },
+    { "owner": "zeka_adminarea_owner", "objectType": "RELATION", "scope": "SCHEMA", "schema": "public", "grants": [] },
+    { "owner": "zeka_adminarea_owner", "objectType": "SEQUENCE", "scope": "SCHEMA", "schema": "public", "grants": [] },
     { "owner": "zeka_adminarea_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
     { "owner": "zeka_adminarea_owner", "objectType": "RELATION", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
     { "owner": "zeka_adminarea_owner", "objectType": "SEQUENCE", "scope": "SCHEMA", "schema": "zeka", "grants": [] },

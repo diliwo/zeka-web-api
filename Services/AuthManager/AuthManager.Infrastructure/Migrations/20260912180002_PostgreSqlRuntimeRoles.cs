@@ -26,7 +26,8 @@ public sealed class PostgreSqlRuntimeRoles : Migration
           "Organisations", "OrganisationMemberships", "AuditEntries", "OutboxMessages", "AspNetUsers",
           "AspNetRoles", "AspNetRoleClaims", "AspNetUserClaims", "AspNetUserLogins", "AspNetUserRoles",
           "AspNetUserTokens", "PermissionSets", "IdempotencyRecords" TO zeka_auth_runtime;
-        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO zeka_auth_runtime;
+        GRANT USAGE, SELECT ON SEQUENCE "AspNetRoleClaims_Id_seq", "AspNetUserClaims_Id_seq"
+          TO zeka_auth_runtime;
         RESET ROLE;
         """);
 

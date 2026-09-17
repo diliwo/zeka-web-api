@@ -26,15 +26,16 @@ public static class DependencyInjection
         services.AddTenantEnforcement(configuration);
         services.TryAddSingleton<ITenantAttemptOrderObserver, NullTenantAttemptOrderObserver>();
         var runtimeConnection = configuration.GetConnectionString("ClientApiConnection");
-        if (!string.IsNullOrWhiteSpace(runtimeConnection))
-            services.AddSingleton<IHostedService>(_ => new RuntimeDatabaseIdentityValidator(
-                runtimeConnection, "zeka_client_runtime"));
+        if (string.IsNullOrWhiteSpace(runtimeConnection))
+            throw new InvalidOperationException("ConnectionStrings:ClientApiConnection is required.");
+        services.AddSingleton<IHostedService>(_ => new RuntimeDatabaseIdentityValidator(
+            runtimeConnection, "zeka_client_runtime"));
         services.AddScoped<TenantTransactionAttemptState>();
         services.AddScoped<TenantCommandGuard>();
         services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
         services.AddDbContext<ApplicationDbContext>((provider, options) =>
             options.UseNpgsql(
-                configuration.GetConnectionString("ClientApiConnection"),
+                runtimeConnection,
                 builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
                     .EnableRetryOnFailure(3, TimeSpan.FromMilliseconds(200), null))
                 .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>())

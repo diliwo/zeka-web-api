@@ -83,7 +83,12 @@ public sealed class PostgreSqlRlsAndRuntimeRoles : Migration
               "Teams", "StaffMembers", "Partners", "DocumentPartners", "ContactPersons", "Emails",
               "StaffProjectionOutbox", "Cities", "Nationalities", "Professions", "Schools", "Trainings",
               "TrainingFields", "TrainingTypes" TO zeka_adminarea_runtime;
-            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO zeka_adminarea_runtime;
+            GRANT USAGE, SELECT ON SEQUENCE
+              "Cities_CityId_seq", "DocumentPartners_Id_seq", "Emails_Id_seq",
+              "Nationalities_NationalityId_seq", "Partners_Id_seq", "Professions_Id_seq",
+              "Schools_Id_seq", "StaffMembers_Id_seq", "StaffProjectionOutbox_Id_seq", "Teams_Id_seq",
+              "TrainingFields_TrainingFieldId_seq", "TrainingTypes_TrainingTypeId_seq", "Trainings_Id_seq"
+              TO zeka_adminarea_runtime;
             REVOKE ALL ON FUNCTION public.zeka_city_key(text), public.zeka_city_text(text) FROM PUBLIC;
             GRANT EXECUTE ON FUNCTION public.zeka_city_key(text), public.zeka_city_text(text),
               zeka.current_organisation_id() TO zeka_adminarea_runtime;

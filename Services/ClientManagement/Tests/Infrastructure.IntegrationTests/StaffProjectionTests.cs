@@ -25,7 +25,8 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
         var config = new ConfigurationManager();
         config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["TenantWorker:SubjectId"] = "worker", ["TenantWorker:BearerToken"] = "synthetic-test-token",
+            ["TenantWorker:SubjectId"] = "worker",
+            ["TenantWorker:BearerToken"] = "synthetic-test-token",
             ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
             ["ConnectionStrings:ClientApiConnection"] = fixture.ConnectionString
         });
@@ -47,9 +48,13 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
             Assert.Single(await context.AssignedClients(membership).ToListAsync());
         }
         handler.Inactive.Add(membership);
-        await consumer.Handle(Message(a, membership, 3, false, "renamed"));
+        var revoked = Message(a, membership, 3, false, "renamed");
+        await consumer.Handle(revoked);
+        handler.AllowMembership = false;
+        await consumer.Handle(revoked); // exact duplicate acknowledges without stale authorization
         await consumer.Handle(Message(a, membership, 2, true, "out-of-order"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => consumer.Handle(Message(a, membership, 3, false, "conflicting-revision")));
+        handler.AllowMembership = true;
         await consumer.Handle(Message(b, otherMembership, 1, true, "other-organisation"));
         await Assert.ThrowsAsync<TenantAccessException>(() => consumer.Handle(Message(a, membership, 4, true, "inactive")));
         await Assert.ThrowsAsync<TenantAccessException>(() => consumer.Handle(Message(b, membership, 4, true, "cross-organisation")));
@@ -75,6 +80,7 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
     private sealed class AccessHandler : HttpMessageHandler
     {
         public bool Allow { get; set; } = true;
+        public bool AllowMembership { get; set; } = true;
         public Dictionary<Guid, Guid> Memberships { get; } = new();
         public HashSet<Guid> Inactive { get; } = new();
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -85,16 +91,23 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
                 var segments = request.RequestUri.Segments;
                 var organisation = Guid.Parse(segments[4].TrimEnd('/'));
                 var membership = Guid.Parse(segments.Last());
-                return Task.FromResult(new HttpResponseMessage(Allow && Memberships.TryGetValue(membership, out var owner)
+                return Task.FromResult(new HttpResponseMessage(Allow && AllowMembership && Memberships.TryGetValue(membership, out var owner)
                     && owner == organisation && (!Inactive.Contains(membership)
                         || request.RequestUri.Query.Contains("includeInactive=True", StringComparison.OrdinalIgnoreCase))
                     ? HttpStatusCode.NoContent : HttpStatusCode.Forbidden));
             }
             return Task.FromResult(Allow ? new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = JsonContent.Create(new { ContractVersion = 1, SubjectId = "worker",
-                    OrganisationId = Guid.Parse(request.RequestUri!.Segments.Last()), OrganisationMembershipId = Guid.NewGuid(),
-                    EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" }, DecisionVersion = "1", ObservedAtUtc = DateTimeOffset.UtcNow })
+                Content = JsonContent.Create(new
+                {
+                    ContractVersion = 1,
+                    SubjectId = "worker",
+                    OrganisationId = Guid.Parse(request.RequestUri!.Segments.Last()),
+                    OrganisationMembershipId = Guid.NewGuid(),
+                    EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },
+                    DecisionVersion = "1",
+                    ObservedAtUtc = DateTimeOffset.UtcNow
+                })
             } : new(HttpStatusCode.Forbidden));
         }
     }

@@ -23,6 +23,7 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
     private const string MigratorPassword = "test-migrator-password";
     private const string RuntimePassword = "test-runtime-password";
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private int nextPartnerNumber = 9000;
 
     public string RuntimeConnectionString => new NpgsqlConnectionStringBuilder(postgres.GetConnectionString())
     {
@@ -47,6 +48,7 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
     public string DatabaseName => new NpgsqlConnectionStringBuilder(postgres.GetConnectionString()).Database!;
 
     public string AdministratorConnectionString => postgres.GetConnectionString();
+    public Guid SeedOrganisation { get; private set; }
 
     public async Task InitializeAsync()
     {
@@ -68,6 +70,27 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
             """, new NpgsqlParameter("name", name), new NpgsqlParameter("organisation", organisation));
     }
 
+    public async Task<int> SeedPartnerAsAdministratorAsync(Guid organisation, string name)
+    {
+        await using var connection = new NpgsqlConnection(postgres.GetConnectionString());
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO public."Partners"
+              ("PartnerNumber", "Name", "Address_Number", "Address_Street", "Address_PostalCode",
+               "Address_City", "StaffMemberId", "CategoryOfPartner", "CategoryOfPartnerName",
+               "StatusOfPartner", "DateOfAgreementSignature", "IsEconomieSociale", "CreatedBy",
+               "Created", "LastModifiedBy", "Softdelete", "OrganisationId")
+            VALUES
+              (@number, @name, '1', 'Evidence Street', '1000', 'Brussels', 1, 0, 'Evidence',
+               0, current_date, false, 'test', now(), 'test', false, @organisation)
+            RETURNING "Id"
+            """, connection);
+        command.Parameters.AddWithValue("name", name);
+        command.Parameters.AddWithValue("number", Interlocked.Increment(ref nextPartnerNumber));
+        command.Parameters.AddWithValue("organisation", organisation);
+        return (int)(await command.ExecuteScalarAsync())!;
+    }
+
     private async Task ApplyAllMigrationsAsMigratorAsync()
     {
         await using var deployment = Deployment(MigratorConnectionString);
@@ -76,6 +99,7 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
         var migrator = deployment.GetService<IMigrator>();
         await migrator.MigrateAsync("20250427103057_Initial Migration");
         var organisation = Guid.NewGuid();
+        SeedOrganisation = organisation;
         await deployment.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE "StaffMembers" SET "UserName" = 'jdoe' WHERE "Id" = 1;
             CREATE TABLE "__OrganisationTenantMap" ("TenantName" text PRIMARY KEY, "OrganisationId" uuid NOT NULL UNIQUE);
@@ -99,6 +123,8 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
         await connection.OpenAsync();
         await ExecuteAsync(connection, null, sql);
     }
+
+    public Task ReapplyBootstrapAsync() => ExecuteAdministratorAsync(ReadBootstrapScript());
 
     public Task<(string Stdout, string Stderr)> GetLogsAsync(DateTime since, DateTime until,
         CancellationToken cancellationToken = default) =>
@@ -245,7 +271,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     public async Task Versioned_manifest_matches_EF_classification_and_effective_catalog_bidirectionally()
     {
         var manifest = RlsSecurityManifestVerifier.Load(typeof(ApplicationDbContext).Assembly);
-        Assert.Equal(9, manifest.SchemaVersion);
+        Assert.Equal(10, manifest.SchemaVersion);
         Assert.Equal(["FOREIGN_TABLE", "MATERIALIZED_VIEW", "VIEW"], manifest.ProhibitedRelationKinds);
         Assert.Empty(manifest.RelationTopology);
         Assert.Equal("(\"OrganisationId\" = zeka.current_organisation_id())",
@@ -254,6 +280,97 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         await using var deployment = new DeploymentDbContext(
             new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(database.MigratorConnectionString).Options);
         await RlsSecurityManifestVerifier.VerifyAsync(deployment, typeof(ApplicationDbContext).Assembly);
+    }
+
+    [Fact]
+    public async Task Migration_history_schema_is_taken_from_the_manifest_when_it_is_not_the_first_managed_schema()
+    {
+        var manifest = RlsSecurityManifestVerifier.Load(typeof(ApplicationDbContext).Assembly) with
+        {
+            MigrationHistoryTable = new ManagedObjectIdentity("zeka", "__EFMigrationsHistory")
+        };
+        Assert.NotEqual(manifest.ManagedSchemas[0], manifest.MigrationHistoryTable.Schema);
+        await database.ExecuteAdministratorAsync("""
+            ALTER TABLE public."__EFMigrationsHistory" SET SCHEMA zeka;
+            REVOKE USAGE ON SCHEMA public FROM zeka_adminarea_migrator;
+            GRANT USAGE ON SCHEMA zeka TO zeka_adminarea_migrator;
+            """);
+        try
+        {
+            await using var deployment = new DeploymentDbContext(
+                new DbContextOptionsBuilder<DeploymentDbContext>()
+                    .UseNpgsql(database.MigratorConnectionString).Options);
+            await RlsSecurityManifestVerifier.VerifyMigrationHistoryPlacementAsync(deployment, manifest);
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("""
+                ALTER TABLE zeka."__EFMigrationsHistory" SET SCHEMA public;
+                REVOKE USAGE ON SCHEMA zeka FROM zeka_adminarea_migrator;
+                GRANT USAGE ON SCHEMA public TO zeka_adminarea_migrator;
+                """);
+        }
+        await VerifyCatalogAsync();
+    }
+
+    [Fact]
+    public async Task Catalog_verification_is_independent_of_hostile_search_path_shadowing()
+    {
+        await database.ExecuteAdministratorAsync("""
+            CREATE SCHEMA issue45_catalog_shadow;
+            CREATE VIEW issue45_catalog_shadow.pg_roles AS SELECT 'shadow'::name AS rolname;
+            """);
+        try
+        {
+            var connection = new NpgsqlConnectionStringBuilder(database.MigratorConnectionString)
+            {
+                Options = "-c search_path=issue45_catalog_shadow,public,pg_catalog"
+            }.ConnectionString;
+            await using var deployment = new DeploymentDbContext(
+                new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(connection).Options);
+            await RlsSecurityManifestVerifier.VerifyAsync(deployment, typeof(ApplicationDbContext).Assembly);
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("DROP SCHEMA issue45_catalog_shadow CASCADE");
+        }
+    }
+
+    [Fact]
+    public async Task Bootstrap_rerun_clears_all_managed_settings_and_restores_only_manifest_approved_objects()
+    {
+        var databaseIdentifier = new NpgsqlCommandBuilder().QuoteIdentifier(database.DatabaseName);
+        await database.ExecuteAdministratorAsync($"""
+            SET ROLE zeka_adminarea_owner;
+            CREATE TABLE public.issue45_unknown_admin(id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY);
+            RESET ROLE;
+            GRANT ALL ON TABLE public.issue45_unknown_admin TO zeka_adminarea_runtime;
+            GRANT ALL ON SEQUENCE public.issue45_unknown_admin_id_seq TO zeka_adminarea_runtime;
+            GRANT SELECT ON TABLE public."__EFMigrationsHistory" TO zeka_adminarea_runtime;
+            ALTER ROLE zeka_adminarea_owner IN DATABASE {databaseIdentifier} SET application_name='unexpected';
+            ALTER ROLE zeka_adminarea_migrator IN DATABASE {databaseIdentifier} SET application_name='unexpected';
+            ALTER ROLE zeka_adminarea_runtime IN DATABASE {databaseIdentifier} SET application_name='unexpected';
+            """);
+
+        await database.ReapplyBootstrapAsync();
+
+        Assert.True(await ExecuteAdministratorScalarAsync<bool>("""
+            SELECT
+              (SELECT count(*)=0 FROM pg_catalog.pg_db_role_setting s
+               JOIN pg_catalog.pg_roles r ON r.oid=s.setrole
+               JOIN pg_catalog.pg_database d ON d.oid=s.setdatabase
+               WHERE d.datname=pg_catalog.current_database()
+                 AND r.rolname=ANY(ARRAY['zeka_adminarea_owner','zeka_adminarea_migrator','zeka_adminarea_runtime']))
+              AND pg_catalog.has_table_privilege('zeka_adminarea_runtime','public."Teams"','SELECT')
+              AND pg_catalog.has_table_privilege('zeka_adminarea_runtime','public."Teams"','INSERT')
+              AND pg_catalog.has_table_privilege('zeka_adminarea_runtime','public."Teams"','UPDATE')
+              AND pg_catalog.has_table_privilege('zeka_adminarea_runtime','public."Teams"','DELETE')
+              AND NOT pg_catalog.has_table_privilege('zeka_adminarea_runtime','public."__EFMigrationsHistory"','SELECT')
+              AND NOT pg_catalog.has_table_privilege('zeka_adminarea_runtime','public.issue45_unknown_admin','SELECT')
+              AND NOT pg_catalog.has_sequence_privilege('zeka_adminarea_runtime','public.issue45_unknown_admin_id_seq','USAGE')
+            """));
+        await database.ExecuteAdministratorAsync("DROP TABLE public.issue45_unknown_admin");
+        await VerifyCatalogAsync();
     }
 
     [Fact]
@@ -977,7 +1094,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
             ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner GRANT SELECT ON TABLES TO zeka_adminarea_runtime WITH GRANT OPTION",
                 "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE SELECT ON TABLES FROM zeka_adminarea_runtime"),
             ("ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public GRANT SELECT ON TABLES TO zeka_adminarea_runtime WITH GRANT OPTION",
-                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE GRANT OPTION FOR SELECT ON TABLES FROM zeka_adminarea_runtime"),
+                "ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE SELECT ON TABLES FROM zeka_adminarea_runtime"),
             ($"CREATE ROLE zeka_issue45_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; GRANT CONNECT ON DATABASE {databaseIdentifier} TO zeka_issue45_unexpected",
                 $"REVOKE CONNECT ON DATABASE {databaseIdentifier} FROM zeka_issue45_unexpected; DROP ROLE zeka_issue45_unexpected"),
             ("CREATE ROLE zeka_issue45_unexpected NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT; GRANT USAGE ON SCHEMA public TO zeka_issue45_unexpected",

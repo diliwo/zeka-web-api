@@ -18,6 +18,19 @@ ALTER ROLE zeka_adminarea_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCR
 ALTER ROLE zeka_adminarea_migrator RESET ALL;
 ALTER ROLE zeka_adminarea_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
 ALTER ROLE zeka_adminarea_runtime RESET ALL;
+DO $settings$
+DECLARE setting record;
+BEGIN
+  FOR setting IN
+    SELECT role.rolname, database.datname
+    FROM pg_catalog.pg_db_role_setting role_setting
+    JOIN pg_catalog.pg_roles role ON role.oid=role_setting.setrole
+    JOIN pg_catalog.pg_database database ON database.oid=role_setting.setdatabase
+    WHERE role.rolname IN ('zeka_adminarea_owner','zeka_adminarea_migrator','zeka_adminarea_runtime')
+  LOOP
+    EXECUTE pg_catalog.format('ALTER ROLE %I IN DATABASE %I RESET ALL', setting.rolname, setting.datname);
+  END LOOP;
+END $settings$;
 DO $database$ BEGIN
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO zeka_adminarea_migrator, zeka_adminarea_runtime', current_database());
@@ -77,5 +90,34 @@ ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL
 ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON TYPES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO zeka_adminarea_runtime;
+DO $existing_objects$
+DECLARE object_name text;
+BEGIN
+  FOREACH object_name IN ARRAY ARRAY[
+    'Cities','ContactPersons','DocumentPartners','Emails','Nationalities','Partners','Professions',
+    'Schools','StaffMembers','StaffProjectionOutbox','Teams','TrainingFields','TrainingTypes','Trainings'
+  ] LOOP
+    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO zeka_adminarea_runtime', object_name);
+    END IF;
+  END LOOP;
+  FOREACH object_name IN ARRAY ARRAY[
+    'Cities_CityId_seq','DocumentPartners_Id_seq','Emails_Id_seq','Nationalities_NationalityId_seq',
+    'Partners_Id_seq','Professions_Id_seq','Schools_Id_seq','StaffMembers_Id_seq',
+    'StaffProjectionOutbox_Id_seq','Teams_Id_seq','TrainingFields_TrainingFieldId_seq',
+    'TrainingTypes_TrainingTypeId_seq','Trainings_Id_seq'
+  ] LOOP
+    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('GRANT SELECT, USAGE ON SEQUENCE public.%I TO zeka_adminarea_runtime', object_name);
+    END IF;
+  END LOOP;
+  IF pg_catalog.to_regprocedure('zeka.current_organisation_id()') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_adminarea_runtime;
+  END IF;
+  IF pg_catalog.to_regprocedure('public.zeka_city_key(text)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.zeka_city_key(text) TO zeka_adminarea_runtime;
+  END IF;
+  IF pg_catalog.to_regprocedure('public.zeka_city_text(text)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.zeka_city_text(text) TO zeka_adminarea_runtime;
+  END IF;
+END $existing_objects$;

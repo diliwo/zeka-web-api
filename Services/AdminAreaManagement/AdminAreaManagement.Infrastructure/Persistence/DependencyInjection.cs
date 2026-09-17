@@ -11,6 +11,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using DateTimeService = AdminAreaManagement.Infrastructure.Services.DateTimeService;
 using AdminAreaManagement.Application.Common.Authorization;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Zeka.PersistenceSecurity;
 
 namespace AdminAreaManagement.Infrastructure.Persistence;
 
@@ -19,15 +21,22 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddTenantEnforcement(configuration);
-        services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
+        services.RemoveAll<IFileService>();
+        services.AddSingleton<IFileService>(_ => new FileService(new FileRepositorySettings(
+            configuration.GetValue<string>("FileServerPath")
+            ?? throw new InvalidOperationException("FileServerPath is required."))));
 
+        services.TryAddSingleton<ITenantAttemptOrderObserver, NullTenantAttemptOrderObserver>();
+        var runtimeConnection = configuration.GetConnectionString("ClientApiConnection");
+        if (string.IsNullOrWhiteSpace(runtimeConnection))
+            throw new InvalidOperationException("ConnectionStrings:ClientApiConnection is required.");
         services.AddScoped<TenantTransactionAttemptState>();
         services.AddScoped<TenantPostCommitActions>();
         services.AddScoped<TenantCommandGuard>();
         services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
         services.AddDbContext<ApplicationDbContext>((provider, options) =>
             options.UseNpgsql(
-                configuration.GetConnectionString("ClientApiConnection"),
+                runtimeConnection,
                 b => b.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
                     .EnableRetryOnFailure(3, TimeSpan.FromMilliseconds(200), null))
                 .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>()));
@@ -50,8 +59,7 @@ public static class DependencyInjection
         // Runtime health must not issue an unscoped command through the tenant DbContext.
         services.AddHealthChecks().AddCheck(
             "adminarea-database-connectivity",
-            new DatabaseConnectivityHealthCheck(configuration.GetConnectionString("ClientApiConnection")
-                ?? throw new InvalidOperationException("ClientApiConnection is required.")));
+            new DatabaseConnectivityHealthCheck(runtimeConnection));
 
         return services;
     }

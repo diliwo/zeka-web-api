@@ -90,11 +90,20 @@ internal sealed class TenantTransactionAttemptState(ITenantAttemptOrderObserver 
 
 public sealed class TenantPostCommitActions
 {
-    private readonly Queue<Action> actions = new();
-    public void Enqueue(Action action) => actions.Enqueue(action ?? throw new ArgumentNullException(nameof(action)));
-    internal void Complete() { while (actions.TryDequeue(out var action)) action(); }
+    private readonly Queue<TenantPostCommitAction> actions = new();
+    public void Enqueue(Action externalEffect, Action preparePersistence,
+        Action completed, Action failed, Action pending) =>
+        actions.Enqueue(new(externalEffect ?? throw new ArgumentNullException(nameof(externalEffect)),
+            preparePersistence ?? throw new ArgumentNullException(nameof(preparePersistence)),
+            completed ?? throw new ArgumentNullException(nameof(completed)),
+            failed ?? throw new ArgumentNullException(nameof(failed)),
+            pending ?? throw new ArgumentNullException(nameof(pending))));
+    internal bool TryDequeue(out TenantPostCommitAction? action) => actions.TryDequeue(out action);
     internal void Clear() => actions.Clear();
 }
+
+internal sealed record TenantPostCommitAction(Action ExternalEffect, Action PreparePersistence,
+    Action Completed, Action Failed, Action Pending);
 
 public sealed class TenantCommitIndeterminateException(Exception innerException)
     : Exception("The tenant transaction commit outcome is indeterminate and was not replayed.", innerException);
@@ -143,7 +152,7 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
         if (organisation == Guid.Empty) throw new InvalidOperationException("Tenant context is not established.");
         var strategy = database.Database.CreateExecutionStrategy();
         var result = await strategy.ExecuteAsync(() => ExecuteAttemptAsync(work, organisation, cancellationToken));
-        postCommit.Complete();
+        await CompletePostCommitAsync(organisation);
         return result;
     }
 
@@ -153,8 +162,41 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
         var organisation = tenant.Current.OrganisationId.Value;
         if (organisation == Guid.Empty) throw new InvalidOperationException("Tenant context is not established.");
         var result = await ExecuteAttemptAsync(work, organisation, cancellationToken);
-        postCommit.Complete();
+        await CompletePostCommitAsync(organisation);
         return result;
+    }
+
+    private async Task CompletePostCommitAsync(Guid organisation)
+    {
+        while (postCommit.TryDequeue(out var action))
+        {
+            if (action is null) throw new InvalidOperationException("A tenant post-commit action is missing.");
+            try
+            {
+                action.ExternalEffect();
+                action.Completed();
+            }
+            catch
+            {
+                action.Failed();
+            }
+
+            try
+            {
+                var strategy = database.Database.CreateExecutionStrategy();
+                await strategy.ExecuteAsync(() => ExecuteAttemptAsync(async token =>
+                {
+                    action.PreparePersistence();
+                    await database.SaveChangesAsync(token);
+                    return true;
+                }, organisation, CancellationToken.None));
+            }
+            catch
+            {
+                action.Pending();
+                database.ChangeTracker.Clear();
+            }
+        }
     }
 
     private async Task<T> ExecuteAttemptAsync<T>(Func<CancellationToken, Task<T>> work, Guid organisation,

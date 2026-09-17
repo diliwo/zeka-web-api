@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "service": "AuthManagement",
   "modelContext": "AuthManager.Infrastructure.Persistence.AuthDbContext",
   "migrationId": "20260912180002_PostgreSqlRuntimeRoles",
@@ -30,6 +30,25 @@
     { "schema": "public", "name": "AspNetRoleClaims_Id_seq" },
     { "schema": "public", "name": "AspNetUserClaims_Id_seq" }
   ],
+  "tablePrivileges": [
+    { "object": { "schema": "public", "name": "AspNetRoleClaims" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "AspNetRoles" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "AspNetUserClaims" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "AspNetUserLogins" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "AspNetUserRoles" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "AspNetUserTokens" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "AspNetUsers" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "AuditEntries" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "IdempotencyRecords" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "OrganisationMemberships" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "Organisations" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "OutboxMessages" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "PermissionSets" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] }
+  ],
+  "sequencePrivileges": [
+    { "object": { "schema": "public", "name": "AspNetRoleClaims_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "AspNetUserClaims_Id_seq" }, "privileges": ["SELECT", "USAGE"] }
+  ],
   "runtimeFunctions": [],
   "runtimeFunctionDefinitionSha256": {},
   "defaultPrivileges": [
@@ -40,28 +59,8 @@
     { "owner": "zeka_auth_owner", "objectType": "SCHEMA", "scope": "GLOBAL", "grants": [] },
     { "owner": "zeka_auth_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "public", "grants": [] },
     { "owner": "zeka_auth_owner", "objectType": "TYPE", "scope": "SCHEMA", "schema": "public", "grants": [] },
-    {
-      "owner": "zeka_auth_owner",
-      "objectType": "RELATION",
-      "scope": "SCHEMA",
-      "schema": "public",
-      "grants": [
-        { "grantee": "zeka_auth_runtime", "privilege": "DELETE", "grantable": false },
-        { "grantee": "zeka_auth_runtime", "privilege": "INSERT", "grantable": false },
-        { "grantee": "zeka_auth_runtime", "privilege": "SELECT", "grantable": false },
-        { "grantee": "zeka_auth_runtime", "privilege": "UPDATE", "grantable": false }
-      ]
-    },
-    {
-      "owner": "zeka_auth_owner",
-      "objectType": "SEQUENCE",
-      "scope": "SCHEMA",
-      "schema": "public",
-      "grants": [
-        { "grantee": "zeka_auth_runtime", "privilege": "SELECT", "grantable": false },
-        { "grantee": "zeka_auth_runtime", "privilege": "USAGE", "grantable": false }
-      ]
-    }
+    { "owner": "zeka_auth_owner", "objectType": "RELATION", "scope": "SCHEMA", "schema": "public", "grants": [] },
+    { "owner": "zeka_auth_owner", "objectType": "SEQUENCE", "scope": "SCHEMA", "schema": "public", "grants": [] }
   ],
   "parameterPrivileges": [],
   "policyPrefix": "rls_",

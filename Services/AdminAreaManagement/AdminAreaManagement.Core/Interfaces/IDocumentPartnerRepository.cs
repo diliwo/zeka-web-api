@@ -4,10 +4,10 @@ namespace AdminAreaManagement.Core.Interfaces
 {
     public interface IDocumentPartnerRepository
     {
-        void Persist(DocumentPartner document);
+        DocumentPartner Persist(DocumentPartner document, Guid operationId, string requestHash);
         DocumentPartner Get(int id);
         IQueryable<DocumentPartner> GetDocuments();
         IQueryable<DocumentPartner> getDocumentsByJobIAndPartnerId(int partnerId, int jobId);
-        void Delete(int id);
+        DocumentPartner Delete(int id, Guid operationId);
     }
 }

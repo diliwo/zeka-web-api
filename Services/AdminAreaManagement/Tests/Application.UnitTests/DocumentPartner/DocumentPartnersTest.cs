@@ -23,6 +23,7 @@ public class DocumentPartnersTest
         var handler = new PersistDocumentPartnerCommand.PersistDocumentPartnerCommandHandler(mockRepositoryManager.Object);
         var command = new PersistDocumentPartnerCommand
         {
+            OperationId = Guid.NewGuid(),
             PartnerId = 1
         };
 
@@ -43,7 +44,8 @@ public class DocumentPartnersTest
 
         mockPartnerRepository.Setup(repo => repo.Get(1)).Returns(partner);
         mockDocumentPartnerRepository
-            .Setup(repo => repo.Persist(It.IsAny<AdminAreaManagement.Core.Entities.DocumentPartner>()))
+            .Setup(repo => repo.Persist(It.IsAny<AdminAreaManagement.Core.Entities.DocumentPartner>(),
+                It.IsAny<Guid>(), It.IsAny<string>()))
             .Throws(new Exception("Persistence Error"));
 
         mockRepositoryManager.Setup(repo => repo.Partner).Returns(mockPartnerRepository.Object);
@@ -52,6 +54,7 @@ public class DocumentPartnersTest
         var handler = new PersistDocumentPartnerCommand.PersistDocumentPartnerCommandHandler(mockRepositoryManager.Object);
         var command = new PersistDocumentPartnerCommand
         {
+            OperationId = Guid.NewGuid(),
             PartnerId = 1,
             Name = "Test Document",
             Description = "Test Description",

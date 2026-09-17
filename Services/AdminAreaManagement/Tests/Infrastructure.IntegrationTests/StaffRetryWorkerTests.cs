@@ -106,8 +106,11 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
             for (var index = 0; index < 101; index++)
             {
                 var message = Message(organisation, Guid.NewGuid(), true);
-                seed.Add(new StaffProjectionMessage { EventId = message.Id,
-                    Payload = index == 0 ? "invalid-json" : JsonSerializer.Serialize(message) });
+                seed.Add(new StaffProjectionMessage
+                {
+                    EventId = message.Id,
+                    Payload = index == 0 ? "invalid-json" : JsonSerializer.Serialize(message)
+                });
             }
             await seed.SaveChangesAsync();
         }
@@ -143,6 +146,10 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
     {
         var services = new ServiceCollection().AddLogging();
         var config = new ConfigurationManager();
+        config.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:ClientApiConnection"] = "Host=localhost;Database=test;Username=test;Password=test"
+        });
         AddWorkerRuntime(services, config);
         await using var provider = services.BuildServiceProvider();
         await Assert.ThrowsAsync<InvalidOperationException>(() => Assert.Single(provider.GetServices<IHostedService>()).StartAsync(default));
@@ -202,10 +209,16 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
             Assert.Equal("synthetic-test-token", request.Headers.Authorization?.Parameter);
             return Task.FromResult(Allow ? new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = JsonContent.Create(new { ContractVersion = 1, SubjectId = "worker",
+                Content = JsonContent.Create(new
+                {
+                    ContractVersion = 1,
+                    SubjectId = "worker",
                     OrganisationId = Guid.Parse(request.RequestUri!.Segments.Last()),
-                    OrganisationMembershipId = Guid.NewGuid(), EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },
-                    DecisionVersion = "1", ObservedAtUtc = DateTimeOffset.UtcNow })
+                    OrganisationMembershipId = Guid.NewGuid(),
+                    EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },
+                    DecisionVersion = "1",
+                    ObservedAtUtc = DateTimeOffset.UtcNow
+                })
             } : new(HttpStatusCode.Forbidden));
         }
     }

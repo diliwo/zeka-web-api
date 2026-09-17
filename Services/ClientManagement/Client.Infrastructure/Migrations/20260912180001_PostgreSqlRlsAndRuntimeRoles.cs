@@ -82,10 +82,16 @@ public sealed class PostgreSqlRlsAndRuntimeRoles : Migration
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "__EFMigrationsHistory" TO zeka_client_migrator;
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
               "Clients", "SocialWorkers", "SocialCases", "Assessments", "ProfessionalAssessments",
-              "ProfessionnalExperience", "SchoolRegistrations", "MonitoringReports", "Languages",
-              "MonitoringActions", "NatureOfContract", "Profession", "School", "Training", "TrainingField",
-              "TrainingType" TO zeka_client_runtime;
-            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO zeka_client_runtime;
+              "ProfessionnalExperience", "SchoolRegistrations", "MonitoringReports", "MonitoringActions"
+              TO zeka_client_runtime;
+            GRANT SELECT ON TABLE "Languages", "NatureOfContract", "Profession", "School", "Training",
+              "TrainingField", "TrainingType" TO zeka_client_runtime;
+            GRANT USAGE, SELECT ON SEQUENCE
+              "Assessments_AssessmentId_seq", "Clients_Id_seq", "MonitoringActions_ActionId_seq",
+              "MonitoringReports_Id_seq", "ProfessionalAssessments_Id_seq",
+              "ProfessionnalExperience_ProfessionnalExperienceId_seq",
+              "SchoolRegistrations_SchoolRegistrationId_seq", "SocialCases_SchoolRegistrationId_seq",
+              "SocialWorkers_SocialWorkerId_seq" TO zeka_client_runtime;
             GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_client_runtime;
             RESET ROLE;
             """);

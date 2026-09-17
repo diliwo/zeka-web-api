@@ -24,7 +24,7 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             _postCommit = postCommit;
         }
 
-        public void Persist(DocumentPartner document)
+        public DocumentPartner Persist(DocumentPartner document, Guid operationId, string requestHash)
         {
             // Check if document has fileName
             if (document.Name != null && document.Name.Length < 1)
@@ -33,16 +33,22 @@ namespace AdminAreaManagement.Infrastructure.Persistence
                     "Erreur lors de la tentative d'enregistrement du document : Il n'existe aucun nom de fichier !");
             }
 
-            // The operation-level tenant transaction executor owns the transaction. A nested transaction would
-            // bypass retry/context initialization. Production composition queues file persistence until the
-            // database commit is acknowledged, keeping it outside execution-strategy retries.
+            var existing = _context.DocumentPartners.SingleOrDefault(x => x.CreateOperationId == operationId);
+            if (existing is not null)
+            {
+                if (!StringComparer.Ordinal.Equals(existing.CreateRequestHash, requestHash))
+                    throw new InvalidOperationException("The document operation identity was reused for different content.");
+                if (existing.FileWriteState != DocumentFileOperationState.Completed) QueueWrite(existing);
+                return existing;
+            }
+
+            document.BeginFileWrite(operationId, requestHash, document.ContentFile);
             _context.DocumentPartners.Add(document);
             _context.SaveChanges();
             if (document.Id == default)
                 throw new InvalidOperationException($"The document id {document.Id} is not correct !");
-            void Save() => _fileService.SaveFile(document.Id, document.PartnerId, document.Name,
-                document.ContentFile, document.ContentType);
-            if (_postCommit is null) Save(); else _postCommit.Enqueue(Save);
+            QueueWrite(document);
+            return document;
         }
 
         public DocumentPartner Get(int id)
@@ -60,8 +66,16 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             return _context.DocumentPartners.Where(d =>
                 d.PartnerId == partnerId && d.Softdelete != true);
         }
-        public void Delete(int id)
+        public DocumentPartner Delete(int id, Guid operationId)
         {
+            var existing = _context.DocumentPartners.SingleOrDefault(x => x.DeleteOperationId == operationId);
+            if (existing is not null)
+            {
+                if (existing.Id != id)
+                    throw new InvalidOperationException("The document operation identity was reused for a different document.");
+                if (existing.FileDeleteState != DocumentFileOperationState.Completed) QueueDelete(existing);
+                return existing;
+            }
             var doc = Get(id);
             if (doc == null)
             {
@@ -70,15 +84,38 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             }
             try
             {
+                doc.BeginFileDelete(operationId);
                 doc.Softdelete = true;
                 _context.SaveChanges();
-                void Delete() => _fileService.DeleteFile(doc.Id, doc.PartnerId, doc.ContentType);
-                if (_postCommit is null) Delete(); else _postCommit.Enqueue(Delete);
+                QueueDelete(doc);
+                return doc;
             }
             catch (Exception ex)
             {
                 throw new ApplicationException(ex.Message);
             }
+        }
+
+        private void QueueWrite(DocumentPartner document)
+        {
+            if (_postCommit is null)
+                throw new InvalidOperationException("Durable document delivery requires the tenant post-commit executor.");
+            var content = document.PendingFileContent?.ToArray()
+                ?? throw new InvalidOperationException("Pending document content is missing.");
+            _postCommit.Enqueue(
+                () => _fileService.SaveFile(document.OrganisationId, document.Id, document.PartnerId, content),
+                () => _context.Update(document),
+                document.CompleteFileWrite, document.FailFileWrite, document.PendFileWrite);
+        }
+
+        private void QueueDelete(DocumentPartner document)
+        {
+            if (_postCommit is null)
+                throw new InvalidOperationException("Durable document delivery requires the tenant post-commit executor.");
+            _postCommit.Enqueue(
+                () => _fileService.DeleteFile(document.OrganisationId, document.Id, document.PartnerId),
+                () => _context.Update(document),
+                document.CompleteFileDelete, document.FailFileDelete, document.PendFileDelete);
         }
 
     }
