@@ -17,9 +17,13 @@ public sealed record ParameterPrivilegeGrant(string Parameter, string Grantee, s
 
 public sealed record ManagedObjectIdentity(string Schema, string Name);
 
+public sealed record RelationTopologyState(string Kind, ManagedObjectIdentity Parent,
+    ManagedObjectIdentity Child, int Sequence, bool DetachPending);
+
 public sealed record RlsSecurityManifest(int SchemaVersion, string Service, string ModelContext,
     string MigrationId, string OwnerRole, string MigratorRole, string RuntimeRole,
     string[] ManagedSchemas, string[] ProhibitedRelationKinds,
+    RelationTopologyState[] RelationTopology,
     ManagedObjectIdentity[] ProtectedTables, ManagedObjectIdentity[] ExcludedTables,
     ManagedObjectIdentity MigrationHistoryTable, ManagedObjectIdentity[] Sequences,
     string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
@@ -40,7 +44,7 @@ public static class RlsSecurityManifestVerifier
     public static RlsSecurityManifest Load(Assembly assembly)
     {
         var name = assembly.GetManifestResourceNames().Single(x =>
-            x.EndsWith("rls-manifest.v7.json", StringComparison.Ordinal));
+            x.EndsWith("rls-manifest.v8.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -56,7 +60,7 @@ public static class RlsSecurityManifestVerifier
         CancellationToken cancellationToken = default)
     {
         var manifest = Load(manifestAssembly);
-        if (manifest.SchemaVersion != 7 || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion != 8 || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
             "function definition inventory");
@@ -87,6 +91,7 @@ public static class RlsSecurityManifestVerifier
         {
             await VerifyRoles(connection, manifest, cancellationToken);
             await VerifyParameterPrivileges(connection, manifest, cancellationToken);
+            await VerifyRelationTopology(connection, manifest, cancellationToken);
             await VerifyProhibitedRelationSurfaces(connection, manifest, cancellationToken);
             await VerifyTablesAndPolicies(connection, manifest, cancellationToken);
             await VerifyDatabaseAndSchemas(connection, manifest, cancellationToken);
@@ -97,6 +102,28 @@ public static class RlsSecurityManifestVerifier
             await VerifyDefaultPrivileges(connection, manifest, cancellationToken);
         }
         finally { if (close) await connection.CloseAsync(); }
+    }
+
+    private static async Task VerifyRelationTopology(DbConnection connection,
+        RlsSecurityManifest manifest, CancellationToken cancellationToken)
+    {
+        var rows = await RowsAsync(connection, """
+            select case when child.relispartition then 'PARTITION' else 'INHERITANCE' end,
+              parent_schema.nspname,parent.relname,child_schema.nspname,child.relname,
+              inheritance.inhseqno::text,inheritance.inhdetachpending::text
+            from pg_inherits inheritance
+            join pg_class child on child.oid=inheritance.inhrelid
+            join pg_namespace child_schema on child_schema.oid=child.relnamespace
+            join pg_class parent on parent.oid=inheritance.inhparent
+            join pg_namespace parent_schema on parent_schema.oid=parent.relnamespace
+            where (child_schema.nspname=any(@schemas) or parent_schema.nspname=any(@schemas))
+              and child.relkind in ('r','p','f') and parent.relkind in ('r','p','f')
+            order by 1,2,3,4,5,6,7
+            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+        var expected = manifest.RelationTopology.Select(state => string.Join('|',
+            state.Kind, state.Parent.Schema, state.Parent.Name, state.Child.Schema, state.Child.Name,
+            state.Sequence, state.DetachPending.ToString().ToLowerInvariant()));
+        Equal(expected, rows.Select(row => string.Join('|', row)), "relation topology");
     }
 
     private static async Task VerifyProhibitedRelationSurfaces(DbConnection connection,
@@ -479,6 +506,9 @@ public static class RlsSecurityManifestVerifier
     {
         Equal(ProhibitedRelationKinds, manifest.ProhibitedRelationKinds,
             "prohibited relation kind inventory");
+        if (manifest.RelationTopology.Length != 0)
+            throw new InvalidOperationException(
+                "The current security model prohibits inheritance and partition topology.");
         ValidateIdentities(manifest.ProtectedTables, "protected table");
         ValidateIdentities(manifest.ExcludedTables, "excluded table");
         ValidateIdentities(manifest.Sequences, "sequence");

@@ -245,8 +245,9 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     public async Task Versioned_manifest_matches_EF_classification_and_effective_catalog_bidirectionally()
     {
         var manifest = RlsSecurityManifestVerifier.Load(typeof(ApplicationDbContext).Assembly);
-        Assert.Equal(7, manifest.SchemaVersion);
+        Assert.Equal(8, manifest.SchemaVersion);
         Assert.Equal(["FOREIGN_TABLE", "MATERIALIZED_VIEW", "VIEW"], manifest.ProhibitedRelationKinds);
+        Assert.Empty(manifest.RelationTopology);
         await using var deployment = new DeploymentDbContext(
             new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(database.MigratorConnectionString).Options);
         await RlsSecurityManifestVerifier.VerifyAsync(deployment, typeof(ApplicationDbContext).Assembly);
@@ -364,6 +365,136 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
                 DROP EXTENSION IF EXISTS file_fdw;
                 """);
         }
+        await VerifyCatalogAsync();
+    }
+
+    [Fact]
+    public async Task Undeclared_classic_inheritance_is_rejected_and_restoration_returns_green()
+    {
+        const string originalName = "chief-private-partner";
+        const string modifiedName = "chief-modified-partner";
+        var organisationA = Guid.NewGuid();
+        await database.ExecuteAdministratorAsync($"""
+            INSERT INTO public."Partners"
+              ("PartnerNumber", "Name", "Address_City", "Address_Number", "Address_PostalCode",
+               "Address_Street", "StaffMemberId", "CategoryOfPartner", "CategoryOfPartnerName",
+               "StatusOfPartner", "DateOfAgreementSignature", "IsEconomieSociale", "Note",
+               "CreatedBy", "Created", "LastModifiedBy", "LastModified", "Softdelete", "OrganisationId")
+            SELECT 999999, '{originalName}', 'Brussels', '1', '1000', 'Review Street',
+                   s."Id", 0, 'Review', 0, current_date, false, NULL,
+                   'review', now(), 'review', NULL, false, s."OrganisationId"
+            FROM public."StaffMembers" s
+            ORDER BY s."Id"
+            LIMIT 1;
+            """);
+        await VerifyCatalogAsync();
+
+        await using (var connection = new NpgsqlConnection(database.RuntimeConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await SetTenantAsync(connection, transaction, organisationA);
+            await using var protectedTable = new NpgsqlCommand(
+                "SELECT count(*) FROM public.\"Partners\" WHERE \"Name\"=@name", connection, transaction);
+            protectedTable.Parameters.AddWithValue("name", originalName);
+            Assert.Equal(0L, await protectedTable.ExecuteScalarAsync());
+            await using var parentBeforeDrift = new NpgsqlCommand(
+                "SELECT count(*) FROM public.\"TrainingTypes\" WHERE \"Name\"=@name", connection, transaction);
+            parentBeforeDrift.Parameters.AddWithValue("name", originalName);
+            Assert.Equal(0L, await parentBeforeDrift.ExecuteScalarAsync());
+            await transaction.RollbackAsync();
+        }
+
+        await database.ExecuteAdministratorAsync("""
+            ALTER TABLE public."Partners"
+              ADD COLUMN "TrainingTypeId" integer NOT NULL DEFAULT 0;
+            ALTER TABLE public."Partners" INHERIT public."TrainingTypes";
+            """);
+        try
+        {
+            Assert.False(await ExecuteAdministratorScalarAsync<bool>("""
+                SELECT child.relispartition
+                FROM pg_inherits inheritance
+                JOIN pg_class child ON child.oid=inheritance.inhrelid
+                WHERE inheritance.inhrelid='public."Partners"'::regclass
+                  AND inheritance.inhparent='public."TrainingTypes"'::regclass
+                """));
+
+            await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+            await connection.OpenAsync();
+            await using (var transaction = await connection.BeginTransactionAsync())
+            {
+                await SetTenantAsync(connection, transaction, organisationA);
+                await using var protectedTable = new NpgsqlCommand(
+                    "SELECT count(*) FROM public.\"Partners\" WHERE \"Name\"=@name", connection, transaction);
+                protectedTable.Parameters.AddWithValue("name", originalName);
+                Assert.Equal(0L, await protectedTable.ExecuteScalarAsync());
+
+                await using var inheritedRead = new NpgsqlCommand("""
+                    SELECT count(*) FROM public."TrainingTypes"
+                    WHERE "Name"=@name AND tableoid='public."Partners"'::regclass
+                    """, connection, transaction);
+                inheritedRead.Parameters.AddWithValue("name", originalName);
+                Assert.Equal(1L, await inheritedRead.ExecuteScalarAsync());
+
+                await using var inheritedWrite = new NpgsqlCommand("""
+                    UPDATE public."TrainingTypes" SET "Name"=@modified WHERE "Name"=@original
+                    """, connection, transaction);
+                inheritedWrite.Parameters.AddWithValue("modified", modifiedName);
+                inheritedWrite.Parameters.AddWithValue("original", originalName);
+                Assert.Equal(1, await inheritedWrite.ExecuteNonQueryAsync());
+                await transaction.RollbackAsync();
+            }
+
+            await using var withoutContext = new NpgsqlCommand("""
+                SELECT count(*) FROM public."TrainingTypes"
+                WHERE "Name"=@name AND tableoid='public."Partners"'::regclass
+                """, connection);
+            withoutContext.Parameters.AddWithValue("name", originalName);
+            Assert.Equal(1L, await withoutContext.ExecuteScalarAsync());
+
+            var drift = await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+            Assert.Contains("relation topology drifted", drift.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("""
+                ALTER TABLE public."Partners" NO INHERIT public."TrainingTypes";
+                ALTER TABLE public."Partners" DROP COLUMN "TrainingTypeId";
+                DELETE FROM public."Partners" WHERE "Name" IN ('chief-private-partner','chief-modified-partner');
+                """);
+        }
+
+        await VerifyCatalogAsync();
+    }
+
+    [Fact]
+    public async Task Undeclared_declarative_partition_is_rejected_and_restoration_returns_green()
+    {
+        await VerifyCatalogAsync();
+        await database.ExecuteAdministratorAsync("""
+            CREATE TABLE zeka.issue45_partition_parent (id integer NOT NULL)
+              PARTITION BY RANGE (id);
+            CREATE TABLE zeka.issue45_partition_child
+              PARTITION OF zeka.issue45_partition_parent FOR VALUES FROM (0) TO (100);
+            """);
+        try
+        {
+            Assert.True(await ExecuteAdministratorScalarAsync<bool>("""
+                SELECT child.relispartition
+                FROM pg_inherits inheritance
+                JOIN pg_class child ON child.oid=inheritance.inhrelid
+                WHERE inheritance.inhrelid='zeka.issue45_partition_child'::regclass
+                  AND inheritance.inhparent='zeka.issue45_partition_parent'::regclass
+                """));
+            var drift = await Assert.ThrowsAsync<InvalidOperationException>(VerifyCatalogAsync);
+            Assert.Contains("relation topology drifted", drift.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("DROP TABLE zeka.issue45_partition_parent CASCADE");
+        }
+
         await VerifyCatalogAsync();
     }
 
