@@ -740,9 +740,19 @@ When uncertain, optimize for:
         over inventing one
 
 <!-- sonar:begin:codex-secrets-on-read -->
-# SonarQube secrets scanning for files protocol
+# SonarQube secret-scanning protocol
 
-Before reading any file in this workspace, scan it for secrets with the deterministic scanner:
+Protect secret material from entering agent context, chat history, command output,
+logs, or downstream telemetry.
+
+Secret scanning is a safety control. It does not grant permission to inspect a file,
+expand the assigned GitHub issue, or perform credential remediation outside the
+authorized scope.
+
+## Files requiring pre-read secret scanning
+
+Before reading a file that is reasonably likely to contain credentials or secret
+material, scan it with:
 
 ```bash
 sonar analyze secrets <path/to/file>
