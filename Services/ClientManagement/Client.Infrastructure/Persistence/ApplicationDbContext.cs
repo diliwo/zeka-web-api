@@ -107,6 +107,7 @@ public class ApplicationDbContext : TenantDbContext
         return SaveChanges();
     }
 
+
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<SocialCase> SocialCases => Set<SocialCase>();
     public DbSet<SchoolRegistration> SchoolRegistrations => Set<SchoolRegistration>();

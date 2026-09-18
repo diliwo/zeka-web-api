@@ -26,15 +26,18 @@ public sealed class PermissionMigrationTests : IAsyncLifetime
         var organisation = Organisation.Create(Guid.NewGuid(), "Synthetic", user.Id, now);
         var membership = OrganisationMembership.Create(Guid.NewGuid(), organisation.Id, user.Id, PermissionSet.MemberId, now);
         database.AddRange(user, organisation, membership); await database.SaveChangesAsync();
-        var missing = await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync());
+        var missing = await Assert.ThrowsAsync<PostgresException>(() =>
+            migrator.MigrateAsync("20260910165430_TenantPermissionCatalogue"));
         Assert.Contains("__MembershipRoleMap", missing.MessageText);
         await database.Database.ExecuteSqlInterpolatedAsync($"""
             CREATE TABLE "__MembershipRoleMap" ("MembershipId" uuid, "OrganisationId" uuid, "RoleCode" text);
             INSERT INTO "__MembershipRoleMap" VALUES ({membership.Id}, {organisation.Id}, 'Admin');
             """);
-        await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync());
+        await Assert.ThrowsAsync<PostgresException>(() =>
+            migrator.MigrateAsync("20260910165430_TenantPermissionCatalogue"));
         await database.Database.ExecuteSqlRawAsync("""UPDATE "__MembershipRoleMap" SET "RoleCode" = 'LimitedViewer'""");
-        await migrator.MigrateAsync(); database.ChangeTracker.Clear();
+        await migrator.MigrateAsync("20260910165430_TenantPermissionCatalogue");
+        database.ChangeTracker.Clear();
         var migrated = await database.OrganisationMemberships.SingleAsync();
         Assert.Equal(membership.Id, migrated.Id); Assert.Equal(organisation.Id, migrated.OrganisationId);
         Assert.Equal(PermissionSet.LimitedViewerId, migrated.PermissionSetId);

@@ -2,9 +2,9 @@
 {
     public interface IFileService
     {
-        void SaveFile(int id, int partnerId, string fileName, byte[] contentFile, string contentType);
-        byte[] GetContentFile(int partnerId, int docId, string contentType);
-        public string GetFolderPath(int partnerId);
-        void DeleteFile(int id, int partnerId, string contentType);
+        void SaveFile(Guid organisationId, int id, int partnerId, byte[] contentFile);
+        byte[] GetContentFile(Guid organisationId, int partnerId, int docId);
+        string GetFolderPath(Guid organisationId, int partnerId);
+        void DeleteFile(Guid organisationId, int id, int partnerId);
     }
 }

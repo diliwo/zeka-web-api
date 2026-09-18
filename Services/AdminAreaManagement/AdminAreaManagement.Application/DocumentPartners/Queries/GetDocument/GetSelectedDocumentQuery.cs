@@ -13,7 +13,7 @@ namespace AdminAreaManagement.Application.DocumentPartners.Queries.GetDocument
         public int JobId { get; set; }
         public int DocumentId { get; set; }
 
-        public class  GetSelectedDocumentQueryHandler : IRequestHandler<GetSelectedDocumentQuery, FileDto>
+        public class GetSelectedDocumentQueryHandler : IRequestHandler<GetSelectedDocumentQuery, FileDto>
         {
             private readonly IRepositoryManager _repository;
             private readonly IFileService _fileService;
@@ -38,12 +38,12 @@ namespace AdminAreaManagement.Application.DocumentPartners.Queries.GetDocument
                     return new FileDto()
                     {
                         Name = document.Description,
-                        Data = _fileService.GetContentFile(query.PartnerId, query.DocumentId,document.ContentType)
+                        Data = _fileService.GetContentFile(document.OrganisationId, document.PartnerId, document.Id)
                     };
                 }
                 catch (Exception ex)
                 {
-                    var filePath = _fileService.GetFolderPath(query.PartnerId);
+                    var filePath = _fileService.GetFolderPath(document.OrganisationId, document.PartnerId);
                     //Log.Error(ex,$"GetSelectedDocumentQueryHandler {query.DocumentId}");
                     if (ex.GetType() == typeof(FileNotFoundException) || ex.GetType() == typeof(DirectoryNotFoundException))
                         throw new NotFoundException("Fichier", filePath);

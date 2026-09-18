@@ -55,7 +55,7 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             return professions;
         }
 
-        public async void SoftDelete(Profession profession)
+        public async Task SoftDelete(Profession profession)
         {
             _context.Professions.Update(profession);
            await _context.SaveChangesAsync();

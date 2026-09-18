@@ -17,5 +17,5 @@ public interface IRepositoryManager
     INatureOfContractRepository NatureOfContract { get; }
     IProfessionnalExperienceRepository ProfessionnalExperience { get; }
     void Save();
-    void SaveAsync();
+    Task SaveAsync();
 }

@@ -9,6 +9,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using ClientManagement.Application.Common.Authorization;
+using Microsoft.Extensions.Hosting;
+using Zeka.PersistenceSecurity;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ClientManagement.Infrastructure;
 
@@ -19,10 +24,22 @@ public static class DependencyInjection
         services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
 
         services.AddTenantEnforcement(configuration);
-        services.AddDbContext<ApplicationDbContext>(options =>
+        services.TryAddSingleton<ITenantAttemptOrderObserver, NullTenantAttemptOrderObserver>();
+        var runtimeConnection = configuration.GetConnectionString("ClientApiConnection");
+        if (string.IsNullOrWhiteSpace(runtimeConnection))
+            throw new InvalidOperationException("ConnectionStrings:ClientApiConnection is required.");
+        services.AddSingleton<IHostedService>(_ => new RuntimeDatabaseIdentityValidator(
+            runtimeConnection, "zeka_client_runtime"));
+        services.AddScoped<TenantTransactionAttemptState>();
+        services.AddScoped<TenantCommandGuard>();
+        services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
+        services.AddDbContext<ApplicationDbContext>((provider, options) =>
             options.UseNpgsql(
-                configuration.GetConnectionString("ClientApiConnection"),
-                builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
+                runtimeConnection,
+                builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
+                    .EnableRetryOnFailure(3, TimeSpan.FromMilliseconds(200), null))
+                .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>())
+                .AddInterceptors(provider.GetServices<IInterceptor>()));
 
         services.AddTransient<IMonitoringActionRepository, MonitoringActionRepository>(); ;
         services.AddTransient<ILanguageRepository, LanguageRepository>();

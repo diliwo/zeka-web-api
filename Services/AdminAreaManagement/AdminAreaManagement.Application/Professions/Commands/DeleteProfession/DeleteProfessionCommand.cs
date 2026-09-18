@@ -35,7 +35,7 @@ namespace AdminAreaManagement.Application.Professions.Commands.DeleteProfession
                         foundedProfession.Softdelete = true;
                     }
 
-                    _repository.Profession.SoftDelete(foundedProfession);
+                    await _repository.Profession.SoftDelete(foundedProfession);
                 }
                 else
                 {

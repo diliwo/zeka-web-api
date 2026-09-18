@@ -16,6 +16,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5" PrivateAssets="all" />
     <PackageReference Include="FluentAssertions" Version="6.12.1" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.14.0" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="8.0.7" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj" />
@@ -23,4 +24,5 @@
 <ItemGroup><ProjectReference Include="..\..\AdminAreaManagement.API\AdminAreaManagement.API.csproj" /></ItemGroup>
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/AuthenticationFixture.cs" Link="AuthenticationFixture.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/ValidatorContractTests.cs" Link="ValidatorContractTests.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/TenantAttemptEvidenceCollector.cs" Link="TenantAttemptEvidenceCollector.cs" /></ItemGroup>
 </Project>

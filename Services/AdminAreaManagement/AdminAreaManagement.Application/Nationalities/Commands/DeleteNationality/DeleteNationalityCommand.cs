@@ -33,7 +33,7 @@ namespace AdminAreaManagement.Application.Nationalities.Commands.DeleteNationali
                         entity.Softdelete = true;
                     }
 
-                    _repository.Nationality.SoftDelete(entity);
+                    await _repository.Nationality.SoftDelete(entity);
                 }
                 else
                 {

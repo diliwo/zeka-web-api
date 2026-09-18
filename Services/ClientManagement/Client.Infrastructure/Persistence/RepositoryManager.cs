@@ -59,5 +59,5 @@ public sealed class RepositoryManager : IRepositoryManager
     public INatureOfContractRepository NatureOfContract => _natureOfContractRepository.Value;
     public IProfessionnalExperienceRepository ProfessionnalExperience => _professionnalExperienceRepository.Value;
     public void Save() => _applicationDbContext.SaveChanges();
-    public void SaveAsync() => _applicationDbContext.SaveChangesAsync();
+    public Task SaveAsync() => _applicationDbContext.SaveChangesAsync();
 }

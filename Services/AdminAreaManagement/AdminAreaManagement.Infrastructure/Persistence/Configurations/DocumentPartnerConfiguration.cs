@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
 {
-    class DocumentPartnerConfiguration  : IEntityTypeConfiguration<DocumentPartner>
+    class DocumentPartnerConfiguration : IEntityTypeConfiguration<DocumentPartner>
     {
         public void Configure(EntityTypeBuilder<DocumentPartner> builder)
         {
@@ -16,6 +16,11 @@ namespace AdminAreaManagement.Infrastructure.Persistence.Configurations
                 .HasPrincipalKey(p => new { p.Id, p.OrganisationId });
             builder
                 .Ignore(d => d.ContentFile);
+            builder.HasIndex(d => new { d.OrganisationId, d.CreateOperationId }).IsUnique();
+            builder.HasIndex(d => new { d.OrganisationId, d.DeleteOperationId }).IsUnique();
+            builder.Property(d => d.CreateRequestHash).HasMaxLength(64).IsRequired();
+            builder.Property(d => d.FileWriteFailureCode).HasMaxLength(64);
+            builder.Property(d => d.FileDeleteFailureCode).HasMaxLength(64);
         }
     }
 }

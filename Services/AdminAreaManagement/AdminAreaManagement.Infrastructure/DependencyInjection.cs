@@ -9,9 +9,14 @@ using AdminAreaManagement.Infrastructure.Persistence.Helpers;
 using AdminAreaManagement.Infrastructure.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using AdminAreaManagement.Application.Common.Authorization;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Zeka.PersistenceSecurity;
 
 
 
@@ -21,13 +26,29 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfigurationManager configuration)
     {
-        services.AddSingleton(x => new FileRepositorySettings(configuration.GetValue<string>("FileServerPath")));
+        services.RemoveAll<IFileService>();
+        services.AddSingleton<IFileService>(_ => new FileService(new FileRepositorySettings(
+            configuration.GetValue<string>("FileServerPath")
+            ?? throw new InvalidOperationException("FileServerPath is required."))));
 
         services.AddTenantEnforcement(configuration);
-        services.AddDbContext<ApplicationDbContext>(options =>
+        services.TryAddSingleton<ITenantAttemptOrderObserver, NullTenantAttemptOrderObserver>();
+        var runtimeConnection = configuration.GetConnectionString("ClientApiConnection");
+        if (string.IsNullOrWhiteSpace(runtimeConnection))
+            throw new InvalidOperationException("ConnectionStrings:ClientApiConnection is required.");
+        services.AddSingleton<IHostedService>(_ => new RuntimeDatabaseIdentityValidator(
+            runtimeConnection, "zeka_adminarea_runtime"));
+        services.AddScoped<TenantTransactionAttemptState>();
+        services.AddScoped<TenantPostCommitActions>();
+        services.AddScoped<TenantCommandGuard>();
+        services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
+        services.AddDbContext<ApplicationDbContext>((provider, options) =>
             options.UseNpgsql(
-                configuration.GetConnectionString("ClientApiConnection"),
-                builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
+                runtimeConnection,
+                builder => builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
+                    .EnableRetryOnFailure(3, TimeSpan.FromMilliseconds(200), null))
+                .AddInterceptors(provider.GetRequiredService<TenantCommandGuard>())
+                .AddInterceptors(provider.GetServices<IInterceptor>()));
 
 
 

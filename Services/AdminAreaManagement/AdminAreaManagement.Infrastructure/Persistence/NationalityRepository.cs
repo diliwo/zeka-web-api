@@ -55,7 +55,7 @@ namespace AdminAreaManagement.Infrastructure.Persistence
             return professions;
         }
 
-        public async void SoftDelete(Nationality nationality)
+        public async Task SoftDelete(Nationality nationality)
         {
             _context.Nationalities.Update(nationality);
            await _context.SaveChangesAsync();

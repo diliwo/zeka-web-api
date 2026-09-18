@@ -4,104 +4,118 @@ namespace AdminAreaManagement.Application.Common.Services
 {
     public class FileService : IFileService
     {
-        private FileRepositorySettings _settings;
-        private readonly string _fileServerPath;
+        private readonly string _storageRoot;
 
         public FileService(FileRepositorySettings settings)
+            : this(settings?.FileServerPath ?? throw new ArgumentNullException(nameof(settings)))
         {
-            _settings = settings;
-            //var filePathSettings =  System.Configuration.ConfigurationManager.AppSettings["FileServerPath"];
-            var filePathSettings = _settings.FileServerPath;
-            if (string.IsNullOrEmpty(filePathSettings))
-            {
-                throw new Exception("FileServerPath configuration setting missing");
-            }
-            _fileServerPath = filePathSettings;
         }
 
         public FileService(string fileServerPath)
         {
-            _fileServerPath = fileServerPath;
-            if (!Directory.Exists(_fileServerPath))
+            if (string.IsNullOrWhiteSpace(fileServerPath))
+                throw new InvalidOperationException("FileServerPath is required.");
+            var configuredRoot = Path.GetFullPath(fileServerPath);
+            Directory.CreateDirectory(configuredRoot);
+            var root = new DirectoryInfo(configuredRoot);
+            _storageRoot = (root.ResolveLinkTarget(returnFinalTarget: true) ?? root).FullName;
+        }
+
+        public byte[] GetContentFile(Guid organisationId, int partnerId, int docId)
+        {
+            return File.ReadAllBytes(DocumentPath(organisationId, partnerId, docId));
+        }
+
+        public string GetFolderPath(Guid organisationId, int partnerId)
+        {
+            ValidateIdentity(organisationId, partnerId, 1);
+            return DocumentFolder(organisationId, partnerId);
+        }
+
+        public void DeleteFile(Guid organisationId, int id, int partnerId)
+        {
+            var path = DocumentPath(organisationId, partnerId, id);
+            if (File.Exists(path)) File.Delete(path);
+        }
+
+        public void SaveFile(Guid organisationId, int id, int partnerId, byte[] contentFile)
+        {
+            ArgumentNullException.ThrowIfNull(contentFile);
+            if (contentFile.Length == 0) throw new InvalidDataException("Document content is required.");
+            var folderPath = DocumentFolder(organisationId, partnerId);
+            Directory.CreateDirectory(folderPath);
+            RejectDirectoryLink(folderPath);
+            var fileFullPath = DocumentPath(organisationId, partnerId, id);
+            if (File.Exists(fileFullPath))
             {
-                Directory.CreateDirectory(_fileServerPath);
+                if (File.ReadAllBytes(fileFullPath).AsSpan().SequenceEqual(contentFile)) return;
+                throw new IOException("A different document already exists for this storage identity.");
             }
-        }
-
-        public byte[] GetContentFile(int partnerId, int docId, string contentType)
-        {
-            throw new NotImplementedException();
-        }
-
-        public string GetFolderPath(int partnerId)
-        {
-            return ""; /*$@"{_fileServerPath}{FileRepositoryHelper.GetFolderNameForPartnerId(partnerId)}";*/
-        }
-
-        public void DeleteFile(int id, int partnerId, string contentType)
-        {
-            throw new NotImplementedException();
-        }
-
-        public void SaveFile(int id, int partnerId, string fileName, byte[] contentFile, string contentType)
-        {
-            var folderPath = GetFolderPath(partnerId);
+            var temporaryPath = ContainedPath(organisationId.ToString("N"), partnerId.ToString("D10"),
+                $".{id:D10}.{Guid.NewGuid():N}.pending");
             try
             {
-                if (!Directory.Exists(folderPath))
+                using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                           81920, FileOptions.WriteThrough))
                 {
-                    Directory.CreateDirectory(folderPath);
+                    stream.Write(contentFile);
+                    stream.Flush(flushToDisk: true);
                 }
+                File.Move(temporaryPath, fileFullPath, overwrite: false);
             }
-            catch (Exception e)
+            finally
             {
-                // can't create folder: do nothing and return
-                throw new ApplicationException($"Erreur lors de la tentative d'importation du document : le dossier d'enregistrement n'a pas pu être créé ou n'existe pas ! ({folderPath})");
-            }
-
-            var fileFullPath = $@"{folderPath}\Document-{partnerId}-{id}.{contentType}";
-
-
-            try
-            {
-                File.WriteAllBytes(fileFullPath, contentFile);
-            }
-            catch (Exception e)
-            {
-                throw new ApplicationException($"Erreur lors de la tentative d'importation  du document: une erreur est survenue lors de l'enregistrement du fichier ! ({fileFullPath}");
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
             }
         }
 
-        public byte[] GetContentFile(int partnerId, int jobId, int docId, string contentType)
+        private string DocumentPath(Guid organisationId, int partnerId, int documentId)
         {
-            var fileName = $"Document-{partnerId}-{jobId}-{docId}.{contentType}";
-            var filePath = $"{GetFolderPath(partnerId)}\\{fileName}";
-
-            using FileStream fs = File.OpenRead(filePath);
-            byte[] data = new byte[fs.Length];
-            int br = fs.Read(data, 0, data.Length);
-            if (br != fs.Length)
-                throw new IOException(filePath);
-            return data;
+            ValidateIdentity(organisationId, partnerId, documentId);
+            var folder = DocumentFolder(organisationId, partnerId);
+            var path = ContainedPath(Path.GetRelativePath(_storageRoot, folder),
+                $"document-{documentId:D10}.bin");
+            RejectFileLink(path);
+            return path;
         }
 
-
-        public void DeleteFile(int id, int partnerId, int jobId, string contentType)
+        private string DocumentFolder(Guid organisationId, int partnerId)
         {
-            var folderPath = GetFolderPath(partnerId);
-            var fileFullPath = $@"{folderPath}\Document-{partnerId}-{jobId}-{id}.{contentType}";
-            if (!File.Exists(fileFullPath))
-            {
-                throw new ApplicationException($"Erreur lors de la tentative de suppression du document : le fichier n'existe pas sur le serveur! ({folderPath})");
-            }
-            try
-            {
-                File.Delete(fileFullPath);
-            }
-            catch (Exception e)
-            {
-                throw new ApplicationException($"Erreur lors de la tentative  de suppression du document: une erreur est survenue lors de la suppression du fichier ! ({fileFullPath}");
-            }
+            var organisation = ContainedPath(organisationId.ToString("N"));
+            RejectDirectoryLink(organisation);
+            var folder = ContainedPath(organisationId.ToString("N"), partnerId.ToString("D10"));
+            RejectDirectoryLink(folder);
+            return folder;
+        }
+
+        private string ContainedPath(params string[] segments)
+        {
+            var path = Path.GetFullPath(Path.Combine([_storageRoot, .. segments]));
+            var rootPrefix = _storageRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? _storageRoot : _storageRoot + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!path.StartsWith(rootPrefix, comparison))
+                throw new InvalidOperationException("Document path escaped the configured storage root.");
+            return path;
+        }
+
+        private static void RejectDirectoryLink(string path)
+        {
+            if (Directory.Exists(path) && new DirectoryInfo(path).LinkTarget is not null)
+                throw new InvalidOperationException("Document storage cannot traverse a symbolic link.");
+        }
+
+        private static void RejectFileLink(string path)
+        {
+            if (new FileInfo(path).LinkTarget is not null)
+                throw new InvalidOperationException("Document storage cannot traverse a symbolic link.");
+        }
+
+        private static void ValidateIdentity(Guid organisationId, int partnerId, int documentId)
+        {
+            if (organisationId == Guid.Empty || partnerId <= 0 || documentId <= 0)
+                throw new InvalidOperationException("Document storage identity is invalid.");
         }
     }
 
@@ -111,6 +125,8 @@ namespace AdminAreaManagement.Application.Common.Services
 
         public FileRepositorySettings(string fileServerPath)
         {
+            if (string.IsNullOrWhiteSpace(fileServerPath))
+                throw new InvalidOperationException("FileServerPath is required.");
             FileServerPath = fileServerPath;
         }
     }

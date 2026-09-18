@@ -56,7 +56,8 @@ public sealed class PostgreSqlOrganisationPersistenceTests(PostgreSqlFixture fix
 
         await using (var arrangeContext = CreateDbContext(connectionString))
         {
-            await arrangeContext.Database.MigrateAsync();
+            await arrangeContext.GetService<IMigrator>()
+                .MigrateAsync("20260910165430_TenantPermissionCatalogue");
             var owner = User.Create("owner@example.org", "owner", "Ada", "Lovelace", Now);
             userId = owner.Id;
             arrangeContext.Add(owner);

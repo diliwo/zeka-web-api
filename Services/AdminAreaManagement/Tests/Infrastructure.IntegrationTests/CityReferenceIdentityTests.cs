@@ -379,6 +379,9 @@ public class CityReferenceIdentityTests(CityPostgreSqlFixture fixture) : IClassF
         using var scope = provider.CreateScope();
         scope.ServiceProvider.GetRequiredService<Zeka.Extensions.MultiTenancy.Abstractions.ITenantContextInitializer>().Establish(new Zeka.Extensions.MultiTenancy.Abstractions.TenantContext(new Zeka.Extensions.MultiTenancy.Abstractions.TenantId(Guid.NewGuid()), "fixture"));
         var queries = scope.ServiceProvider.GetRequiredService<ICityQueries>();
-        (await queries.ActiveCityExistsAsync("Missing", "Missing", CancellationToken.None)).Should().BeFalse();
+        var transactions = scope.ServiceProvider.GetRequiredService<
+            AdminAreaManagement.Application.Common.Authorization.ITenantTransactionExecutor>();
+        (await transactions.ExecuteAsync(token =>
+            queries.ActiveCityExistsAsync("Missing", "Missing", token), CancellationToken.None)).Should().BeFalse();
     }
 }

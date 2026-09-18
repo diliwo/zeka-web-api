@@ -24,8 +24,8 @@ namespace AdminAreaManagement.API.Controllers
         public async Task<ActionResult> Import(PersistDocumentPartnerCommand command)
         {
             var test = command.Name;
-            var id = await Mediator.Send(command);
-            return Ok(id);
+            var result = await Mediator.Send(command);
+            return Ok(result);
         }
 
         [HttpGet("{partnerId}/{jobId}")]
@@ -34,7 +34,7 @@ namespace AdminAreaManagement.API.Controllers
         [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetDocumentsJobPartnerListQuery))]
         public async Task<ActionResult<DocumentPartnersListDto>> GetDocumentsByJobIAndPartnerId(int partnerId, int jobId)
         {
-            var vm = await Mediator.Send(new GetDocumentsJobPartnerListQuery() { PartnerId = partnerId, JobId = jobId});
+            var vm = await Mediator.Send(new GetDocumentsJobPartnerListQuery() { PartnerId = partnerId, JobId = jobId });
 
             return Ok(vm);
         }
@@ -46,7 +46,7 @@ namespace AdminAreaManagement.API.Controllers
         [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(GetSelectedDocumentQuery))]
         public async Task<ActionResult<DocumentPartnersListDto>> GetSelectedDocument(int partnerId, int jobId, int documentId)
         {
-            var vm = await Mediator.Send(new GetSelectedDocumentQuery() { PartnerId = partnerId, JobId = jobId, DocumentId = documentId});
+            var vm = await Mediator.Send(new GetSelectedDocumentQuery() { PartnerId = partnerId, JobId = jobId, DocumentId = documentId });
 
             FileContentResult file = new FileContentResult(vm.Data, MimeMapping.MimeUtility.GetMimeMapping(vm.Name));
             file.FileDownloadName = vm.Name;
@@ -56,10 +56,11 @@ namespace AdminAreaManagement.API.Controllers
         [Produces(typeof(void))]
         [HttpDelete("{id}")]
         [AdminAreaManagement.API.Services.TenantRequestPolicy(typeof(DeleteDocumentPartnerCommand))]
-        public async Task<ActionResult> DeleteDocument(int id)
+        public async Task<ActionResult> DeleteDocument(int id,
+            [FromHeader(Name = "Idempotency-Key")] Guid operationId)
         {
-            await Mediator.Send(new DeleteDocumentPartnerCommand(id));
-            return NoContent();
+            var result = await Mediator.Send(new DeleteDocumentPartnerCommand(id, operationId));
+            return Ok(result);
         }
     }
 }

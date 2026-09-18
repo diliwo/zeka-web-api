@@ -21,13 +21,15 @@ public sealed class RepositoryManager : IRepositoryManager
     private readonly Lazy<ICityRepository> _cityRepository;
     private readonly Lazy<INationalityRepository> _nationalityRepository;
 
-    public RepositoryManager(ApplicationDbContext applicationDbContext, IFileService fileService)
+    public RepositoryManager(ApplicationDbContext applicationDbContext, IFileService fileService,
+        TenantPostCommitActions postCommit)
     {
         _applicationDbContext = applicationDbContext;
         _teamRepository = new Lazy<ITeamRepository>(() => new TeamRepository(applicationDbContext));
         _StaffMemberRepository = new Lazy<IStaffMemberRepository>(() => new StaffMemberRepository(applicationDbContext));
         _partnerRepository = new Lazy<IPartnerRepository>(() => new PartnerRepository(applicationDbContext));
-        _documentPartnerRepository = new Lazy<IDocumentPartnerRepository>(() => new DocumentPartnerRepository(applicationDbContext, fileService));
+        _documentPartnerRepository = new Lazy<IDocumentPartnerRepository>(() =>
+            new DocumentPartnerRepository(applicationDbContext, fileService, postCommit));
         _schoolRepository = new Lazy<ISchoolRepository>(() => new SchoolRepository(applicationDbContext));
         _TrainingRepository =
             new Lazy<ITrainingsRepository>(() => new TrainingsRepository(applicationDbContext));

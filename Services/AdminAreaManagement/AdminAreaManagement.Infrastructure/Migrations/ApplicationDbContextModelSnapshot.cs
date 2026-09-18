@@ -99,6 +99,14 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid>("CreateOperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreateRequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime>("Created")
                         .HasColumnType("timestamp without time zone");
 
@@ -106,9 +114,32 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("DeleteOperationId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("FileDeleteAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FileDeleteFailureCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("FileDeleteState")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("FileWriteAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FileWriteFailureCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("FileWriteState")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("LastModified")
                         .HasColumnType("timestamp without time zone");
@@ -127,12 +158,21 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.Property<int>("PartnerId")
                         .HasColumnType("integer");
 
+                    b.Property<byte[]>("PendingFileContent")
+                        .HasColumnType("bytea");
+
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
                     b.HasKey("Id");
 
                     b.HasAlternateKey("Id", "OrganisationId");
+
+                    b.HasIndex("OrganisationId", "CreateOperationId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganisationId", "DeleteOperationId")
+                        .IsUnique();
 
                     b.HasIndex("PartnerId", "OrganisationId");
 
