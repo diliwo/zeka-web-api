@@ -60,6 +60,70 @@ public sealed class FileServiceTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Existing_final_file_symbolic_link_is_rejected_without_accessing_external_target()
+    {
+        var service = new FileService(root);
+        var organisation = Guid.NewGuid();
+        const int documentId = 17;
+        const int partnerId = 19;
+        var folder = service.GetFolderPath(organisation, partnerId);
+        Directory.CreateDirectory(folder);
+        var documentPath = Path.Combine(folder, $"document-{documentId:D10}.bin");
+        var outside = Path.Combine(Path.GetTempPath(), $"zeka-document-outside-{Guid.NewGuid():N}.bin");
+        byte[] externalContent = [4, 3, 2, 1];
+        File.WriteAllBytes(outside, externalContent);
+        File.CreateSymbolicLink(documentPath, outside);
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                service.GetContentFile(organisation, partnerId, documentId));
+            Assert.Throws<InvalidOperationException>(() =>
+                service.SaveFile(organisation, documentId, partnerId, [9, 9, 9]));
+            Assert.Throws<InvalidOperationException>(() =>
+                service.DeleteFile(organisation, documentId, partnerId));
+
+            Assert.True(File.Exists(outside));
+            Assert.Equal(externalContent, File.ReadAllBytes(outside));
+            Assert.NotNull(new FileInfo(documentPath).LinkTarget);
+        }
+        finally
+        {
+            File.Delete(documentPath);
+            File.Delete(outside);
+        }
+    }
+
+    [Fact]
+    public void Dangling_final_file_symbolic_link_is_rejected_without_creating_external_target()
+    {
+        var service = new FileService(root);
+        var organisation = Guid.NewGuid();
+        const int documentId = 23;
+        const int partnerId = 29;
+        var folder = service.GetFolderPath(organisation, partnerId);
+        Directory.CreateDirectory(folder);
+        var documentPath = Path.Combine(folder, $"document-{documentId:D10}.bin");
+        var outside = Path.Combine(Path.GetTempPath(), $"zeka-document-missing-{Guid.NewGuid():N}.bin");
+        File.CreateSymbolicLink(documentPath, outside);
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                service.GetContentFile(organisation, partnerId, documentId));
+            Assert.Throws<InvalidOperationException>(() =>
+                service.SaveFile(organisation, documentId, partnerId, [1, 2, 3]));
+            Assert.Throws<InvalidOperationException>(() =>
+                service.DeleteFile(organisation, documentId, partnerId));
+
+            Assert.False(File.Exists(outside));
+            Assert.NotNull(new FileInfo(documentPath).LinkTarget);
+        }
+        finally
+        {
+            File.Delete(documentPath);
+        }
+    }
+
     [Theory]
     [InlineData(0, 1)]
     [InlineData(-1, 1)]

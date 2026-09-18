@@ -268,6 +268,61 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     }
 
     [Fact]
+    public async Task Startup_identity_validation_is_independent_of_hostile_search_path_shadowing()
+    {
+        await database.ExecuteAdministratorAsync("""
+            CREATE SCHEMA issue45_identity_shadow;
+            GRANT USAGE ON SCHEMA issue45_identity_shadow TO zeka_adminarea_runtime;
+            CREATE VIEW issue45_identity_shadow.pg_roles AS
+              SELECT 'zeka_adminarea_runtime'::name AS rolname, 42::oid AS oid,
+                     true AS rolcanlogin, true AS rolsuper, true AS rolbypassrls,
+                     true AS rolcreatedb, true AS rolcreaterole, true AS rolinherit,
+                     true AS rolreplication, ARRAY['unexpected']::text[] AS rolconfig;
+            CREATE VIEW issue45_identity_shadow.pg_auth_members AS
+              SELECT 42::oid AS member, 42::oid AS roleid;
+            CREATE VIEW issue45_identity_shadow.pg_db_role_setting AS
+              SELECT 42::oid AS setrole;
+            CREATE VIEW issue45_identity_shadow.pg_parameter_acl AS
+              SELECT 'session_replication_role'::text AS parname;
+            CREATE FUNCTION issue45_identity_shadow.has_parameter_privilege(name, text, text)
+              RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT true';
+            GRANT SELECT ON ALL TABLES IN SCHEMA issue45_identity_shadow TO zeka_adminarea_runtime;
+            GRANT EXECUTE ON FUNCTION issue45_identity_shadow.has_parameter_privilege(name, text, text)
+              TO zeka_adminarea_runtime;
+            """);
+        try
+        {
+            var hostileConnection = new NpgsqlConnectionStringBuilder(database.RuntimeConnectionString)
+            {
+                Options = "-c search_path=issue45_identity_shadow,public,pg_catalog",
+                Pooling = false
+            }.ConnectionString;
+
+            await using (var connection = new NpgsqlConnection(hostileConnection))
+            {
+                await connection.OpenAsync();
+                await using var command = new NpgsqlCommand(
+                    "select rolsuper,has_parameter_privilege(current_user,'session_replication_role','SET') " +
+                    "from pg_roles where rolname=current_user", connection);
+                await using var reader = await command.ExecuteReaderAsync();
+                Assert.True(await reader.ReadAsync());
+                Assert.True(reader.GetBoolean(0));
+                Assert.True(reader.GetBoolean(1));
+            }
+
+            await new RuntimeDatabaseIdentityValidator(hostileConnection, "zeka_adminarea_runtime")
+                .StartAsync(default);
+        }
+        finally
+        {
+            await database.ExecuteAdministratorAsync("DROP SCHEMA issue45_identity_shadow CASCADE");
+        }
+
+        await ValidateRuntimeIdentityAsync();
+        await VerifyCatalogAsync();
+    }
+
+    [Fact]
     public async Task Versioned_manifest_matches_EF_classification_and_effective_catalog_bidirectionally()
     {
         var manifest = RlsSecurityManifestVerifier.Load(typeof(ApplicationDbContext).Assembly);

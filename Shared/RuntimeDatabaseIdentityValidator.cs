@@ -15,13 +15,13 @@ public sealed class RuntimeDatabaseIdentityValidator(string connectionString, st
             select session_user,current_user,
                    r.rolcanlogin,r.rolsuper,r.rolbypassrls,r.rolcreatedb,r.rolcreaterole,
                    r.rolinherit,r.rolreplication,r.rolconfig is null,
-                   not exists(select 1 from pg_auth_members m where m.member=r.oid or m.roleid=r.oid),
-                   not exists(select 1 from pg_db_role_setting s where s.setrole=r.oid),
+                   not exists(select 1 from pg_catalog.pg_auth_members m where m.member=r.oid or m.roleid=r.oid),
+                   not exists(select 1 from pg_catalog.pg_db_role_setting s where s.setrole=r.oid),
                    not exists(
-                     select 1 from pg_parameter_acl parameter
-                     where has_parameter_privilege(current_user,parameter.parname,'SET')
-                        or has_parameter_privilege(current_user,parameter.parname,'ALTER SYSTEM'))
-            from pg_roles r where r.rolname=current_user
+                     select 1 from pg_catalog.pg_parameter_acl parameter
+                     where pg_catalog.has_parameter_privilege(current_user,parameter.parname,'SET')
+                        or pg_catalog.has_parameter_privilege(current_user,parameter.parname,'ALTER SYSTEM'))
+            from pg_catalog.pg_roles r where r.rolname=current_user
             """;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)

@@ -73,8 +73,10 @@ namespace AdminAreaManagement.Application.Common.Services
         {
             ValidateIdentity(organisationId, partnerId, documentId);
             var folder = DocumentFolder(organisationId, partnerId);
-            return ContainedPath(Path.GetRelativePath(_storageRoot, folder),
+            var path = ContainedPath(Path.GetRelativePath(_storageRoot, folder),
                 $"document-{documentId:D10}.bin");
+            RejectFileLink(path);
+            return path;
         }
 
         private string DocumentFolder(Guid organisationId, int partnerId)
@@ -101,6 +103,12 @@ namespace AdminAreaManagement.Application.Common.Services
         private static void RejectDirectoryLink(string path)
         {
             if (Directory.Exists(path) && new DirectoryInfo(path).LinkTarget is not null)
+                throw new InvalidOperationException("Document storage cannot traverse a symbolic link.");
+        }
+
+        private static void RejectFileLink(string path)
+        {
+            if (new FileInfo(path).LinkTarget is not null)
                 throw new InvalidOperationException("Document storage cannot traverse a symbolic link.");
         }
 
