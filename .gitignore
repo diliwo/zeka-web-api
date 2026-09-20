@@ -256,6 +256,7 @@ paket-files/
 /src/WebUI/__LogFilePath__log-20220511.txt
 .vs/diliPathFinder-web-api/copilot-chat
 .vs
+.artifacts/
 Services/ClientManagement/Client.API/obj
 Services/ClientManagement/Client.Infrastructure/obj
 Services/ClientManagement/Client.Application/obj
