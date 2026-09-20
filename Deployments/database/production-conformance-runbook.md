@@ -31,11 +31,22 @@ This runbook is the provider-neutral Issue #46 platform procedure. It preserves 
 ## Migration or bootstrap failure
 
 1. Stop the deployment. Application runtimes must not execute migrations and must not receive the migrator credential.
-2. Record the service, revision, migration identifier, bootstrap phase and redacted error category.
-3. Reset any assumed owner role, close the failed migrator session and determine whether the transaction committed.
-4. Rerun the idempotent reviewed bootstrap only to reconcile its declared roles, memberships, settings, default grants and ACLs.
-5. Production migration targets are forward-only `latest`. A down-migration target is prohibited; use a reviewed forward repair or the database-wide restore process. This is currently an operational rule, not executable OPS-03 evidence: no accepted production migration entry point enforces the target before database mutation.
-6. After a successful forward repair, rerun the complete migration chain on a fresh database, the supported upgrade checkpoint, runtime identity validation and all v10 manifest checks.
+2. Preserve the sanitized `zeka-db-migrate` result with its service, exact source SHA, operation UUID, migration identifiers, phase states and redacted error code. Never retain the credential, connection string, host, tenant data, raw SQL or unrestricted exception text.
+3. A `DOWN_TARGET_REJECTED` result is a policy stop: migration and bootstrap must both be `not_started`. Compare the before/after history and catalog/privilege digest and do not continue the deployment.
+4. `ALREADY_CURRENT` is a successful no-mutation outcome only when the read-only v10 manifest verification passes.
+5. `MIGRATION_STATE_REQUIRES_INSPECTION` means EF work may have started. Reset the assumed role, close the failed session, inspect migration history and catalog state, and determine which commands committed. Do not blindly retry, run a down migration, mark readiness green or widen privileges.
+6. A retry always reacquires the database-scoped advisory lock, revalidates identity and membership, and reclassifies the observed history. Continue only when the history is a known reviewed prefix and the requested operation is still forward; otherwise retain the failure and escalate for a reviewed forward repair or authorized database-wide restore.
+7. Bootstrap reconciliation is a separate role-administrator phase outside the CLI. Rerun it only after successful migration to reconcile its declared roles, memberships, settings, default grants and ACLs. A bootstrap or verifier failure does not roll back an already committed migration.
+8. After a successful forward repair, rerun the complete migration chain on a fresh database, the supported upgrade checkpoint, runtime identity validation and all v10 manifest checks.
+
+The deployment host builds `Tools/Zeka.DbMigrate/Zeka.DbMigrate.csproj` from the
+reviewed immutable SHA with that SHA supplied as `ZekaSourceSha`. It invokes only
+`plan` or `apply`, one of `adminarea`, `auth`, or `client`, `latest` or an exact
+compiled migration identifier, an operation UUID, and a destination beneath an
+authorized host-controlled evidence root. It supplies the matching service-migrator
+connection through `--credential-stdin`; the role-administrator credential never
+enters this process. Concrete cloud, AKS, identity-provider and secret-delivery
+topology remains deferred to ADR-004/ADR-005.
 
 ## Database-wide backup and restore prerequisites
 

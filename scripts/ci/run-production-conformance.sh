@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root=$(git rev-parse --show-toplevel)
+source_sha=$(git -C "${repo_root}" rev-parse --verify HEAD)
 inventory="${repo_root}/Deployments/database/production-conformance.targets.json"
 results_dir="${1:-${repo_root}/TestResults/production-conformance}"
 
@@ -27,7 +28,7 @@ if ! jq -e '
       (.evidence | type == "array") and
       (if (.evidence | length) > 0 then
          (.disposition == null) and
-         all(.evidence[]; (.suite | IN("auth","adminarea","client")) and (.test | length > 0))
+         all(.evidence[]; (.suite | IN("auth","adminarea","client","migration")) and (.test | length > 0))
        else
          (.disposition.status | IN("blocked","untested")) and
          (.disposition.reason | type == "string" and length > 0)
@@ -45,6 +46,7 @@ projects=(
   "auth|Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj"
   "adminarea|Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj"
   "client|Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj"
+  "migration|Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj"
 )
 
 test_status=0
@@ -53,6 +55,7 @@ for entry in "${projects[@]}"; do
   project=${entry#*|}
   echo "::group::Issue #46 production conformance: ${suite}"
   if ! dotnet test "${repo_root}/${project}" --configuration Release --no-restore \
+      /p:ZekaSourceSha="${source_sha}" \
       --filter 'Issue=46&Evidence=PlatformConformance' \
       --logger "trx;LogFileName=${suite}.trx" --results-directory "${results_dir}"; then
     test_status=1

@@ -9,9 +9,15 @@ For each service database, Zeka Platform Operations:
 1. creates the database using the separately authorized PostgreSQL administrative process;
 2. executes the matching `bootstrap-*-roles.sql` script to create/reconcile the service `owner`, `migrator`, and `runtime` roles, ownership, membership, default privileges, and database/schema ACLs;
 3. supplies the deployment-only migrator credential through the approved host secret-delivery mechanism;
-4. connects as the service migrator, explicitly assumes only its matching `NOLOGIN` owner role, prepares any separately reviewed migration input tables, and applies the complete EF migration chain;
-5. resets the assumed role and executes the versioned manifest verifier using the migrator identity;
-6. retains only redacted migration identity and manifest-verification evidence.
+4. builds the standalone `Tools/Zeka.DbMigrate` CLI at the reviewed SHA and invokes
+   `plan` or `apply` for one closed service descriptor and `latest` or an exact
+   compiled migration identifier; the host supplies the matching migrator connection
+   only through `--credential-stdin`, never through arguments or retained files;
+5. after a successful forward migration, separately reruns the reviewed bootstrap
+   under the role-administrator credential, which is never supplied to the CLI;
+6. executes the versioned manifest verifier using the migrator-to-matching-owner path,
+   then performs runtime readiness using only the matching runtime identity;
+7. retains only the sanitized atomic CLI result, reviewed digest and verification evidence.
 
 Application processes never apply migrations at startup. The owner is `NOLOGIN`; runtime workloads receive only their matching runtime credential. Owner/migrator may perform required DDL and RLS/policy management, but are not added to runtime RLS policies for protected-row DML. RLS must not be disabled or bypassed for convenience. A future protected-data backfill requires a separately reviewed tenant-aware or explicitly privileged procedure.
 
@@ -40,6 +46,10 @@ Revocation disables or replaces the affected login credential, drains workload p
 
 Rollback never restores service by broadening runtime privilege or disabling RLS. Any incident action that changes the accepted role/RLS boundary requires explicit approval and a separately retained audit record.
 
-Production deployment targets are forward-only `latest`. A down-migration target is explicitly prohibited; recovery uses a separately reviewed forward repair or an authorized database-wide restore. The Issue #46 target inventory and incident procedures are in `production-conformance.targets.json` and `production-conformance-runbook.md`.
-
-No accepted executable production migration entry point currently composes host-supplied migrator credentials, matching-owner assumption, and target enforcement. Consequently OPS-03 remains untested: documentation and a test-only policy cannot prove rejection before database mutation. Defining that entry point must preserve the accepted role separation and requires a separately accepted deployment/credential design.
+Production deployment is forward-only. The CLI validates exact identity, membership,
+owner assumption, advisory locking and the known migration-history prefix before it
+classifies `DOWN_TARGET_REJECTED`, `ALREADY_CURRENT`, or `FORWARD_APPROVED` and before
+EF migration can start. A down target is never executed; recovery uses a separately
+reviewed forward repair or an authorized database-wide restore. The Issue #46 target
+inventory and incident procedures are in `production-conformance.targets.json` and
+`production-conformance-runbook.md`.
