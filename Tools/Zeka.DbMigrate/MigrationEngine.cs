@@ -124,18 +124,18 @@ internal static class MigrationEngine
                     exitCode = ResultCodes.Success;
                 }
                 else try
-                {
-                    await VerifyManifestAsync(context, options.Service.MigrationAssembly, cancellationToken);
-                    manifest = "passed";
-                    resultCode = "SUCCESS";
-                    exitCode = ResultCodes.Success;
-                }
-                catch
-                {
-                    manifest = "failed";
-                    resultCode = "MANIFEST_REJECTED";
-                    exitCode = ResultCodes.ManifestRejected;
-                }
+                    {
+                        await VerifyManifestAsync(context, options.Service.MigrationAssembly, cancellationToken);
+                        manifest = "passed";
+                        resultCode = "SUCCESS";
+                        exitCode = ResultCodes.Success;
+                    }
+                    catch
+                    {
+                        manifest = "failed";
+                        resultCode = "MANIFEST_REJECTED";
+                        exitCode = ResultCodes.ManifestRejected;
+                    }
                 return Complete();
             }
 
