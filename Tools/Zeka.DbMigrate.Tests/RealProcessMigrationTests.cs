@@ -146,6 +146,7 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
         {
             Assert.Equal(29, (await InvokeWithoutCredentialAsync(root, "../escape.json")).ExitCode);
             Assert.Equal(29, (await InvokeWithoutCredentialAsync(root, Path.Combine(external, "absolute.json"))).ExitCode);
+            Assert.Equal(29, (await InvokeWithoutCredentialAsync(root, "/tmp/alternate-root.json")).ExitCode);
             Assert.Equal(29, (await InvokeWithoutCredentialAsync(root, "C:\\device\\escape.json")).ExitCode);
 
             var linkedParent = Path.Combine(root, "linked-parent");
@@ -172,6 +173,80 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
             Directory.Delete(rootLink);
             Assert.Equal(sentinelHash, Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(externalFile))));
             Assert.Equal(["protected.txt"], Directory.GetFiles(external).Select(Path.GetFileName).Order().ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(external)) Directory.Delete(external, true);
+        }
+    }
+
+    [Fact]
+    public async Task Real_process_rejects_parent_and_final_destination_swaps_after_validation_without_external_access()
+    {
+        Assert.True(OperatingSystem.IsLinux(), "The Release evidence publisher requires Linux directory handles.");
+        var external = Path.Combine(Path.GetTempPath(), "zeka-db-migrate-race-external-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(external);
+        var externalFile = Path.Combine(external, "protected.txt");
+        await File.WriteAllTextAsync(externalFile, "unchanged", Encoding.UTF8);
+        var sentinelHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(externalFile)));
+        var oldAccessTime = new DateTime(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+        var oldDirectoryWriteTime = new DateTime(2002, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+        File.SetLastAccessTimeUtc(externalFile, oldAccessTime);
+        Directory.SetLastWriteTimeUtc(external, oldDirectoryWriteTime);
+        try
+        {
+            var linkedRoot = NewEvidenceRoot("parent-swap-existing");
+            var linkedParent = Path.Combine(linkedRoot, "safe");
+            var parkedParent = Path.Combine(linkedRoot, "safe-original");
+            Directory.CreateDirectory(linkedParent);
+            var linked = await InvokeAfterValidationMutationAsync(linkedRoot, "safe/result.json", () =>
+            {
+                Directory.Move(linkedParent, parkedParent);
+                Directory.CreateSymbolicLink(linkedParent, external);
+            });
+            AssertEvidencePublishRejected(linked);
+            Assert.False(File.Exists(Path.Combine(external, "result.json")));
+            Assert.Empty(Directory.GetFiles(parkedParent));
+
+            var danglingTarget = external + "-missing";
+            Assert.False(Directory.Exists(danglingTarget));
+            var danglingRoot = NewEvidenceRoot("parent-swap-dangling");
+            var danglingParent = Path.Combine(danglingRoot, "safe");
+            var danglingParked = Path.Combine(danglingRoot, "safe-original");
+            Directory.CreateDirectory(danglingParent);
+            var dangling = await InvokeAfterValidationMutationAsync(danglingRoot, "safe/result.json", () =>
+            {
+                Directory.Move(danglingParent, danglingParked);
+                Directory.CreateSymbolicLink(danglingParent, danglingTarget);
+            });
+            AssertEvidencePublishRejected(dangling);
+            Assert.False(Directory.Exists(danglingTarget));
+            Assert.Empty(Directory.GetFiles(danglingParked));
+
+            var finalLinkRoot = NewEvidenceRoot("final-link-race");
+            var finalLink = await InvokeAfterValidationMutationAsync(finalLinkRoot, "result.json",
+                () => File.CreateSymbolicLink(Path.Combine(finalLinkRoot, "result.json"), externalFile));
+            AssertEvidencePublishRejected(finalLink);
+
+            var finalDanglingRoot = NewEvidenceRoot("final-dangling-race");
+            var finalDangling = await InvokeAfterValidationMutationAsync(finalDanglingRoot, "result.json",
+                () => File.CreateSymbolicLink(Path.Combine(finalDanglingRoot, "result.json"),
+                    Path.Combine(external, "missing.json")));
+            AssertEvidencePublishRejected(finalDangling);
+            Assert.False(File.Exists(Path.Combine(external, "missing.json")));
+
+            var finalFileRoot = NewEvidenceRoot("final-file-race");
+            var racedFinal = Path.Combine(finalFileRoot, "result.json");
+            var finalFile = await InvokeAfterValidationMutationAsync(finalFileRoot, "result.json",
+                () => File.WriteAllText(racedFinal, "raced-existing", Encoding.UTF8));
+            AssertEvidencePublishRejected(finalFile);
+            Assert.Equal("raced-existing", await File.ReadAllTextAsync(racedFinal, Encoding.UTF8));
+            Assert.Empty(Directory.GetFiles(finalFileRoot, ".*.tmp"));
+
+            Assert.Equal(oldAccessTime, File.GetLastAccessTimeUtc(externalFile));
+            Assert.Equal(oldDirectoryWriteTime, Directory.GetLastWriteTimeUtc(external));
+            Assert.Equal(["protected.txt"], Directory.GetFiles(external).Select(Path.GetFileName).Order().ToArray());
+            Assert.Equal(sentinelHash, Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(externalFile))));
         }
         finally
         {
@@ -340,6 +415,56 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
         var error = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
         return (process.ExitCode, await error);
+    }
+
+    private async Task<(int ExitCode, string StandardError)> InvokeAfterValidationMutationAsync(string root,
+        string file, Action mutate)
+    {
+        var process = Start("apply", "auth", "latest", Guid.NewGuid(), root, file, 1);
+        try
+        {
+            var parent = Path.Combine(root, Path.GetDirectoryName(file) ?? string.Empty);
+            await WaitForOpenDirectoryHandleAsync(process, parent);
+            mutate();
+            process.StandardInput.Close();
+            var error = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            return (process.ExitCode, await error);
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.StandardInput.Close();
+                await process.WaitForExitAsync();
+            }
+        }
+    }
+
+    private static async Task WaitForOpenDirectoryHandleAsync(Process process, string directory)
+    {
+        var expected = Path.GetFullPath(directory);
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < deadline && !process.HasExited)
+        {
+            var descriptorDirectory = $"/proc/{process.Id}/fd";
+            if (Directory.Exists(descriptorDirectory) && Directory.EnumerateFileSystemEntries(descriptorDirectory)
+                    .Any(path => string.Equals(new DirectoryInfo(path).LinkTarget, expected, StringComparison.Ordinal)))
+            {
+                await Task.Delay(250);
+                if (process.HasExited)
+                    throw new InvalidOperationException("The Release process exited before the containment race.");
+                return;
+            }
+            await Task.Delay(10);
+        }
+        throw new TimeoutException("The Release process did not bind the authorized evidence directory.");
+    }
+
+    private static void AssertEvidencePublishRejected((int ExitCode, string StandardError) result)
+    {
+        Assert.Equal(29, result.ExitCode);
+        Assert.Equal("EVIDENCE_PUBLISH_REJECTED" + Environment.NewLine, result.StandardError);
     }
 
     private Process Start(string operation, string service, string target, Guid operationId, string root, string file,
