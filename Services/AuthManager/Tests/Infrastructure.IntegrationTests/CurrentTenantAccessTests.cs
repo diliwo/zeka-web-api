@@ -9,6 +9,8 @@ using Testcontainers.PostgreSql;
 
 namespace Infrastructure.IntegrationTests;
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class CurrentTenantAccessTests : IAsyncLifetime
 {
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();

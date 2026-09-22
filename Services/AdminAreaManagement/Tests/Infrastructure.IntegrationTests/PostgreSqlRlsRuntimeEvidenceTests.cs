@@ -887,6 +887,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     }
 
     [Theory]
+    [Trait("Evidence", "ApplicationConformance")]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("not-a-uuid")]
@@ -914,6 +915,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     }
 
     [Fact]
+    [Trait("Evidence", "ApplicationConformance")]
     public async Task Raw_sql_and_filter_bypass_cannot_cross_tenant_select_insert_update_or_delete()
     {
         var a = Guid.NewGuid();

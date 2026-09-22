@@ -35,6 +35,8 @@ using Zeka.PersistenceSecurity.Tests;
 
 namespace Infrastructure.IntegrationTests;
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatabase database)
     : IClassFixture<PostgreSqlClientRuntimeDatabase>
 {
