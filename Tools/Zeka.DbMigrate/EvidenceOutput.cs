@@ -12,18 +12,24 @@ internal sealed class EvidenceOutput
     private readonly DirectoryIdentity[] directoryIdentities;
     private readonly string finalName;
     private readonly SafeFileHandle parentHandle;
+    private readonly Func<int, int> synchronizeDirectory;
 
     private EvidenceOutput(string root, string[] parentComponents, DirectoryIdentity[] directoryIdentities,
-        string finalName, SafeFileHandle parentHandle)
+        string finalName, SafeFileHandle parentHandle, Func<int, int> synchronizeDirectory)
     {
         this.root = root;
         this.parentComponents = parentComponents;
         this.directoryIdentities = directoryIdentities;
         this.finalName = finalName;
         this.parentHandle = parentHandle;
+        this.synchronizeDirectory = synchronizeDirectory;
     }
 
     public static EvidenceOutput Create(string authorizedRoot, string relativeFile)
+        => Create(authorizedRoot, relativeFile, NativeMethods.fsync);
+
+    internal static EvidenceOutput Create(string authorizedRoot, string relativeFile,
+        Func<int, int> synchronizeDirectory)
     {
         if (!OperatingSystem.IsLinux() || !Path.IsPathFullyQualified(authorizedRoot)
             || string.IsNullOrWhiteSpace(relativeFile) || Path.IsPathRooted(relativeFile)
@@ -51,7 +57,8 @@ internal sealed class EvidenceOutput
             }
 
             RequireMissing(current, components[^1]);
-            var output = new EvidenceOutput(root, parentComponents, identities.ToArray(), components[^1], current);
+            var output = new EvidenceOutput(root, parentComponents, identities.ToArray(), components[^1], current,
+                synchronizeDirectory);
             current = null;
             return output;
         }
@@ -91,6 +98,7 @@ internal sealed class EvidenceOutput
             if (NativeMethods.renameat2(Descriptor(parentHandle), temporaryName, Descriptor(parentHandle), finalName,
                     NativeMethods.RenameNoReplace) != 0)
                 ThrowNativeFailure();
+            if (synchronizeDirectory(Descriptor(parentHandle)) != 0) ThrowNativeFailure();
             published = true;
         }
         catch (EvidencePathException)

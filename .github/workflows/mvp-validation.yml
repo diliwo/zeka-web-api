@@ -178,6 +178,7 @@ jobs:
           dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
           dotnet restore Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
           dotnet restore Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
+          dotnet restore Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj --configfile nuget.config
 
       - name: Run every declared platform target without skips
         run: ./scripts/ci/run-production-conformance.sh TestResults/production-conformance

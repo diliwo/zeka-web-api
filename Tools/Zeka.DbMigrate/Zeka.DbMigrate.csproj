@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="SourceCommit" Value="$(ZekaSourceSha)" />
+    <InternalsVisibleTo Include="Zeka.DbMigrate.Tests" />
     <ProjectReference Include="../../Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj" />
     <ProjectReference Include="../../Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj" />
     <ProjectReference Include="../../Services/ClientManagement/Client.Infrastructure/ClientManagement.Infrastructure.csproj" />
