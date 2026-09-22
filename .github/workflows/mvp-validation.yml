@@ -297,7 +297,7 @@ jobs:
       - name: Run complete suite and collect coverage for analysis
         run: |
           docker info
-          dotnet test zeka-web-api.sln --configuration Release --no-build --no-restore \
+          dotnet test zeka-web-api.sln -m:1 --configuration Release --no-build --no-restore \
             --collect:"XPlat Code Coverage" --results-directory TestResults \
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
