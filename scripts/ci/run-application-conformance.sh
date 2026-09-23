@@ -35,10 +35,15 @@ if ! jq -e '
   exit 1
 fi
 
+# Python's XML parser binds definitions to results; text occurrence is not evidence.
+command -v python3 >/dev/null
 mkdir -p "${results_dir}"
+# Never reuse stale evidence when a test invocation fails before writing its TRX.
+if [[ -e "${results_dir}/target-results.json" ]] || compgen -G "${results_dir}/*.trx" >/dev/null; then
+  echo "Use a fresh application-conformance results directory." >&2
+  exit 1
+fi
 results_file="${results_dir}/target-results.json"
-results_lines="${results_dir}/target-results.ndjson"
-: >"${results_lines}"
 projects=(
   "auth-infra|Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj"
   "adminarea-unit|Services/AdminAreaManagement/Tests/Application.UnitTests/Application.UnitTests.csproj"
@@ -57,47 +62,13 @@ for entry in "${projects[@]}"; do
       --logger "trx;LogFileName=${suite}.trx" --results-directory "${results_dir}"; then
     test_status=1
   fi
-  trx="${results_dir}/${suite}.trx"
-  if [[ ! -s "${trx}" ]] || ! grep -Eq 'total="[1-9][0-9]*"' "${trx}" \
-      || ! grep -q 'failed="0"' "${trx}" || ! grep -q 'notExecuted="0"' "${trx}"; then
-    echo "Required ${suite} conformance tests failed, skipped, or produced no executable evidence." >&2
-    test_status=1
-  fi
   echo "::endgroup::"
 done
 
-while IFS= read -r target; do
-  target_status=passed
-  target_reason=""
-  mapfile -t target_evidence < <(jq -r --arg target "${target}" \
-    '.targets[] | select(.id == $target) | .evidence[] | [.suite,.test] | join("|")' "${inventory}")
-  for evidence in "${target_evidence[@]}"; do
-    suite=${evidence%%|*}
-    test_name=${evidence#*|}
-    trx="${results_dir}/${suite}.trx"
-    if [[ ! -s "${trx}" ]] || ! grep -Fq "${test_name}" "${trx}"; then
-      target_status=failed
-      target_reason="No executed ${suite} evidence was found for ${test_name}."
-      test_status=1
-      break
-    fi
-  done
+if ! python3 "${repo_root}/scripts/ci/reconcile_application_conformance.py" "${inventory}" "${results_dir}"; then
+  test_status=1
+fi
 
-  if [[ "${target_status}" == "passed" ]]; then
-    jq -cn --arg id "${target}" --argjson evidence \
-      "$(jq -c --arg target "${target}" '.targets[] | select(.id == $target) | .evidence' "${inventory}")" \
-      '{id:$id,status:"passed",reason:null,evidence:$evidence}' >>"${results_lines}"
-    echo "${target}: passed"
-  else
-    jq -cn --arg id "${target}" --arg reason "${target_reason}" \
-      '{id:$id,status:"failed",reason:$reason,evidence:[]}' >>"${results_lines}"
-    echo "${target}: failed - ${target_reason}" >&2
-  fi
-done < <(jq -r '.targets[].id' "${inventory}")
-
-jq -s --argjson blocked "$(jq -c '.blockedBoundaries' "${inventory}")" \
-  '{schemaVersion:1,targets:.,blockedBoundaries:$blocked}' "${results_lines}" >"${results_file}"
-rm "${results_lines}"
 jq -r '([.targets[].status] | group_by(.) | map("\(.[0])=\(length)") | join(", "))' "${results_file}"
 
 if (( test_status != 0 )); then

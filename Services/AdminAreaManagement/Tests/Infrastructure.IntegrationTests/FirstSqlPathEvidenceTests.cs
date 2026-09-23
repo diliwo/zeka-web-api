@@ -7,6 +7,7 @@ using AdminAreaManagement.API.Services;
 using AdminAreaManagement.Application.Common.Authorization;
 using AdminAreaManagement.Application.Common.Exceptions;
 using AdminAreaManagement.Application.Teams.Commands.UpsertTeam;
+using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using AdminAreaManagement.Infrastructure.Messaging;
 using AdminAreaManagement.Infrastructure.Persistence;
@@ -154,16 +155,29 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
     public async Task Cross_tenant_body_identity_is_not_loaded_or_persisted()
     {
         var owner = Guid.NewGuid(); var selected = Guid.NewGuid();
-        var id = await CreateTeamAsync(owner, "Body owner", "BDO");
+        var calls = new RepositoryCalls();
+        var id = await CreateTeamAsync(owner, "Body owner", "BDO", calls);
+        Assert.Equal(1, calls.Persists);
+        Assert.Equal(1, calls.Saves);
+        calls.Persists = calls.Saves = 0;
+        var before = await TeamRowAsync(id);
         var evidence = new TenantAttemptEvidenceCollector();
-        await using var app = await StartHttpApplicationAsync(selected, evidence);
+        await using var app = await StartHttpApplicationAsync(selected, evidence, calls: calls);
         using var client = app.GetTestClient();
         SetTenantHeaders(client, selected);
 
-        await Assert.ThrowsAsync<NotFoundException>(() => client.PostAsJsonAsync("/api/Teams",
+        var exception = await Assert.ThrowsAsync<NotFoundException>(() => client.PostAsJsonAsync("/api/Teams",
             new { Id = id, Name = "Body conflict", Acronym = "BDC" }));
 
         Assert.DoesNotContain(evidence.Snapshot(), item => item.Category == TenantAttemptCommandCategory.EfWrite);
+        Assert.Equal(new NotFoundException(nameof(Team), id).Message, exception.Message);
+        Assert.Equal(1, calls.MissingGets);
+        Assert.Equal(0, calls.Persists);
+        Assert.Equal(0, calls.Saves);
+        var attempts = AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfRead, expectedAttempts: 1);
+        Assert.Equal(TenantAttemptCommandCategory.Rollback, attempts[0][^1].Category);
+        Assert.DoesNotContain(evidence.Snapshot(), item => item.Category == TenantAttemptCommandCategory.Commit);
+        Assert.Equal(before, await TeamRowAsync(id));
         Assert.Equal(1, await CountTeamsAsync(owner, "Body owner"));
         Assert.Equal(0, await CountTeamsAsync(selected, "Body conflict"));
     }
@@ -348,7 +362,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
 
     private async Task<WebApplication> StartHttpApplicationAsync(Guid organisation,
         TenantAttemptEvidenceCollector evidence, bool allow = true, RetryAfterFirstWriteBehavior? fault = null,
-        Guid? claimedOrganisation = null)
+        Guid? claimedOrganisation = null, RepositoryCalls? calls = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.WebHost.UseTestServer();
@@ -367,6 +381,13 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         builder.Services.AddAuthorization();
         AdminAreaManagement.Application.DependencyInjection.AddApplication(builder.Services);
         AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration);
+        if (calls is not null)
+        {
+            var registration = builder.Services.Single(service => service.ServiceType == typeof(IRepositoryManager));
+            builder.Services.Remove(registration);
+            builder.Services.AddScoped<IRepositoryManager>(provider => new ObservedRepository(
+                (IRepositoryManager)ActivatorUtilities.CreateInstance(provider, registration.ImplementationType!), calls));
+        }
         builder.Services.AddSingleton<IInterceptor>(evidence);
         builder.Services.RemoveAll<IHostedService>();
         builder.Services.RemoveAll<ITenantAttemptOrderObserver>();
@@ -420,15 +441,66 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         return services.BuildServiceProvider();
     }
 
-    private async Task<int> CreateTeamAsync(Guid organisation, string name, string acronym)
+    private async Task<int> CreateTeamAsync(Guid organisation, string name, string acronym, RepositoryCalls? calls = null)
     {
         var evidence = new TenantAttemptEvidenceCollector();
-        await using var app = await StartHttpApplicationAsync(organisation, evidence);
+        await using var app = await StartHttpApplicationAsync(organisation, evidence, calls: calls);
         using var client = app.GetTestClient();
         SetTenantHeaders(client, organisation);
         var response = await client.PostAsJsonAsync("/api/Teams", new { Name = name, Acronym = acronym });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<int>();
+    }
+
+    private async Task<string> TeamRowAsync(int id)
+    {
+        await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            "SELECT row_to_json(t)::text FROM public.\"Teams\" t WHERE \"Id\"=@id", connection);
+        command.Parameters.AddWithValue("id", id);
+        return Assert.IsType<string>(await command.ExecuteScalarAsync());
+    }
+
+    // Forward every call to the real repositories; observe entry, not just SQL dispatch.
+    private sealed class RepositoryCalls
+    {
+        public int MissingGets;
+        public int Persists;
+        public int Saves;
+    }
+
+    private sealed class ObservedRepository(IRepositoryManager inner, RepositoryCalls calls) : IRepositoryManager
+    {
+        public ITeamRepository Team { get; } = new ObservedTeams(inner.Team, calls);
+        public IStaffMemberRepository StaffMember => inner.StaffMember;
+        public IPartnerRepository Partner => inner.Partner;
+        public IDocumentPartnerRepository DocumentPartner => inner.DocumentPartner;
+        public ISchoolRepository School => inner.School;
+        public ITrainingTypeRepository TrainingType => inner.TrainingType;
+        public IProfessionRepository Profession => inner.Profession;
+        public ITrainingsRepository Trainings => inner.Trainings;
+        public ITrainingFieldRepository TrainingField => inner.TrainingField;
+        public ICityRepository City => inner.City;
+        public INationalityRepository Nationality => inner.Nationality;
+        public void Save() { calls.Saves++; inner.Save(); }
+        public Task SaveAsync() { calls.Saves++; return inner.SaveAsync(); }
+    }
+
+    private sealed class ObservedTeams(ITeamRepository inner, RepositoryCalls calls) : ITeamRepository
+    {
+        public Team Get(int id)
+        {
+            var team = inner.Get(id);
+            if (team is null) calls.MissingGets++;
+            return team!;
+        }
+        public void Persist(Team team) { calls.Persists++; inner.Persist(team); }
+        public bool IsTeamUnique(string name) => inner.IsTeamUnique(name);
+        public IQueryable<Team> GetTeams(string filter) => inner.GetTeams(filter);
+        public void SoftDelete(Team team) => inner.SoftDelete(team);
+        public Task<bool> ContainsStaffMembers(int teamId) => inner.ContainsStaffMembers(teamId);
+        public Task<bool> TeamHasStaffMembers(int serviceId) => inner.TeamHasStaffMembers(serviceId);
     }
 
     private async Task<int> CountTeamsAsync(Guid organisation, string name)
