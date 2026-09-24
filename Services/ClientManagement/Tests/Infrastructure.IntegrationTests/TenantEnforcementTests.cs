@@ -21,6 +21,8 @@ public sealed class TenantDatabase : IAsyncLifetime
     public Task DisposeAsync() => postgres.DisposeAsync().AsTask();
 }
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class TenantEnforcementTests(TenantDatabase fixture) : IClassFixture<TenantDatabase>
 {
     private DbContextOptions<ApplicationDbContext> Options => new DbContextOptionsBuilder<ApplicationDbContext>()

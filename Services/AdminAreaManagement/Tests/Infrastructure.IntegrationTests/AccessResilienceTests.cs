@@ -11,6 +11,8 @@ using Zeka.Extensions.MultiTenancy.Abstractions;
 
 namespace Infrastructure.IntegrationTests;
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class AccessResilienceTests
 {
     [Theory]

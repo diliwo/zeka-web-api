@@ -9,6 +9,8 @@ using Zeka.PersistenceSecurity;
 
 namespace Infrastructure.IntegrationTests;
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "PlatformConformance")]
 public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
 {
     private const string MigratorPassword = "test-migrator-password";
@@ -22,6 +24,7 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
     public async Task Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest()
     {
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
         await ExecuteAdministratorAsync($"ALTER ROLE zeka_auth_migrator PASSWORD '{MigratorPassword}'; ALTER ROLE zeka_auth_runtime PASSWORD '{RuntimePassword}';");
 
         var migratorConnection = Connection("zeka_auth_migrator", MigratorPassword);
@@ -29,7 +32,12 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
         {
             await migration.Database.OpenConnectionAsync();
             await migration.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            var migrations = migration.Database.GetMigrations().ToArray();
+            Assert.True(migrations.Length > 1);
+            await migration.GetService<IMigrator>().MigrateAsync(migrations[^2]);
+            Assert.Equal([migrations[^1]], await migration.Database.GetPendingMigrationsAsync());
             await migration.GetService<IMigrator>().MigrateAsync();
+            Assert.Empty(await migration.Database.GetPendingMigrationsAsync());
         }
 
         await using var verification = Context(migratorConnection);

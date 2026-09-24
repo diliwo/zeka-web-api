@@ -38,6 +38,8 @@ public sealed class TenantDatabase : IAsyncLifetime
     public Task DisposeAsync() => postgres.DisposeAsync().AsTask();
 }
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class TenantEnforcementTests(TenantDatabase fixture) : IClassFixture<TenantDatabase>
 {
     private DbContextOptions<ApplicationDbContext> Options => new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -147,6 +149,22 @@ public sealed class TenantEnforcementTests(TenantDatabase fixture) : IClassFixtu
             await database.SaveChangesAsync();
             Assert.Equal(id, (await database.Teams.SingleAsync()).OrganisationId);
         }));
+    }
+
+    [Fact]
+    public async Task Same_tenant_scoped_natural_key_succeeds_concurrently_in_two_organisations()
+    {
+        var firstOrganisation = Guid.NewGuid();
+        var secondOrganisation = Guid.NewGuid();
+        await using var first = Context(firstOrganisation);
+        await using var second = Context(secondOrganisation);
+        first.Add(new Team("Shared natural key", "SAME"));
+        second.Add(new Team("Shared natural key", "SAME"));
+
+        await Task.WhenAll(first.SaveChangesAsync(), second.SaveChangesAsync());
+
+        Assert.Equal(firstOrganisation, (await first.Teams.SingleAsync()).OrganisationId);
+        Assert.Equal(secondOrganisation, (await second.Teams.SingleAsync()).OrganisationId);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using AdminAreaManagement.Application.Common.Exceptions;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using MediatR;
@@ -26,7 +27,8 @@ namespace AdminAreaManagement.Application.Teams.Commands.UpsertTeam
 
                 if (request.Id.HasValue)
                 {
-                    entity = _repository.Team.Get(request.Id.Value);
+                    entity = _repository.Team.Get(request.Id.Value)
+                        ?? throw new NotFoundException(nameof(Team), request.Id.Value);
                     entity.Acronym = request.Acronym.Trim();
                     entity.Name = request.Name.Trim();
 

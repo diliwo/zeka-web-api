@@ -5,6 +5,8 @@ using Zeka.Extensions.MultiTenancy.Abstractions;
 
 namespace Application.UnitTests;
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class TenantAuthorizationTests
 {
     [Fact]

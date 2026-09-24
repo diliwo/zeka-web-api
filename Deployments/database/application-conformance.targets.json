@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "statusVocabulary": ["passed", "failed", "blocked", "untested"],
+  "targets": [
+    {"id":"CTX-01","required":true,"evidence":[{"suite":"adminarea-infra","test":"All_save_overloads_reject_forged_tenant_ids_and_mutation"}]},
+    {"id":"CTX-02","required":true,"evidence":[{"suite":"adminarea-infra","test":"Reads_and_new_rows_are_scoped_and_missing_context_fails_closed"},{"suite":"adminarea-infra","test":"Failed_context_initialization_never_records_or_dispatches_tenant_sql"}]},
+    {"id":"CTX-03","required":true,"evidence":[{"suite":"adminarea-infra","test":"Missing_empty_malformed_zero_and_noncanonical_context_fail_closed"}]},
+    {"id":"CTX-04","required":true,"evidence":[
+      {"suite":"adminarea-infra","test":"Conflicting_claim_and_header_identity_is_rejected_before_persistence"},
+      {"suite":"adminarea-infra","test":"Conflicting_header_and_authorized_identity_is_rejected_before_persistence"},
+      {"suite":"adminarea-infra","test":"Cross_tenant_route_identity_is_not_loaded_or_persisted"},
+      {"suite":"adminarea-infra","test":"Cross_tenant_body_identity_is_not_loaded_or_persisted"}
+    ]},
+    {"id":"CTX-05","required":true,"evidence":[{"suite":"auth-infra","test":"Each_call_observes_current_authoritative_state_and_never_reuses_a_positive_decision"},{"suite":"client-infra","test":"Consumer_uses_fresh_authorized_scopes_and_idempotent_versioned_membership_snapshots"}]},
+    {"id":"CTX-06","required":true,"evidence":[{"suite":"adminarea-unit","test":"Selection_alone_unknown_permissions_and_forged_organisations_fail_closed"}]},
+    {"id":"CTX-07","required":true,"evidence":[{"suite":"adminarea-infra","test":"All_save_overloads_reject_forged_tenant_ids_and_mutation"}]},
+    {"id":"AUTH-01","required":true,"evidence":[{"suite":"auth-infra","test":"Each_call_observes_current_authoritative_state_and_never_reuses_a_positive_decision"},{"suite":"client-infra","test":"Consumer_uses_fresh_authorized_scopes_and_idempotent_versioned_membership_snapshots"}]},
+    {"id":"XTEN-01","required":true,"evidence":[{"suite":"adminarea-infra","test":"Reads_and_new_rows_are_scoped_and_missing_context_fails_closed"},{"suite":"adminarea-infra","test":"Raw_sql_and_filter_bypass_cannot_cross_tenant_select_insert_update_or_delete"}]},
+    {"id":"XTEN-02","required":true,"evidence":[{"suite":"adminarea-infra","test":"All_save_overloads_reject_forged_tenant_ids_and_mutation"},{"suite":"adminarea-infra","test":"Raw_sql_and_filter_bypass_cannot_cross_tenant_select_insert_update_or_delete"}]},
+    {"id":"XTEN-03","required":true,"evidence":[{"suite":"adminarea-infra","test":"Detached_cross_tenant_writes_cannot_match_another_organisations_row"},{"suite":"adminarea-infra","test":"Raw_sql_and_filter_bypass_cannot_cross_tenant_select_insert_update_or_delete"}]},
+    {"id":"XTEN-04","required":true,"evidence":[{"suite":"adminarea-infra","test":"Detached_cross_tenant_writes_cannot_match_another_organisations_row"},{"suite":"adminarea-infra","test":"Raw_sql_and_filter_bypass_cannot_cross_tenant_select_insert_update_or_delete"}]},
+    {"id":"REL-01","required":true,"evidence":[{"suite":"adminarea-infra","test":"Same_tenant_scoped_natural_key_succeeds_concurrently_in_two_organisations"}]},
+    {"id":"REL-02","required":true,"evidence":[{"suite":"adminarea-infra","test":"Explicit_partner_dependents_preserve_values_and_reject_cross_tenant_reparenting"}]},
+    {"id":"ESC-01","required":true,"evidence":[{"suite":"adminarea-infra","test":"Raw_sql_bulk_operations_and_filter_bypass_are_rejected"}]},
+    {"id":"ESC-02","required":true,"evidence":[{"suite":"adminarea-infra","test":"Raw_sql_bulk_operations_and_filter_bypass_are_rejected"}]},
+    {"id":"ESC-03","required":true,"evidence":[{"suite":"adminarea-infra","test":"Raw_sql_bulk_operations_and_filter_bypass_are_rejected"}]},
+    {"id":"ESC-04","required":true,"evidence":[{"suite":"adminarea-infra","test":"Raw_sql_and_filter_bypass_cannot_cross_tenant_select_insert_update_or_delete"}]},
+    {"id":"PAR-01","required":true,"evidence":[{"suite":"adminarea-infra","test":"Parallel_non_http_scopes_do_not_leak_through_reused_provider_connections"}]},
+    {"id":"PAR-02","required":true,"evidence":[{"suite":"adminarea-unit","test":"Parallel_http_worker_and_consumer_operations_have_independent_contexts"},{"suite":"client-infra","test":"Client_http_get_and_post_prove_first_sql_order_on_restricted_runtime"},{"suite":"client-infra","test":"Client_consumer_proves_first_sql_order_on_restricted_runtime"}]},
+    {"id":"PAR-03","required":true,"evidence":[{"suite":"adminarea-infra","test":"Same_tenant_scoped_natural_key_succeeds_concurrently_in_two_organisations"},{"suite":"auth-infra","test":"Competing_writers_cannot_create_duplicate_memberships"}]},
+    {"id":"COV-01","required":true,"evidence":[{"suite":"adminarea-infra","test":"Every_persisted_type_has_exactly_one_classification_and_every_tenant_root_has_a_filter"},{"suite":"client-infra","test":"Every_persisted_type_has_exactly_one_classification_and_every_tenant_root_has_a_filter"}]},
+    {"id":"COV-04","required":true,"evidence":[{"suite":"adminarea-infra","test":"Every_persisted_type_has_exactly_one_classification_and_every_tenant_root_has_a_filter"},{"suite":"client-infra","test":"Every_persisted_type_has_exactly_one_classification_and_every_tenant_root_has_a_filter"}]},
+    {"id":"NDB-01","required":true,"evidence":[{"suite":"auth-infra","test":"Audit_supports_platform_and_tenant_scope_with_correlation_id"},{"suite":"auth-infra","test":"Audit_metadata_rejects_credential_fields"}]},
+    {"id":"NDB-02","required":true,"evidence":[{"suite":"auth-infra","test":"Audit_outbox_and_business_state_roll_back_together"},{"suite":"auth-infra","test":"Dispatcher_retries_then_processes_transient_failure"},{"suite":"adminarea-infra","test":"Staff_and_event_commit_together_and_failed_publication_is_retryable_in_a_fresh_scope"}]},
+    {"id":"NDB-04","required":true,"evidence":[{"suite":"adminarea-unit","test":"Canonical_storage_is_contained_idempotent_and_ignores_untrusted_metadata"},{"suite":"adminarea-infra","test":"Failed_real_write_is_recorded_and_same_operation_reconciles_after_restart_without_duplicate"}]},
+    {"id":"NDB-06","required":true,"evidence":[{"suite":"client-unit","test":"Request_logging_does_not_capture_niss_or_search_payloads"},{"suite":"adminarea-infra","test":"Hosted_worker_autonomously_recovers_pending_tombstone_and_emits_redacted_failures"}]},
+    {"id":"NDB-07","required":true,"evidence":[{"suite":"adminarea-infra","test":"Metrics_and_traces_record_retry_latency_and_failure_without_identity_or_body"}]},
+    {"id":"NDB-08","required":true,"evidence":[{"suite":"adminarea-infra","test":"Metrics_and_traces_record_retry_latency_and_failure_without_identity_or_body"},{"suite":"adminarea-infra","test":"Hosted_worker_autonomously_recovers_pending_tombstone_and_emits_redacted_failures"}]},
+    {"id":"NDB-09","required":true,"evidence":[{"suite":"adminarea-infra","test":"Denied_worker_leaves_rows_pending_and_recovers_after_live_access_restoration"}]},
+    {"id":"NDB-10","required":true,"evidence":[{"suite":"client-infra","test":"Consumer_uses_fresh_authorized_scopes_and_idempotent_versioned_membership_snapshots"}]},
+    {"id":"NDB-11","required":true,"evidence":[{"suite":"adminarea-unit","test":"Symbolic_link_escape_is_rejected"},{"suite":"adminarea-infra","test":"Delete_is_durable_idempotent_and_retry_identity_cannot_target_another_document"}]}
+  ],
+  "blockedBoundaries": [
+    {"id":"NDB-03","status":"blocked","reason":"No durable or distributed tenant-data cache exists."},
+    {"id":"NDB-04-BLOB","status":"blocked","reason":"No blob or object-storage provider exists; NDB-04 evidence is limited to the existing local-storage boundary."},
+    {"id":"NDB-05","status":"blocked","reason":"No external search index exists."},
+    {"id":"NDB-07-BACKEND","status":"blocked","reason":"No accepted trace-export backend architecture exists."},
+    {"id":"NDB-08-BACKEND","status":"blocked","reason":"No accepted metrics backend or retention architecture exists."},
+    {"id":"LIFE-01..05","status":"blocked","reason":"Organisation export and verified deletion require a Chief-adjudicated product/application contract and Hervé authorization."}
+  ]
+}

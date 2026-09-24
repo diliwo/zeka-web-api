@@ -3,6 +3,8 @@ using Xunit;
 
 namespace Application.UnitTests.DocumentPartner;
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class FileServiceTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), $"zeka-document-tests-{Guid.NewGuid():N}");
