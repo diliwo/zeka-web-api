@@ -120,6 +120,32 @@ class ReconciliationTests(unittest.TestCase):
         self.write("adminarea-infra", root)
         self.assert_target("failed")
 
+    def test_unsupported_definition_cannot_be_ignored(self):
+        root = trx([("Route", "Passed", "Tests.Tenant", ""), ("Body", "Passed", "Tests.Tenant", "")])
+        node(root.find("t:TestDefinitions", reconcile.NS), "OtherTest", id="unsupported")
+        self.write("adminarea-infra", root)
+        with self.assertRaisesRegex(ValueError, "Unsupported TRX definition"):
+            reconcile.read_suite(self.path / "adminarea-infra.trx")
+        report, passed, errors = reconcile.reconcile(self.inventory, self.path)
+        self.assertFalse(passed)
+        self.assertEqual({"adminarea-infra"}, set(errors))
+        for target in report["targets"]:
+            self.assertEqual("failed", target["status"])
+            self.assertEqual([], target["evidence"])
+
+    def test_empty_or_entirely_unexecuted_suite_cannot_credit_targets(self):
+        for cases in ([], [("Route", None, "Tests.Tenant", ""), ("Body", None, "Tests.Tenant", "")]):
+            with self.subTest(cases=cases):
+                self.write("adminarea-infra", trx(cases))
+                with self.assertRaisesRegex(ValueError, "No TRX execution"):
+                    reconcile.read_suite(self.path / "adminarea-infra.trx")
+                report, passed, errors = reconcile.reconcile(self.inventory, self.path)
+                self.assertFalse(passed)
+                self.assertEqual({"adminarea-infra"}, set(errors))
+                for target in report["targets"]:
+                    self.assertEqual("failed", target["status"])
+                    self.assertEqual([], target["evidence"])
+
     def test_inconsistent_case_identity_fails(self):
         root = trx([("Route", "Passed", "Tests.Tenant", ""), ("Body", "Passed", "Tests.Tenant", "")])
         root.find("t:TestDefinitions/t:UnitTest/t:TestMethod", reconcile.NS).set("name", "Other")
@@ -161,6 +187,24 @@ class ReconciliationTests(unittest.TestCase):
             with self.subTest(mappings=mappings):
                 self.inventory["targets"][0]["evidence"] = mappings
                 self.assert_target("failed")
+
+    def test_invalid_mapping_cannot_credit_passing_trx(self):
+        for mapping in (None, "Body", {}, {"suite": "unknown", "test": "Body"},
+                        {"suite": "adminarea-infra"}, {"suite": "adminarea-infra", "test": 1},
+                        {"suite": "adminarea-infra", "test": ""},
+                        {"suite": "adminarea-infra", "test": " \t"}):
+            with self.subTest(mapping=mapping):
+                self.inventory["targets"][0]["evidence"] = [
+                    {"suite": "adminarea-infra", "test": "Route"}, mapping]
+                report, passed, errors = reconcile.reconcile(self.inventory, self.path)
+                self.assertFalse(passed)
+                self.assertEqual({}, errors)
+                self.assertEqual("failed", report["targets"][0]["status"])
+                self.assertEqual("Invalid evidence mapping.", report["targets"][0]["reason"])
+                self.assertEqual([], report["targets"][0]["evidence"])
+                self.assertEqual("passed", report["targets"][1]["status"])
+                self.assertEqual(self.inventory["targets"][1]["evidence"], report["targets"][1]["evidence"])
+                self.assertEqual(self.inventory["blockedBoundaries"], report["blockedBoundaries"])
 
     def test_all_parameterized_cases_must_execute_and_pass(self):
         for outcome in ("Passed", "Failed", "NotExecuted", None):
