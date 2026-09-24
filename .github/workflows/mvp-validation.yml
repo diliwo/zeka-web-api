@@ -239,6 +239,11 @@ jobs:
         with:
           dotnet-version: 8.0.129
 
+      - name: Install pinned Python runtime
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: 3.12.14
+
       - name: Verify SonarQube Cloud prerequisites
         env:
           SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
@@ -267,6 +272,8 @@ jobs:
         run: |
           : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
           export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
+          python -m pip install --disable-pip-version-check --no-deps --require-hashes \
+            --requirement scripts/ci/requirements-coverage.txt
           dotnet tool restore --configfile nuget.config
           dotnet restore zeka-web-api.sln --configfile nuget.config
 
@@ -287,12 +294,56 @@ jobs:
             /d:sonar.pullrequest.branch="${SONAR_PR_BRANCH}" \
             /d:sonar.pullrequest.base="${SONAR_PR_BASE}" \
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
+            /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
 
       - name: Build for analysis
         run: dotnet build zeka-web-api.sln --configuration Release --no-restore --no-incremental
+
+      - name: Run Python accounting regressions and collect coverage for analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          coverage_dir="TestResults/python-coverage"
+          coverage_file="${coverage_dir}/coverage.xml"
+          test_log="${coverage_dir}/tests.log"
+          mkdir -p "${coverage_dir}"
+          export COVERAGE_FILE="${coverage_dir}/.coverage"
+          python -m coverage erase
+          python -m coverage run --branch \
+            --include='scripts/ci/reconcile_application_conformance.py' \
+            -m unittest discover -s scripts/ci/tests -p 'test_application_conformance.py' -v \
+            2>&1 | tee "${test_log}"
+          if grep -Eq '^OK \(skipped=[1-9][0-9]*\)$' "${test_log}" || ! grep -Eq '^OK$' "${test_log}"; then
+            echo "Python accounting regressions did not complete without skips." >&2
+            exit 1
+          fi
+          python -m coverage xml -o "${coverage_file}"
+          COVERAGE_FILE="${coverage_file}" python - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          coverage_file = Path(os.environ["COVERAGE_FILE"])
+          root = ET.parse(coverage_file).getroot()
+          classes = root.findall("./packages/package/classes/class")
+          expected_file = "scripts/ci/reconcile_application_conformance.py"
+          measured = [item for item in classes if item.get("filename") == expected_file]
+          try:
+              lines_valid = int(root.attrib["lines-valid"])
+              lines_covered = int(root.attrib["lines-covered"])
+          except (KeyError, TypeError, ValueError) as error:
+              raise SystemExit("Python coverage report has invalid line counters.") from error
+          if (root.tag != "coverage" or root.get("version") != "7.16.1"
+                  or len(classes) != 1 or len(measured) != 1
+                  or not measured[0].findall("./lines/line") or lines_valid <= 0):
+              raise SystemExit("Python coverage report is malformed or missing the reconciler.")
+          if lines_covered * 100 <= lines_valid * 80:
+              raise SystemExit("Python reconciler line coverage is not strictly above 80%.")
+          print(f"Verified Python reconciler line coverage: {lines_covered}/{lines_valid}")
+          PY
 
       - name: Run complete suite and collect coverage for analysis
         run: |
