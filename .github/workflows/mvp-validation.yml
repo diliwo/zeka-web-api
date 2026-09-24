@@ -272,7 +272,7 @@ jobs:
         run: |
           : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
           export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
-          python -m pip install --disable-pip-version-check --no-deps --require-hashes \
+          python -m pip install --disable-pip-version-check --no-deps --require-hashes --only-binary :all: \
             --requirement scripts/ci/requirements-coverage.txt
           dotnet tool restore --configfile nuget.config
           dotnet restore zeka-web-api.sln --configfile nuget.config
@@ -295,6 +295,7 @@ jobs:
             /d:sonar.pullrequest.base="${SONAR_PR_BASE}" \
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
+            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
