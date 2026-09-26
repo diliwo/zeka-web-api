@@ -7,19 +7,28 @@ These procedures implement the provider-neutral Issue #45 boundary. Environment-
 For each service database, Zeka Platform Operations:
 
 1. creates the database using the separately authorized PostgreSQL administrative process;
-2. executes the matching `bootstrap-*-roles.sql` script to create/reconcile the service `owner`, `migrator`, and `runtime` roles, ownership, membership, default privileges, and database/schema ACLs;
+2. executes the matching `bootstrap-*-roles.sql` script to create/reconcile the service `owner`, `migrator`, and `runtime` roles, provision any script-managed schema under the exact reviewed owner, and reconcile ownership, membership, default privileges, and database/schema ACLs; the Auth bootstrap creates `zeka` only when absent and fails closed without adopting it when an unexpected owner already controls it;
 3. supplies the deployment-only migrator credential through the approved host secret-delivery mechanism;
 4. builds the standalone `Tools/Zeka.DbMigrate` CLI at the reviewed SHA and invokes
    `plan` or `apply` for one closed service descriptor and `latest` or an exact
    compiled migration identifier; the host supplies the matching migrator connection
    only through `--credential-stdin`, never through arguments or retained files;
 5. after a successful forward migration, separately reruns the reviewed bootstrap
-   under the role-administrator credential, which is never supplied to the CLI;
+   under the role-administrator credential, which is never supplied to the CLI, to
+   reconcile migrated objects and privileges without changing an unexpected managed-
+   schema owner;
 6. executes the versioned manifest verifier using the migrator-to-matching-owner path,
    then performs runtime readiness using only the matching runtime identity;
 7. retains only the sanitized atomic CLI result, reviewed digest and verification evidence.
 
 Application processes never apply migrations at startup. The owner is `NOLOGIN`; runtime workloads receive only their matching runtime credential. Owner/migrator may perform required DDL and RLS/policy management, but are not added to runtime RLS policies for protected-row DML. RLS must not be disabled or bypassed for convenience. A future protected-data backfill requires a separately reviewed tenant-aware or explicitly privileged procedure.
+
+The initial Auth bootstrap is both role setup and administrative provisioning for the
+managed `zeka` schema. The restricted migrator then explicitly assumes
+`zeka_auth_owner` for the reviewed EF migration; neither role receives database
+`CREATE`, and the migrator receives no direct `zeka` schema grant. Runtime receives
+only `USAGE` on `zeka`, never schema `CREATE`. Omitting the administrative prerequisite
+must leave migration failed rather than moving schema creation into application code.
 
 ## Runtime readiness
 

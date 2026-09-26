@@ -31,6 +31,22 @@ BEGIN
     EXECUTE pg_catalog.format('ALTER ROLE %I IN DATABASE %I RESET ALL', setting.rolname, setting.datname);
   END LOOP;
 END $settings$;
+DO $managed_schema$
+DECLARE schema_owner name;
+BEGIN
+  SELECT pg_catalog.pg_get_userbyid(namespace.nspowner)
+    INTO schema_owner
+    FROM pg_catalog.pg_namespace namespace
+    WHERE namespace.nspname = 'zeka';
+
+  IF NOT FOUND THEN
+    CREATE SCHEMA zeka AUTHORIZATION zeka_auth_owner;
+  ELSIF schema_owner <> 'zeka_auth_owner' THEN
+    RAISE EXCEPTION USING
+      ERRCODE = '42501',
+      MESSAGE = 'managed schema zeka has unexpected owner';
+  END IF;
+END $managed_schema$;
 DO $database$ BEGIN
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO zeka_auth_migrator, zeka_auth_runtime', current_database());
@@ -50,14 +66,8 @@ END $memberships$;
 ALTER SCHEMA public OWNER TO zeka_auth_owner;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO zeka_auth_migrator, zeka_auth_runtime;
-DO $managed_schemas$
-BEGIN
-  IF pg_catalog.to_regnamespace('zeka') IS NOT NULL THEN
-    ALTER SCHEMA zeka OWNER TO zeka_auth_owner;
-    REVOKE ALL ON SCHEMA zeka FROM PUBLIC, zeka_auth_runtime;
-    GRANT USAGE ON SCHEMA zeka TO zeka_auth_migrator, zeka_auth_runtime;
-  END IF;
-END $managed_schemas$;
+REVOKE ALL ON SCHEMA zeka FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
+GRANT USAGE ON SCHEMA zeka TO zeka_auth_runtime;
 DO $ownership$
 DECLARE object record;
 BEGIN
