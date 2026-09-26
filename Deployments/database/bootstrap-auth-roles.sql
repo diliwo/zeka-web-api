@@ -135,6 +135,7 @@ BEGIN
 END $existing_objects$;
 DO $lifecycle_objects$
 DECLARE object_name text;
+        column_grant record;
 BEGIN
   FOREACH object_name IN ARRAY ARRAY[
     'LifecycleParticipantRegistryRevisions','LifecycleParticipantRegistryBindings',
@@ -145,7 +146,26 @@ BEGIN
     END IF;
   END LOOP;
   IF pg_catalog.to_regclass('public."OrganisationLifecycleOperations"') IS NOT NULL THEN
-    GRANT SELECT, INSERT, UPDATE ON TABLE public."OrganisationLifecycleOperations" TO zeka_auth_runtime;
+    -- Table REVOKE does not erase pg_attribute.attacl. Remove every non-owner
+    -- column grant, including stale grants on future columns, before the allowlist.
+    FOR column_grant IN
+      SELECT DISTINCT attribute.attname, acl.grantee,
+        pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
+      FROM pg_catalog.pg_attribute attribute
+      JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+      CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+      WHERE relation.oid='public."OrganisationLifecycleOperations"'::regclass
+        AND attribute.attnum>0 AND NOT attribute.attisdropped
+        AND acl.grantee<>relation.relowner
+    LOOP
+      EXECUTE pg_catalog.format(
+        'REVOKE ALL (%I) ON TABLE public."OrganisationLifecycleOperations" FROM %s CASCADE',
+        column_grant.attname,
+        CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+          ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
+    END LOOP;
+    GRANT SELECT, INSERT ON TABLE public."OrganisationLifecycleOperations" TO zeka_auth_runtime;
+    GRANT UPDATE ("State", "Revision") ON TABLE public."OrganisationLifecycleOperations" TO zeka_auth_runtime;
   END IF;
   IF pg_catalog.to_regclass('public."OrganisationLifecycleParticipants"') IS NOT NULL THEN
     GRANT SELECT, INSERT ON TABLE public."OrganisationLifecycleParticipants" TO zeka_auth_runtime;

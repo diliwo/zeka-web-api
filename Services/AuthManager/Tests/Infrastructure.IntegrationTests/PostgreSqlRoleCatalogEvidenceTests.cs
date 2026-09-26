@@ -88,6 +88,8 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
         }
 
         await using var verification = Context(migratorConnection);
+        // Reconcile the actual migrated lifecycle schema before runtime/catalog verification.
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(AuthDbContext).Assembly);
         await new RuntimeDatabaseIdentityValidator(runtimeConnection, "zeka_auth_runtime").StartAsync(default);
 
@@ -130,17 +132,10 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(AuthDbContext).Assembly);
 
         await ExecuteAdministratorAsync("""
-            CREATE FUNCTION zeka.current_organisation_id() RETURNS uuid
-              LANGUAGE sql SECURITY INVOKER AS 'SELECT NULL::uuid';
             CREATE FUNCTION zeka.issue46_unknown_function() RETURNS integer
               LANGUAGE sql SECURITY INVOKER AS 'SELECT 1';
             CREATE FUNCTION public.issue46_unknown_function() RETURNS integer
               LANGUAGE sql SECURITY INVOKER AS 'SELECT 1';
-            CREATE TABLE public."LifecycleParticipantRegistryRevisions" ("Id" uuid PRIMARY KEY);
-            CREATE TABLE public."LifecycleParticipantRegistryBindings" ("Id" uuid PRIMARY KEY);
-            CREATE TABLE public."LifecycleParticipantRegistryActivation" ("Id" uuid PRIMARY KEY);
-            CREATE TABLE public."OrganisationLifecycleOperations" ("Id" uuid PRIMARY KEY);
-            CREATE TABLE public."OrganisationLifecycleParticipants" ("Id" uuid PRIMARY KEY);
             CREATE TABLE public.issue46_unknown_lifecycle (id uuid PRIMARY KEY);
             CREATE TABLE zeka.issue46_unknown_lifecycle (id uuid PRIMARY KEY);
             GRANT CREATE, USAGE ON SCHEMA zeka TO zeka_auth_runtime;
@@ -168,15 +163,10 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
             """));
 
         await ExecuteAdministratorAsync("""
-            DROP TABLE public."LifecycleParticipantRegistryRevisions",
-              public."LifecycleParticipantRegistryBindings",
-              public."LifecycleParticipantRegistryActivation",
-              public."OrganisationLifecycleOperations",
-              public."OrganisationLifecycleParticipants",
-              public.issue46_unknown_lifecycle,
+            DROP TABLE public.issue46_unknown_lifecycle,
               zeka.issue46_unknown_lifecycle;
             DROP FUNCTION public.issue46_unknown_function();
-            DROP SCHEMA zeka CASCADE;
+            DROP FUNCTION zeka.issue46_unknown_function();
             """);
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(AuthDbContext).Assembly);
@@ -248,7 +238,6 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
             ('LifecycleParticipantRegistryActivation','SELECT'),
             ('OrganisationLifecycleOperations','SELECT'),
             ('OrganisationLifecycleOperations','INSERT'),
-            ('OrganisationLifecycleOperations','UPDATE'),
             ('OrganisationLifecycleParticipants','SELECT'),
             ('OrganisationLifecycleParticipants','INSERT')
         ), actual(table_name, privilege) AS (
