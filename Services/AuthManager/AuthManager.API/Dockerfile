@@ -8,14 +8,17 @@ EXPOSE 8080
 FROM mcr.microsoft.com/dotnet/sdk:8.0.419 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
+COPY nuget.config .
 COPY ["Services/AuthManager/AuthManager.API/AuthManager.API.csproj", "Services/AuthManager/AuthManager.API/"]
 COPY ["Services/AuthManager/AuthManager.Application/AuthManager.Application.csproj", "Services/AuthManager/AuthManager.Application/"]
 COPY ["Services/AuthManager/AuthManager.Core/AuthManager.Core.csproj", "Services/AuthManager/AuthManager.Core/"]
 COPY ["Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj", "Services/AuthManager/AuthManager.Infrastructure/"]
 COPY ["Shared/Zeka.Authentication/Zeka.Authentication.csproj", "Shared/Zeka.Authentication/"]
 
-RUN dotnet restore "Services/AuthManager/AuthManager.API/AuthManager.API.csproj" \
-    --source https://api.nuget.org/v3/index.json
+RUN --mount=type=secret,id=github_token,required=true \
+    NuGetPackageSourceCredentials_github="Username=diliwo;Password=$(cat /run/secrets/github_token);ValidAuthenticationTypes=Basic" \
+    dotnet restore "Services/AuthManager/AuthManager.API/AuthManager.API.csproj" \
+      --configfile nuget.config
 
 COPY . .
 WORKDIR "/src/Services/AuthManager/AuthManager.API"
