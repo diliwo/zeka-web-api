@@ -139,12 +139,31 @@ dotnet build zeka-web-api.sln --configuration Release --no-restore
 dotnet test zeka-web-api.sln --configuration Release --no-build --no-restore
 ```
 
-Before daemon-dependent local verification, confirm `docker info` reports a
-rootless daemon. Build the repository's four Compose images through:
+On Linux, confirm `docker info` reports a rootless daemon before
+daemon-dependent local verification. Build the repository's four Compose
+images through:
 
 ```bash
 ./Deployments/build/local/dev.sh build
 ```
+
+On native Windows, use PowerShell and let Docker's selected context provide the
+named-pipe endpoint. Clear any inherited `DOCKER_HOST` override, verify that the
+active context resolves to an `npipe://` endpoint, and use the Windows wrapper:
+
+```powershell
+Remove-Item Env:DOCKER_HOST -ErrorAction SilentlyContinue
+$dockerEndpoint = docker context inspect (docker context show) --format '{{.Endpoints.docker.Host}}'
+if ($dockerEndpoint -notlike 'npipe://*') {
+    throw "The active Docker context must use a Windows named-pipe endpoint."
+}
+.\Deployments\build\local\dev.ps1 build
+```
+
+The PowerShell wrapper also accepts a Compose service name, for example
+`.\Deployments\build\local\dev.ps1 build authman.api`. Windows validation must
+be performed in native PowerShell; this procedure does not establish support
+for invoking `dev.sh` from Git Bash or WSL.
 
 The local wrapper is not used on GitHub-hosted runners because CI receives
 ephemeral GitHub credentials directly and does not depend on a developer's
