@@ -20,7 +20,7 @@ dotnet test Services/ClientManagement/Tests/Domain.UnitTests/Domain.UnitTests.cs
 dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj -c Release --no-restore --filter "FullyQualifiedName~JwksHttpSourceTests|FullyQualifiedName~Unknown_or_nested_issuer_configuration"
 dotnet build zeka-web-api.sln -c Release --no-restore
 dotnet test zeka-web-api.sln -c Release --no-build --no-restore --collect:"XPlat Code Coverage" --results-directory TestResults/pr63-final -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
-docker build --progress plain -f Services/AuthManager/AuthManager.API/Dockerfile -t zeka-authmanager-pr63 .
+./Deployments/build/local/dev.sh build authman.api
 ```
 
 - Focused tests: 3/3 and 8/8 passed.
