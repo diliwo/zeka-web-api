@@ -75,6 +75,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Shared", "Shared", "{A9D623
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeka.Authentication", "Shared\Zeka.Authentication\Zeka.Authentication.csproj", "{18BB97A2-6944-4231-8430-E6016F8D66D5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeka.DbMigrate", "Tools\Zeka.DbMigrate\Zeka.DbMigrate.csproj", "{B91566A1-A667-43C9-ADE8-C8D06A49715A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeka.DbMigrate.Tests", "Tools\Zeka.DbMigrate.Tests\Zeka.DbMigrate.Tests.csproj", "{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -405,6 +409,30 @@ Global
 		{18BB97A2-6944-4231-8430-E6016F8D66D5}.Release|x64.Build.0 = Release|Any CPU
 		{18BB97A2-6944-4231-8430-E6016F8D66D5}.Release|x86.ActiveCfg = Release|Any CPU
 		{18BB97A2-6944-4231-8430-E6016F8D66D5}.Release|x86.Build.0 = Release|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Debug|x64.Build.0 = Debug|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Debug|x86.Build.0 = Debug|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Release|x64.ActiveCfg = Release|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Release|x64.Build.0 = Release|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Release|x86.ActiveCfg = Release|Any CPU
+		{B91566A1-A667-43C9-ADE8-C8D06A49715A}.Release|x86.Build.0 = Release|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Debug|x64.Build.0 = Debug|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Debug|x86.Build.0 = Debug|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Release|x64.ActiveCfg = Release|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Release|x64.Build.0 = Release|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Release|x86.ActiveCfg = Release|Any CPU
+		{B2670615-483F-40ED-9CA1-9B7BF4FB7A2D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

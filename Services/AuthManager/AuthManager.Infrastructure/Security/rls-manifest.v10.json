@@ -6,7 +6,7 @@
   "ownerRole": "zeka_auth_owner",
   "migratorRole": "zeka_auth_migrator",
   "runtimeRole": "zeka_auth_runtime",
-  "managedSchemas": ["public"],
+  "managedSchemas": ["public", "zeka"],
   "prohibitedRelationKinds": ["FOREIGN_TABLE", "MATERIALIZED_VIEW", "VIEW"],
   "relationTopology": [],
   "protectedTables": [],
@@ -60,7 +60,11 @@
     { "owner": "zeka_auth_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "public", "grants": [] },
     { "owner": "zeka_auth_owner", "objectType": "TYPE", "scope": "SCHEMA", "schema": "public", "grants": [] },
     { "owner": "zeka_auth_owner", "objectType": "RELATION", "scope": "SCHEMA", "schema": "public", "grants": [] },
-    { "owner": "zeka_auth_owner", "objectType": "SEQUENCE", "scope": "SCHEMA", "schema": "public", "grants": [] }
+    { "owner": "zeka_auth_owner", "objectType": "SEQUENCE", "scope": "SCHEMA", "schema": "public", "grants": [] },
+    { "owner": "zeka_auth_owner", "objectType": "FUNCTION", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
+    { "owner": "zeka_auth_owner", "objectType": "RELATION", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
+    { "owner": "zeka_auth_owner", "objectType": "SEQUENCE", "scope": "SCHEMA", "schema": "zeka", "grants": [] },
+    { "owner": "zeka_auth_owner", "objectType": "TYPE", "scope": "SCHEMA", "schema": "zeka", "grants": [] }
   ],
   "parameterPrivileges": [],
   "policyPrefix": "rls_",

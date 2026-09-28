@@ -7,6 +7,8 @@ using Microsoft.Extensions.Logging;
 
 namespace Application.UnitTests;
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class SensitiveRequestLoggingTests
 {
     [Fact]

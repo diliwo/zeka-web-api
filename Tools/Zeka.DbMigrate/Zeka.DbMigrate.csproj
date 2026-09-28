@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>zeka-db-migrate</AssemblyName>
+    <Version>0.1.0</Version>
+    <ZekaSourceSha Condition="'$(ZekaSourceSha)' == ''">unknown</ZekaSourceSha>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="SourceCommit" Value="$(ZekaSourceSha)" />
+    <InternalsVisibleTo Include="Zeka.DbMigrate.Tests" />
+    <ProjectReference Include="../../Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj" />
+    <ProjectReference Include="../../Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj" />
+    <ProjectReference Include="../../Services/ClientManagement/Client.Infrastructure/ClientManagement.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

@@ -10,6 +10,8 @@ using Npgsql;
 namespace Infrastructure.IntegrationTests;
 
 [Collection(PostgreSqlCollection.CollectionName)]
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class PostgreSqlOrganisationPersistenceTests(PostgreSqlFixture fixture)
 {
     private const string PrecedingMigration = "20260819155420_OnboardingOperationalFoundations";

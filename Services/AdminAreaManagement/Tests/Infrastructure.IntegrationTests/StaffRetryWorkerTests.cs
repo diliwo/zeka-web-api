@@ -19,6 +19,8 @@ using Zeka.Extensions.EventBus.Abstractions;
 
 namespace Infrastructure.IntegrationTests;
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "ApplicationConformance")]
 public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixture<TenantDatabase>
 {
     private DbContextOptions<ApplicationDbContext> Options => new DbContextOptionsBuilder<ApplicationDbContext>()

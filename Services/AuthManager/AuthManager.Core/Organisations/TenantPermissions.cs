@@ -29,7 +29,8 @@ public static class TenantPermissions
             ["Admin"] = Permissions(View, AdministrationView, Contribution, Administration,
                 ["Clients.Create", "Clients.EditAssigned", "Clients.EditAll", "Clients.ImportExport"]),
             ["Owner"] = Permissions(View, AdministrationView, Contribution, Administration,
-                ["Clients.Create", "Clients.EditAssigned", "Clients.EditAll", "Clients.ImportExport"])
+                ["Clients.Create", "Clients.EditAssigned", "Clients.EditAll", "Clients.ImportExport",
+                 "Organisations.Export", "Organisations.Close"])
         }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public static IReadOnlySet<string>? Resolve(string roleCode) =>

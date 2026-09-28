@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using AdminAreaManagement.Application.Common.Authorization;
 using AdminAreaManagement.Core.Entities;
@@ -111,7 +112,14 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
             INSERT INTO "__StaffMembershipMap" VALUES
               (1, {organisation}, {Guid.NewGuid()}), (2, {organisation}, {Guid.NewGuid()}), (3, {organisation}, {Guid.NewGuid()});
             """);
-        await deployment.GetService<IMigrator>().MigrateAsync();
+        await migrator.MigrateAsync("20260912180000_PostgreSqlRlsAndRuntimeRoles");
+        var pending = (await deployment.Database.GetPendingMigrationsAsync()).ToArray();
+        if (!pending.SequenceEqual(["20260917212648_DurableDocumentFileOperations"], StringComparer.Ordinal))
+            throw new InvalidOperationException(
+                $"Supported upgrade checkpoint drifted: [{string.Join(", ", pending)}].");
+        await migrator.MigrateAsync();
+        if ((await deployment.Database.GetPendingMigrationsAsync()).Any())
+            throw new InvalidOperationException("Supported upgrade did not reach the reviewed latest migration.");
     }
 
     private static DeploymentDbContext Deployment(string connectionString) => new(
@@ -125,6 +133,16 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
     }
 
     public Task ReapplyBootstrapAsync() => ExecuteAdministratorAsync(ReadBootstrapScript());
+
+    public async Task<string> RequireBackupToolAsync(string executable)
+    {
+        if (executable is not ("pg_dump" or "pg_restore"))
+            throw new ArgumentOutOfRangeException(nameof(executable));
+        var result = await postgres.ExecAsync([executable, "--version"]);
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException($"{executable} prerequisite failed: {result.Stderr}");
+        return result.Stdout.Trim();
+    }
 
     public Task<(string Stdout, string Stderr)> GetLogsAsync(DateTime since, DateTime until,
         CancellationToken cancellationToken = default) =>
@@ -151,6 +169,8 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
     }
 }
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "PlatformConformance")]
 public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDatabase database, ITestOutputHelper output)
     : IClassFixture<PostgreSqlRlsRuntimeDatabase>
 {
@@ -164,6 +184,58 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         "StaffProjectionOutbox",
         "Teams"
     ];
+
+    [Fact]
+    public async Task Supported_upgrade_checkpoints_end_at_the_reviewed_latest_migration()
+    {
+        await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT "MigrationId" FROM public."__EFMigrationsHistory" ORDER BY "MigrationId"
+            """, connection);
+        await using var reader = await command.ExecuteReaderAsync();
+        var applied = new List<string>();
+        while (await reader.ReadAsync()) applied.Add(reader.GetString(0));
+        Assert.Contains("20260912180000_PostgreSqlRlsAndRuntimeRoles", applied);
+        Assert.Equal("20260917212648_DurableDocumentFileOperations", applied[^1]);
+    }
+
+    [Fact]
+    public async Task Database_wide_backup_restore_prerequisite_tools_are_available_and_version_aligned()
+    {
+        var dump = await database.RequireBackupToolAsync("pg_dump");
+        var restore = await database.RequireBackupToolAsync("pg_restore");
+        Assert.StartsWith("pg_dump (PostgreSQL) 17.", dump, StringComparison.Ordinal);
+        Assert.StartsWith("pg_restore (PostgreSQL) 17.", restore, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Operational_runbook_covers_required_incidents_without_ADR_008_commitments()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        string? runbook = null;
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "Deployments", "database",
+                "production-conformance-runbook.md");
+            if (File.Exists(candidate))
+            {
+                runbook = File.ReadAllText(candidate);
+                break;
+            }
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(runbook);
+        Assert.Contains("## Runtime identity mismatch", runbook, StringComparison.Ordinal);
+        Assert.Contains("## Catalog drift", runbook, StringComparison.Ordinal);
+        Assert.Contains("## Pool-contamination suspicion", runbook, StringComparison.Ordinal);
+        Assert.Contains("## Migration or bootstrap failure", runbook, StringComparison.Ordinal);
+        Assert.Contains("RTO, RPO, backup retention, regional recovery and tenant movement remain ADR-008-blocked",
+            runbook, StringComparison.Ordinal);
+        Assert.Contains("Per-tenant restoration requires logical reconstruction and reconciliation",
+            runbook, StringComparison.Ordinal);
+    }
 
     [Fact]
     public async Task Runtime_role_is_restricted_and_every_protected_table_is_forced_with_targeted_policy()
@@ -815,6 +887,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     }
 
     [Theory]
+    [Trait("Evidence", "ApplicationConformance")]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("not-a-uuid")]
@@ -842,6 +915,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
     }
 
     [Fact]
+    [Trait("Evidence", "ApplicationConformance")]
     public async Task Raw_sql_and_filter_bypass_cannot_cross_tenant_select_insert_update_or_delete()
     {
         var a = Guid.NewGuid();
@@ -917,6 +991,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         var connectionString = new NpgsqlConnectionStringBuilder(database.RuntimeConnectionString)
         { MaxPoolSize = maximumPoolSize }.ConnectionString;
         await using var source = NpgsqlDataSource.Create(connectionString);
+        var correlations = new ConcurrentBag<(string Attempt, int Pid, long Transaction)>();
 
         await Task.WhenAll(organisations.Select(async (organisation, index) =>
         {
@@ -926,12 +1001,78 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
                 await using var connection = await source.OpenConnectionAsync();
                 await using var transaction = await connection.BeginTransactionAsync();
                 await SetTenantAsync(connection, transaction, organisation);
+                await using (var correlation = new NpgsqlCommand(
+                    "SELECT pg_backend_pid(), pg_catalog.txid_current()", connection, transaction))
+                await using (var reader = await correlation.ExecuteReaderAsync())
+                {
+                    Assert.True(await reader.ReadAsync());
+                    correlations.Add(($"attempt-{index}-{iteration}", reader.GetInt32(0), reader.GetInt64(1)));
+                }
                 Assert.Equal([organisation], await ReadOrganisationsAsync(connection, transaction));
                 Assert.Equal(0, await ExecuteCountAsync(connection, transaction,
                     "UPDATE \"Teams\" SET \"Name\"=\"Name\" WHERE \"OrganisationId\"=@organisation", foreign));
                 await transaction.CommitAsync();
             }
         }));
+        Assert.Equal(organisations.Length * 12, correlations.Count);
+        Assert.InRange(correlations.Select(value => value.Pid).Distinct().Count(), 1, maximumPoolSize);
+        Assert.Equal(correlations.Count, correlations.Select(value => value.Attempt).Distinct().Count());
+        Assert.All(correlations, value => Assert.True(value.Transaction > 0));
+        output.WriteLine("pool-size={0}; attempts={1}; backend-pids={2}; transaction-markers={3}; foreign-observations=0",
+            maximumPoolSize, correlations.Count, correlations.Select(value => value.Pid).Distinct().Count(),
+            correlations.Select(value => value.Transaction).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Saturated_pool_waiters_timeout_and_cancel_then_the_released_session_is_clean()
+    {
+        async Task ExerciseAsync(string waiterOutcome)
+        {
+            var connectionString = new NpgsqlConnectionStringBuilder(database.RuntimeConnectionString)
+            {
+                MaxPoolSize = 1,
+                Timeout = 1
+            }.ConnectionString;
+            await using var source = NpgsqlDataSource.Create(connectionString);
+            var a = Guid.NewGuid();
+            var b = Guid.NewGuid();
+            int heldPid;
+            await using (var held = await source.OpenConnectionAsync())
+            {
+                heldPid = held.ProcessID;
+                await using (var transaction = await held.BeginTransactionAsync())
+                {
+                    await SetTenantAsync(held, transaction, a);
+                    await transaction.CommitAsync();
+                }
+
+                if (waiterOutcome == "cancelled")
+                {
+                    using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                        await source.OpenConnectionAsync(cancellation.Token));
+                }
+                else
+                {
+                    await Assert.ThrowsAsync<NpgsqlException>(async () => await source.OpenConnectionAsync());
+                }
+            }
+
+            await using var reused = await source.OpenConnectionAsync();
+            Assert.Equal(heldPid, reused.ProcessID);
+            await AssertInvalidContextAsync(reused);
+            await using var bTransaction = await reused.BeginTransactionAsync();
+            await SetTenantAsync(reused, bTransaction, b);
+            await using var current = new NpgsqlCommand(
+                "SELECT zeka.current_organisation_id()", reused, bTransaction);
+            Assert.Equal(b, await current.ExecuteScalarAsync());
+            await bTransaction.CommitAsync();
+            output.WriteLine("waiter={0}; attempt=2; backend-pid={1}; transaction=reinitialized; foreign-observations=0",
+                waiterOutcome, reused.ProcessID);
+        }
+
+        await ExerciseAsync("cancelled");
+        await ExerciseAsync("timed-out");
     }
 
     [Theory]

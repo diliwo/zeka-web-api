@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "statusVocabulary": ["passed", "failed", "blocked", "untested"],
+  "targets": [
+    {"id":"ROLE-01","required":true,"evidence":[{"suite":"adminarea","test":"Runtime_role_is_restricted_and_every_protected_table_is_forced_with_targeted_policy"}]},
+    {"id":"ROLE-02","required":true,"evidence":[{"suite":"adminarea","test":"Startup_identity_validation_rejects_privileged_session_masked_as_runtime_role"}]},
+    {"id":"ROLE-03","required":true,"evidence":[{"suite":"auth","test":"Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest"},{"suite":"client","test":"Fresh_database_migrates_through_owner_assumption_and_matches_client_manifest"},{"suite":"adminarea","test":"Supported_upgrade_checkpoints_end_at_the_reviewed_latest_migration"}]},
+    {"id":"ROLE-04","required":true,"evidence":[{"suite":"auth","test":"Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest"},{"suite":"client","test":"Fresh_database_migrates_through_owner_assumption_and_matches_client_manifest"},{"suite":"adminarea","test":"Runtime_role_is_restricted_and_every_protected_table_is_forced_with_targeted_policy"}]},
+    {"id":"POOL-01","required":true,"evidence":[{"suite":"adminarea","test":"Pool_size_one_reuses_session_without_context_after_commit_and_rollback_then_allows_b"}]},
+    {"id":"POOL-02","required":true,"evidence":[{"suite":"adminarea","test":"Pool_size_one_reuses_session_without_context_after_commit_and_rollback_then_allows_b"}]},
+    {"id":"POOL-03","required":true,"evidence":[{"suite":"adminarea","test":"Common_executor_failure_paths_prove_session_disposition_no_context_and_b_isolation"}]},
+    {"id":"POOL-04","required":true,"evidence":[{"suite":"adminarea","test":"Common_executor_failure_paths_prove_session_disposition_no_context_and_b_isolation"}]},
+    {"id":"POOL-05","required":true,"evidence":[{"suite":"adminarea","test":"Common_executor_failure_paths_prove_session_disposition_no_context_and_b_isolation"}]},
+    {"id":"POOL-06","required":true,"evidence":[{"suite":"adminarea","test":"Execution_strategy_retry_uses_a_new_transaction_attempt_and_reinitializes_before_sql"}]},
+    {"id":"POOL-07","required":true,"evidence":[{"suite":"adminarea","test":"Pool_size_one_reuses_session_without_context_after_commit_and_rollback_then_allows_b"}]},
+    {"id":"POOL-08","required":true,"evidence":[{"suite":"adminarea","test":"Bounded_pool_under_four_organisation_saturation_never_observes_or_writes_foreign_rows"}]},
+    {"id":"POOL-09","required":true,"evidence":[{"suite":"adminarea","test":"Saturated_pool_waiters_timeout_and_cancel_then_the_released_session_is_clean"}]},
+    {"id":"COV-02","required":true,"evidence":[{"suite":"auth","test":"Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest"},{"suite":"client","test":"Fresh_database_migrates_through_owner_assumption_and_matches_client_manifest"},{"suite":"adminarea","test":"Versioned_manifest_matches_EF_classification_and_effective_catalog_bidirectionally"}]},
+    {"id":"COV-03","required":true,"evidence":[{"suite":"auth","test":"Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest"},{"suite":"client","test":"Fresh_database_migrates_through_owner_assumption_and_matches_client_manifest"},{"suite":"adminarea","test":"Runtime_role_is_restricted_and_every_protected_table_is_forced_with_targeted_policy"}]},
+    {"id":"COV-05","required":true,"evidence":[{"suite":"auth","test":"Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest"},{"suite":"client","test":"Fresh_database_migrates_through_owner_assumption_and_matches_client_manifest"},{"suite":"adminarea","test":"Versioned_manifest_matches_EF_classification_and_effective_catalog_bidirectionally"}]},
+    {"id":"PRIV-01","required":true,"evidence":[{"suite":"adminarea","test":"Runtime_role_is_restricted_and_every_protected_table_is_forced_with_targeted_policy"}]},
+    {"id":"PRIV-02","required":true,"evidence":[{"suite":"adminarea","test":"Startup_identity_validation_rejects_privileged_session_masked_as_runtime_role"}]},
+    {"id":"PRIV-03","required":true,"evidence":[{"suite":"auth","test":"Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest"},{"suite":"client","test":"Fresh_database_migrates_through_owner_assumption_and_matches_client_manifest"},{"suite":"adminarea","test":"Supported_upgrade_checkpoints_end_at_the_reviewed_latest_migration"}]},
+    {"id":"OPS-01","required":true,"evidence":[{"suite":"auth","test":"Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest"},{"suite":"client","test":"Fresh_database_migrates_through_owner_assumption_and_matches_client_manifest"},{"suite":"adminarea","test":"Supported_upgrade_checkpoints_end_at_the_reviewed_latest_migration"}]},
+    {"id":"OPS-02","required":true,"evidence":[{"suite":"auth","test":"Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest"},{"suite":"client","test":"Fresh_database_migrates_through_owner_assumption_and_matches_client_manifest"},{"suite":"adminarea","test":"Supported_upgrade_checkpoints_end_at_the_reviewed_latest_migration"}]},
+    {"id":"OPS-03","required":true,"evidence":[{"suite":"migration","test":"Real_process_rejects_adminarea_down_target_without_state_change"},{"suite":"migration","test":"Real_process_rejects_auth_down_target_without_state_change"},{"suite":"migration","test":"Real_process_rejects_client_down_target_without_state_change"}]},
+    {"id":"OPS-04","required":true,"evidence":[{"suite":"adminarea","test":"Bootstrap_rerun_clears_all_managed_settings_and_restores_only_manifest_approved_objects"}]},
+    {"id":"OPS-05","required":true,"evidence":[{"suite":"adminarea","test":"Catalog_verifier_fails_closed_for_each_managed_drift_category"}]},
+    {"id":"OPS-06","required":true,"evidence":[{"suite":"adminarea","test":"Managed_schema_object_inventory_rls_policy_and_acl_drift_fails_closed_and_restores_green"}]},
+    {"id":"OPS-07","required":true,"evidence":[{"suite":"adminarea","test":"Database_wide_backup_restore_prerequisite_tools_are_available_and_version_aligned"}]},
+    {"id":"OPS-08","required":true,"evidence":[{"suite":"adminarea","test":"Operational_runbook_covers_required_incidents_without_ADR_008_commitments"}]}
+  ]
+}

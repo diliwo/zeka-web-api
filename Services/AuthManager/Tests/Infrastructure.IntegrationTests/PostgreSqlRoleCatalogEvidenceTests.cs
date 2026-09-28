@@ -9,6 +9,8 @@ using Zeka.PersistenceSecurity;
 
 namespace Infrastructure.IntegrationTests;
 
+[Trait("Issue", "46")]
+[Trait("Evidence", "PlatformConformance")]
 public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
 {
     private const string MigratorPassword = "test-migrator-password";
@@ -19,23 +21,77 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
     public Task DisposeAsync() => postgres.DisposeAsync().AsTask();
 
     [Fact]
+    public async Task Unexpected_managed_schema_owner_fails_closed_without_adoption()
+    {
+        await ExecuteAdministratorAsync("CREATE SCHEMA zeka");
+        var originalIdentity = await ExecuteAdministratorScalarAsync<string>("""
+            SELECT namespace.oid::text || '|' || pg_catalog.pg_get_userbyid(namespace.nspowner)
+            FROM pg_catalog.pg_namespace namespace
+            WHERE namespace.nspname='zeka'
+            """);
+
+        var exception = await Assert.ThrowsAsync<PostgresException>(() =>
+            ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql")));
+
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, exception.SqlState);
+        Assert.Equal("managed schema zeka has unexpected owner", exception.MessageText);
+        Assert.Equal(originalIdentity, await ExecuteAdministratorScalarAsync<string>("""
+            SELECT namespace.oid::text || '|' || pg_catalog.pg_get_userbyid(namespace.nspowner)
+            FROM pg_catalog.pg_namespace namespace
+            WHERE namespace.nspname='zeka'
+            """));
+    }
+
+    [Fact]
     public async Task Fresh_database_migrates_through_owner_assumption_and_matches_auth_manifest()
     {
+        Assert.False(await ExecuteAdministratorScalarAsync<bool>(
+            "SELECT pg_catalog.to_regnamespace('zeka') IS NOT NULL"));
+
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
+        var provisionedSchemaOid = await ExecuteAdministratorScalarAsync<long>(
+            "SELECT oid::bigint FROM pg_catalog.pg_namespace WHERE nspname='zeka'");
+        Assert.True(await ExecuteAdministratorScalarAsync<bool>(ExactManagedSchemaPrivilegesSql));
+
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
+        Assert.Equal(provisionedSchemaOid, await ExecuteAdministratorScalarAsync<long>(
+            "SELECT oid::bigint FROM pg_catalog.pg_namespace WHERE nspname='zeka'"));
+        Assert.True(await ExecuteAdministratorScalarAsync<bool>(ExactManagedSchemaPrivilegesSql));
+
         await ExecuteAdministratorAsync($"ALTER ROLE zeka_auth_migrator PASSWORD '{MigratorPassword}'; ALTER ROLE zeka_auth_runtime PASSWORD '{RuntimePassword}';");
 
         var migratorConnection = Connection("zeka_auth_migrator", MigratorPassword);
+        var runtimeConnection = Connection("zeka_auth_runtime", RuntimePassword);
+        await AssertInsufficientPrivilegeAsync(migratorConnection, "CREATE SCHEMA issue46_migrator_forbidden");
+        await AssertInsufficientPrivilegeAsync(runtimeConnection, "CREATE SCHEMA issue46_runtime_forbidden");
+        await AssertInsufficientPrivilegeAsync(migratorConnection,
+            "SET ROLE zeka_auth_owner; CREATE SCHEMA issue46_owner_forbidden");
+        await AssertInsufficientPrivilegeAsync(migratorConnection,
+            "CREATE TABLE zeka.issue46_direct_migrator_forbidden(id integer)");
+        await ExecuteAsync(migratorConnection, """
+            SET ROLE zeka_auth_owner;
+            CREATE TABLE zeka.issue46_owner_assumption_probe(id integer);
+            DROP TABLE zeka.issue46_owner_assumption_probe;
+            RESET ROLE;
+            """);
+
         await using (var migration = Context(migratorConnection))
         {
             await migration.Database.OpenConnectionAsync();
             await migration.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            var migrations = migration.Database.GetMigrations().ToArray();
+            Assert.True(migrations.Length > 1);
+            await migration.GetService<IMigrator>().MigrateAsync(migrations[^2]);
+            Assert.Equal([migrations[^1]], await migration.Database.GetPendingMigrationsAsync());
             await migration.GetService<IMigrator>().MigrateAsync();
+            Assert.Empty(await migration.Database.GetPendingMigrationsAsync());
         }
 
         await using var verification = Context(migratorConnection);
+        // Reconcile the actual migrated lifecycle schema before runtime/catalog verification.
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(AuthDbContext).Assembly);
-        await new RuntimeDatabaseIdentityValidator(Connection("zeka_auth_runtime", RuntimePassword),
-            "zeka_auth_runtime").StartAsync(default);
+        await new RuntimeDatabaseIdentityValidator(runtimeConnection, "zeka_auth_runtime").StartAsync(default);
 
         var maskedAdministrator = new NpgsqlConnectionStringBuilder(postgres.GetConnectionString())
         {
@@ -74,6 +130,46 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
             """));
         await ExecuteAdministratorAsync("DROP TABLE public.issue45_unknown_auth");
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(AuthDbContext).Assembly);
+
+        await ExecuteAdministratorAsync("""
+            CREATE FUNCTION zeka.issue46_unknown_function() RETURNS integer
+              LANGUAGE sql SECURITY INVOKER AS 'SELECT 1';
+            CREATE FUNCTION public.issue46_unknown_function() RETURNS integer
+              LANGUAGE sql SECURITY INVOKER AS 'SELECT 1';
+            CREATE TABLE public.issue46_unknown_lifecycle (id uuid PRIMARY KEY);
+            CREATE TABLE zeka.issue46_unknown_lifecycle (id uuid PRIMARY KEY);
+            GRANT CREATE, USAGE ON SCHEMA zeka TO zeka_auth_runtime;
+            GRANT ALL ON ALL TABLES IN SCHEMA public, zeka TO zeka_auth_runtime;
+            GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public, zeka TO zeka_auth_runtime;
+            """);
+
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
+
+        Assert.True(await ExecuteAdministratorScalarAsync<bool>(ExactLifecycleTablePrivilegesSql));
+        Assert.True(await ExecuteAdministratorScalarAsync<bool>("""
+            SELECT
+              pg_catalog.has_schema_privilege('zeka_auth_runtime', 'public', 'USAGE')
+              AND NOT pg_catalog.has_schema_privilege('zeka_auth_runtime', 'public', 'CREATE')
+              AND pg_catalog.has_schema_privilege('zeka_auth_runtime', 'zeka', 'USAGE')
+              AND NOT pg_catalog.has_schema_privilege('zeka_auth_runtime', 'zeka', 'CREATE')
+              AND (
+                SELECT pg_catalog.array_agg(n.nspname || '.' || p.proname ORDER BY n.nspname, p.proname)
+                FROM pg_catalog.pg_proc p
+                JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname=ANY(ARRAY['public','zeka'])
+                  AND pg_catalog.has_function_privilege('zeka_auth_runtime', p.oid, 'EXECUTE')
+              ) = ARRAY['zeka.current_organisation_id']
+            """));
+
+        await ExecuteAdministratorAsync("""
+            DROP TABLE public.issue46_unknown_lifecycle,
+              zeka.issue46_unknown_lifecycle;
+            DROP FUNCTION public.issue46_unknown_function();
+            DROP FUNCTION zeka.issue46_unknown_function();
+            """);
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
+        await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(AuthDbContext).Assembly);
     }
 
     private static AuthDbContext Context(string connectionString) => new(
@@ -99,6 +195,20 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
         return (T)(await command.ExecuteScalarAsync())!;
     }
 
+    private static async Task ExecuteAsync(string connectionString, string sql)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task AssertInsufficientPrivilegeAsync(string connectionString, string sql)
+    {
+        var exception = await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, sql));
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, exception.SqlState);
+    }
+
     private static string ReadBootstrapScript(string fileName)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -110,4 +220,68 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
         }
         throw new FileNotFoundException("The reviewed database role bootstrap script was not found.", fileName);
     }
+
+    private const string ExactLifecycleTablePrivilegesSql = """
+        WITH privilege_names(privilege) AS (
+          VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),('REFERENCES'),('TRIGGER')
+        ), expected(table_name, privilege) AS (
+          SELECT table_name, privilege
+          FROM unnest(ARRAY[
+            'AspNetRoleClaims','AspNetRoles','AspNetUserClaims','AspNetUserLogins','AspNetUserRoles',
+            'AspNetUserTokens','AspNetUsers','AuditEntries','IdempotencyRecords','OrganisationMemberships',
+            'Organisations','OutboxMessages','PermissionSets'
+          ]) table_name
+          CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) privilege
+          UNION ALL VALUES
+            ('LifecycleParticipantRegistryRevisions','SELECT'),
+            ('LifecycleParticipantRegistryBindings','SELECT'),
+            ('LifecycleParticipantRegistryActivation','SELECT'),
+            ('OrganisationLifecycleOperations','SELECT'),
+            ('OrganisationLifecycleOperations','INSERT'),
+            ('OrganisationLifecycleParticipants','SELECT'),
+            ('OrganisationLifecycleParticipants','INSERT')
+        ), actual(table_name, privilege) AS (
+          SELECT c.relname, privilege_names.privilege
+          FROM pg_catalog.pg_class c
+          JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+          CROSS JOIN privilege_names
+          WHERE n.nspname=ANY(ARRAY['public','zeka'])
+            AND c.relkind IN ('r','p')
+            AND pg_catalog.has_table_privilege(
+              'zeka_auth_runtime',
+              pg_catalog.format('%I.%I', n.nspname, c.relname),
+              privilege_names.privilege)
+        )
+        SELECT NOT EXISTS (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+          AND NOT EXISTS (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+        """;
+
+    private const string ExactManagedSchemaPrivilegesSql = """
+        WITH schema_acl AS (
+          SELECT COALESCE(grantee.rolname, 'PUBLIC') grantee,
+            acl.privilege_type,
+            acl.is_grantable
+          FROM pg_catalog.pg_namespace namespace
+          CROSS JOIN LATERAL pg_catalog.aclexplode(namespace.nspacl) acl
+          LEFT JOIN pg_catalog.pg_roles grantee ON grantee.oid=acl.grantee
+          WHERE namespace.nspname='zeka'
+            AND acl.grantee<>namespace.nspowner
+        )
+        SELECT
+          (SELECT pg_catalog.pg_get_userbyid(namespace.nspowner)='zeka_auth_owner'
+             FROM pg_catalog.pg_namespace namespace WHERE namespace.nspname='zeka')
+          AND NOT pg_catalog.has_database_privilege('zeka_auth_owner', pg_catalog.current_database(), 'CREATE')
+          AND NOT pg_catalog.has_database_privilege('zeka_auth_migrator', pg_catalog.current_database(), 'CREATE')
+          AND NOT pg_catalog.has_database_privilege('zeka_auth_runtime', pg_catalog.current_database(), 'CREATE')
+          AND NOT pg_catalog.has_schema_privilege('zeka_auth_migrator', 'zeka', 'USAGE')
+          AND NOT pg_catalog.has_schema_privilege('zeka_auth_migrator', 'zeka', 'CREATE')
+          AND pg_catalog.has_schema_privilege('zeka_auth_runtime', 'zeka', 'USAGE')
+          AND NOT pg_catalog.has_schema_privilege('zeka_auth_runtime', 'zeka', 'CREATE')
+          AND (SELECT pg_catalog.count(*)=1 FROM schema_acl)
+          AND EXISTS (
+            SELECT FROM schema_acl
+            WHERE grantee='zeka_auth_runtime'
+              AND privilege_type='USAGE'
+              AND NOT is_grantable)
+        """;
 }
