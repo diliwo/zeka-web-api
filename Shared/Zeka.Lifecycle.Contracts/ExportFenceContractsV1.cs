@@ -167,17 +167,32 @@ public sealed record StageOrganisationExportV1
         LifecycleMessageHeaderV1 header,
         DateTimeOffset snapshotAt,
         CompleteExportFenceEvidenceV1 fenceEvidence)
+        : this(header, snapshotAt, fenceEvidence, header?.ParticipantId
+            ?? throw new ArgumentNullException(nameof(header)))
+    {
+    }
+
+    public StageOrganisationExportV1(
+        LifecycleMessageHeaderV1 header,
+        DateTimeOffset snapshotAt,
+        CompleteExportFenceEvidenceV1 fenceEvidence,
+        string fenceOwnerParticipantId)
     {
         Header = header ?? throw new ArgumentNullException(nameof(header));
         SnapshotAt = ContractGuard.Utc(snapshotAt, nameof(snapshotAt));
         FenceEvidence = fenceEvidence ?? throw new ArgumentNullException(nameof(fenceEvidence));
+        FenceOwnerParticipantId = ContractGuard.StableKey(
+            fenceOwnerParticipantId,
+            nameof(fenceOwnerParticipantId));
         if (Header.OperationId != FenceEvidence.OperationId
             || Header.OrganisationId != FenceEvidence.OrganisationId
             || Header.OperationRevision != FenceEvidence.OperationRevision)
             throw new ArgumentException("Stage header must match the complete fence evidence.", nameof(header));
         if (!FenceEvidence.RequiredParticipants.Any(x =>
-                x.ParticipantId == Header.ParticipantId && x.ContractVersion == Header.ContractVersion))
-            throw new ArgumentException("Stage participant must belong to the frozen required inventory.", nameof(header));
+                x.ParticipantId == FenceOwnerParticipantId && x.ContractVersion == Header.ContractVersion))
+            throw new ArgumentException(
+                "Stage fence owner must belong to the frozen required fence inventory.",
+                nameof(fenceOwnerParticipantId));
         if (SnapshotAt < FenceEvidence.LastFenceEnteredAt)
             throw new ArgumentException("SnapshotAt must be recorded after every required fence receipt.", nameof(snapshotAt));
     }
@@ -185,6 +200,7 @@ public sealed record StageOrganisationExportV1
     public LifecycleMessageHeaderV1 Header { get; }
     public DateTimeOffset SnapshotAt { get; }
     public CompleteExportFenceEvidenceV1 FenceEvidence { get; }
+    public string FenceOwnerParticipantId { get; }
     public string FenceEvidenceHash => FenceEvidence.EvidenceHash;
 }
 

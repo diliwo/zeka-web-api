@@ -82,11 +82,20 @@ public sealed class ExportContractTests
         var stage = new StageOrganisationExportV1(
             Header("auth"), FenceTime.AddTicks(1), evidence);
         stage.FenceEvidenceHash.Should().Be(evidence.EvidenceHash);
+        stage.FenceOwnerParticipantId.Should().Be("auth");
+
+        var sharedFenceStage = new StageOrganisationExportV1(
+            Header("auth-documents"), FenceTime.AddTicks(1), evidence, "auth");
+        sharedFenceStage.Header.ParticipantId.Should().Be("auth-documents");
+        sharedFenceStage.FenceOwnerParticipantId.Should().Be("auth");
 
         var early = () => new StageOrganisationExportV1(Header("auth"), FenceTime.AddTicks(-1), evidence);
         var unknown = () => new StageOrganisationExportV1(Header("client"), FenceTime.AddTicks(1), evidence);
+        var unknownFenceOwner = () => new StageOrganisationExportV1(
+            Header("auth-documents"), FenceTime.AddTicks(1), evidence, "client");
         early.Should().Throw<ArgumentException>();
         unknown.Should().Throw<ArgumentException>();
+        unknownFenceOwner.Should().Throw<ArgumentException>();
     }
 
     [Fact]
