@@ -1,4 +1,5 @@
 using System.Data;
+using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text.Json;
 using AuthManager.Application.Common.Outbox;
@@ -212,12 +213,12 @@ public sealed class LifecycleClosureStore(
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            await InitializeAsync(database, transaction, organisationId, cancellationToken);
+            await EstablishLifecycleContextAsync(database, transaction, organisationId, cancellationToken);
             return await database.Set<LifecycleOperation>().Where(x => x.IsActive
                     && x.Family == LifecycleOperationFamily.Termination)
                 .OrderBy(x => x.RequestedAt).Select(x => x.Id).ToListAsync(cancellationToken);
         }
-        finally { Clear(database); }
+        finally { ResetLifecycleContext(database); }
     }
 
     public Task<ClosureProgressResult> ResumeAsync(Guid operationId, Guid organisationId,
@@ -311,31 +312,49 @@ public sealed class LifecycleClosureStore(
     private async Task<ClosureProgressResult> ExecuteAsync(Guid operationId, Guid organisationId,
         Func<AuthDbContext, Task<ClosureProgressResult>> action, CancellationToken cancellationToken)
     {
-        for (var attempt = 0; attempt < 3; attempt++)
+        var attemptsRemaining = 3;
+        while (attemptsRemaining-- > 0)
         {
             await using var database = new AuthDbContext(options) { LifecycleOnly = true };
             try
             {
-                return await database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
-                {
-                    await using var transaction = await database.Database.BeginTransactionAsync(
-                        IsolationLevel.Serializable, cancellationToken);
-                    try
-                    {
-                        await InitializeAsync(database, transaction, organisationId, cancellationToken);
-                        var result = await action(database);
-                        await transaction.CommitAsync(cancellationToken);
-                        return result;
-                    }
-                    finally { Clear(database); }
-                });
+                var strategy = database.Database.CreateExecutionStrategy();
+                return await strategy.ExecuteAsync(() => RunSerializableAsync(
+                    database, organisationId, action, cancellationToken));
             }
-            catch (DbUpdateException exception) when (exception.InnerException is PostgresException
-                { SqlState: PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.SerializationFailure }) { }
-            catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.SerializationFailure) { }
+            catch (Exception exception) when (IsRetryable(exception)) { }
         }
         return Result(ClosureProgressStatus.Unavailable, operationId, 0);
     }
+
+    private static async Task<ClosureProgressResult> RunSerializableAsync(AuthDbContext database,
+        Guid organisationId, Func<AuthDbContext, Task<ClosureProgressResult>> action,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await database.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable, cancellationToken);
+        try
+        {
+            await EstablishLifecycleContextAsync(database, transaction, organisationId, cancellationToken);
+            var result = await action(database);
+            await transaction.CommitAsync(cancellationToken);
+            return result;
+        }
+        finally { ResetLifecycleContext(database); }
+    }
+
+    private static bool IsRetryable(Exception exception) => exception switch
+    {
+        DbUpdateException
+        {
+            InnerException: PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.SerializationFailure
+            }
+        } => true,
+        PostgresException { SqlState: PostgresErrorCodes.SerializationFailure } => true,
+        _ => false
+    };
 
     private static async Task<LifecycleOperation?> Operation(AuthDbContext database, Guid operationId,
         CancellationToken cancellationToken) => await database.Set<LifecycleOperation>()
@@ -408,24 +427,33 @@ public sealed class LifecycleClosureStore(
     private static ClosureProgressResult Result(ClosureProgressStatus status, Guid operationId,
         long revision, string? failureCode = null) => new(status, operationId, revision, failureCode);
 
-    private static async Task InitializeAsync(AuthDbContext database, IDbContextTransaction transaction,
+    private static async Task EstablishLifecycleContextAsync(AuthDbContext database,
+        IDbContextTransaction transaction,
         Guid organisation, CancellationToken cancellationToken)
     {
         if (organisation == Guid.Empty) throw new InvalidOperationException("Authorized organisation is required.");
-        await using var command = database.Database.GetDbConnection().CreateCommand();
+        await using var command = CreateLifecycleContextCommand(database, transaction, organisation);
+        var expected = organisation.ToString("D");
+        if (!Equals(await command.ExecuteScalarAsync(cancellationToken), expected))
+            throw new InvalidOperationException("Lifecycle context initialization failed.");
+        database.LifecycleOrganisationId = organisation;
+        database.LifecycleTransaction = transaction.GetDbTransaction();
+    }
+
+    private static DbCommand CreateLifecycleContextCommand(AuthDbContext database,
+        IDbContextTransaction transaction, Guid organisation)
+    {
+        var command = database.Database.GetDbConnection().CreateCommand();
         command.Transaction = transaction.GetDbTransaction();
         command.CommandText = "select pg_catalog.set_config('zeka.organisation_id', @organisation_id, true)";
         var parameter = command.CreateParameter();
         parameter.ParameterName = "organisation_id";
         parameter.Value = organisation.ToString("D");
         command.Parameters.Add(parameter);
-        if (!Equals(await command.ExecuteScalarAsync(cancellationToken), parameter.Value))
-            throw new InvalidOperationException("Lifecycle context initialization failed.");
-        database.LifecycleOrganisationId = organisation;
-        database.LifecycleTransaction = transaction.GetDbTransaction();
+        return command;
     }
 
-    private static void Clear(AuthDbContext database)
+    private static void ResetLifecycleContext(AuthDbContext database)
     {
         database.LifecycleTransaction = null;
         database.LifecycleOrganisationId = Guid.Empty;
