@@ -39,6 +39,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Client.Application\ClientManagement.Application.csproj" />
+    <ProjectReference Include="..\..\..\Shared\Zeka.Lifecycle.Contracts\Zeka.Lifecycle.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Security/rls-manifest.v10.json" />
