@@ -49,6 +49,18 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
                     || entry.State == EntityState.Modified && (Guid)entry.Property("OrganisationId").OriginalValue! != organisation)
                     throw new InvalidOperationException("Lifecycle write is outside its immutable organisation attempt.");
             }
+            if (entry.Entity is AuthManager.Core.Lifecycle.LifecycleInboxReceipt
+                or AuthManager.Core.Lifecycle.LifecycleExportFenceReceipt
+                or AuthManager.Core.Lifecycle.LifecycleExportFragment
+                or AuthManager.Core.Lifecycle.LifecycleExportPackage
+                or AuthManager.Core.Lifecycle.LifecycleCoordinatorLease)
+            {
+                var organisation = (Guid)entry.Property("OrganisationId").CurrentValue!;
+                if (!LifecycleOnly || LifecycleTransaction is null || organisation == Guid.Empty
+                    || organisation != LifecycleOrganisationId || entry.State == EntityState.Deleted
+                    || entry.State == EntityState.Modified && (Guid)entry.Property("OrganisationId").OriginalValue! != organisation)
+                    throw new InvalidOperationException("Lifecycle evidence write is outside its immutable organisation attempt.");
+            }
         }
     }
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
@@ -58,6 +70,11 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<OrganisationMembership> OrganisationMemberships => Set<OrganisationMembership>();
     public DbSet<PermissionSet> PermissionSets => Set<PermissionSet>();
     public DbSet<MembershipPermissionGrant> MembershipPermissionGrants => Set<MembershipPermissionGrant>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleInboxReceipt> LifecycleInboxReceipts => Set<AuthManager.Core.Lifecycle.LifecycleInboxReceipt>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleExportFenceReceipt> LifecycleExportFenceReceipts => Set<AuthManager.Core.Lifecycle.LifecycleExportFenceReceipt>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleExportFragment> LifecycleExportFragments => Set<AuthManager.Core.Lifecycle.LifecycleExportFragment>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleExportPackage> LifecycleExportPackages => Set<AuthManager.Core.Lifecycle.LifecycleExportPackage>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleCoordinatorLease> LifecycleCoordinatorLeases => Set<AuthManager.Core.Lifecycle.LifecycleCoordinatorLease>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

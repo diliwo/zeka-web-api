@@ -115,7 +115,9 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         Assert.Equal(ef, live.Split(','));
         output.WriteLine("Exact EF/live operation columns: " + live);
         var before = await Row(operation.Id);
-        foreach (var column in ef.Except(["State", "Revision"]))
+        var workflowMutable = new[] { "State", "Revision", "SnapshotAt", "FenceEvidenceHash",
+            "PackageSha256", "PackageReference", "FailureCode", "CompletedAt", "IsActive" };
+        foreach (var column in ef.Except(workflowMutable))
         {
             var property = model.Model.FindEntityType(typeof(LifecycleOperation))!.GetProperties()
                 .Single(p => p.GetColumnName(table) == column);
@@ -185,8 +187,10 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
     {
         await using var model = Context("zeka_auth_migrator");
         var table = StoreObjectIdentifier.Table("OrganisationLifecycleOperations", null);
+        var mutable = new[] { "State", "Revision", "SnapshotAt", "FenceEvidenceHash", "PackageSha256",
+            "PackageReference", "FailureCode", "CompletedAt", "IsActive" };
         var frozen = model.Model.FindEntityType(typeof(LifecycleOperation))!.GetProperties()
-            .Select(p => p.GetColumnName(table)!).Except(["State", "Revision"]).Order(StringComparer.Ordinal);
+            .Select(p => p.GetColumnName(table)!).Except(mutable).Order(StringComparer.Ordinal);
         var mutations = frozen.Select(column =>
             $"GRANT UPDATE ({new NpgsqlCommandBuilder().QuoteIdentifier(column)}) ON public.\"OrganisationLifecycleOperations\" TO zeka_auth_runtime")
             .Concat(new[]
@@ -211,7 +215,7 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
     }
 
     [Fact]
-    public async Task Runtime_registry_mutation_lifecycle_delete_and_participant_update_are_denied()
+    public async Task Runtime_registry_mutation_lifecycle_delete_and_participant_identity_update_are_denied()
     {
         var operation = await Seed();
         var tables = new[] { "LifecycleParticipantRegistryRevisions", "LifecycleParticipantRegistryBindings",
@@ -233,8 +237,10 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
             }
         }
         var participantDenied = await Assert.ThrowsAsync<PostgresException>(() => Runtime(Organisation,
-            "UPDATE public.\"OrganisationLifecycleParticipants\" SET \"State\"=\"State\""));
+            "UPDATE public.\"OrganisationLifecycleParticipants\" SET \"Mandatory\"=\"Mandatory\""));
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, participantDenied.SqlState);
+        Assert.Equal(1, Convert.ToInt32(await Runtime(Organisation,
+            "UPDATE public.\"OrganisationLifecycleParticipants\" SET \"State\"=\"State\" RETURNING 1")));
         Assert.NotNull(await Row(operation.Id));
     }
 
@@ -457,7 +463,7 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
             ("GRANT DELETE ON public.\"OrganisationLifecycleOperations\" TO zeka_auth_runtime",
                 "REVOKE DELETE ON public.\"OrganisationLifecycleOperations\" FROM zeka_auth_runtime", "table ACLs"),
             ("GRANT UPDATE ON public.\"OrganisationLifecycleParticipants\" TO zeka_auth_runtime",
-                "REVOKE UPDATE ON public.\"OrganisationLifecycleParticipants\" FROM zeka_auth_runtime", "table ACLs"),
+                Bootstrap(), "table ACLs"),
             ("GRANT UPDATE (\"Mandatory\") ON public.\"LifecycleParticipantRegistryBindings\" TO zeka_auth_runtime",
                 "REVOKE UPDATE (\"Mandatory\") ON public.\"LifecycleParticipantRegistryBindings\" FROM zeka_auth_runtime", "column ACLs"),
             ("ALTER TABLE public.\"OrganisationLifecycleOperations\" ADD CONSTRAINT unexpected_organisation_fk FOREIGN KEY (\"OrganisationId\") REFERENCES public.\"Organisations\"(\"Id\") ON DELETE CASCADE",
@@ -485,6 +491,14 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         var baseline = RlsSecurityManifestVerifier.Load(typeof(AuthDbContext).Assembly);
         var global = baseline.GlobalControlPlaneTables!;
         var scoped = baseline.OrganisationScopedSurvivingControlTables!;
+        var operation = new ManagedObjectIdentity("public", "OrganisationLifecycleOperations");
+        var v10ColumnScoped = baseline with
+        {
+            SchemaVersion = 10,
+            GlobalControlPlaneTables = null,
+            OrganisationScopedSurvivingControlTables = null,
+            ColumnPrivileges = [new(operation, "State", ["UPDATE"], false)]
+        };
         var variants = new[]
         {
             baseline with { GlobalControlPlaneTables = null },
@@ -500,7 +514,16 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
             baseline with { ColumnPrivileges = baseline.ColumnPrivileges!.Reverse().ToArray() },
             baseline with { ColumnPrivileges = [baseline.ColumnPrivileges![0], baseline.ColumnPrivileges[0]] },
             baseline with { ColumnPrivileges = [baseline.ColumnPrivileges![0] with { Column = "*" }, baseline.ColumnPrivileges[1]] },
-            baseline with { ColumnPrivileges = [baseline.ColumnPrivileges![0] with { Grantable = true }, baseline.ColumnPrivileges[1]] }
+            baseline with { ColumnPrivileges = [baseline.ColumnPrivileges![0] with { Grantable = true }, baseline.ColumnPrivileges[1]] },
+            v10ColumnScoped with { ColumnPrivileges = [new(operation, "*", ["UPDATE"], false)] },
+            v10ColumnScoped with { ColumnPrivileges = [new(operation, "State", ["DELETE"], false)] },
+            v10ColumnScoped with { ColumnPrivileges = [new(operation, "State", ["UPDATE"], true)] },
+            v10ColumnScoped with
+            {
+                TablePrivileges = baseline.TablePrivileges.Select(state => state.Object == operation
+                    ? state with { Privileges = ["INSERT", "SELECT", "UPDATE"] }
+                    : state).ToArray()
+            }
         };
         foreach (var variant in variants)
             await Assert.ThrowsAsync<InvalidOperationException>(() => RlsSecurityManifestVerifier.VerifyAsync(verification, variant));

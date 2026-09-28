@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AuthManager.Application\AuthManager.Application.csproj" />
     <ProjectReference Include="..\AuthManager.Core\AuthManager.Core.csproj" />
+    <ProjectReference Include="..\..\..\Shared\Zeka.Lifecycle.Contracts\Zeka.Lifecycle.Contracts.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.8" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.8" />
   </ItemGroup>
@@ -19,7 +20,7 @@
 
   <ItemGroup><ProjectReference Include="../../../Shared/Zeka.Authentication/Zeka.Authentication.csproj" /></ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Security/rls-manifest.v12.json" />
+    <EmbeddedResource Include="Security/rls-manifest.v13.json" />
     <Compile Include="../../../Shared/RlsSecurityManifestVerifier.cs" Link="Security/RlsSecurityManifestVerifier.cs" />
     <Compile Include="../../../Shared/RuntimeDatabaseIdentityValidator.cs" Link="Security/RuntimeDatabaseIdentityValidator.cs" />
   </ItemGroup>

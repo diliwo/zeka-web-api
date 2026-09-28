@@ -14,6 +14,12 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
     public Guid RegistryRevision { get; private set; }
     public string InventoryHash { get; private set; } = "";
     public DateTimeOffset RequestedAt { get; private set; }
+    public DateTimeOffset? SnapshotAt { get; private set; }
+    public string? FenceEvidenceHash { get; private set; }
+    public string? PackageSha256 { get; private set; }
+    public string? PackageReference { get; private set; }
+    public string? FailureCode { get; private set; }
+    public DateTimeOffset? CompletedAt { get; private set; }
     public long Revision { get; private set; } = 1;
     public bool IsActive { get; private set; } = true;
     private readonly List<LifecycleParticipant> participants = [];
@@ -41,6 +47,127 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
 
     public bool IsReplay(Guid subject, LifecycleOperationFamily family, Guid idempotencyId) =>
         RequestingSubjectId == subject && Family == family && IdempotencyId == idempotencyId;
+
+    public void BeginExport()
+    {
+        DemandExportState(LifecycleOperationState.Requested);
+        State = LifecycleOperationState.EnteringFence;
+        foreach (var participant in participants.Where(x =>
+                     x.Family == LifecycleOperationFamily.Export
+                     && x.CapabilityKey == "organisation.export-fence"))
+            participant.Request();
+        Revision++;
+    }
+
+    public void RecordFenceAccepted(string participantId)
+    {
+        DemandExportState(LifecycleOperationState.EnteringFence);
+        FindExportParticipant(participantId, "organisation.export-fence").Accept();
+    }
+
+    public void EstablishSnapshot(DateTimeOffset snapshotAt, string fenceEvidenceHash)
+    {
+        DemandExportState(LifecycleOperationState.EnteringFence);
+        if (participants.Where(IsFenceParticipant).Any(x => x.Mandatory && x.State != LifecycleParticipantState.Accepted))
+            throw new InvalidOperationException("Every mandatory export fence must be accepted before SnapshotAt is established.");
+        if (snapshotAt == default || snapshotAt.Offset != TimeSpan.Zero)
+            throw new ArgumentException("SnapshotAt must be a non-default UTC timestamp.", nameof(snapshotAt));
+        SnapshotAt = snapshotAt;
+        FenceEvidenceHash = RequireSha256(fenceEvidenceHash, nameof(fenceEvidenceHash));
+        State = LifecycleOperationState.StagingFragments;
+        foreach (var participant in participants.Where(x =>
+                     x.Family == LifecycleOperationFamily.Export
+                     && IsFragmentCapability(x.CapabilityKey)))
+            participant.Request();
+        Revision++;
+    }
+
+    public void RecordFragmentAccepted(string participantId)
+    {
+        DemandExportState(LifecycleOperationState.StagingFragments);
+        FindExportParticipant(participantId, IsFragmentCapability).Accept();
+        if (participants.Where(IsFragmentParticipant).All(x => !x.Mandatory || x.State == LifecycleParticipantState.Accepted))
+        {
+            State = LifecycleOperationState.AssemblingPackage;
+            Revision++;
+        }
+    }
+
+    public void RecordPackage(string packageSha256, string packageReference, DateTimeOffset completedAt)
+    {
+        DemandExportState(LifecycleOperationState.AssemblingPackage);
+        PackageSha256 = RequireSha256(packageSha256, nameof(packageSha256));
+        PackageReference = RequireStable(packageReference, nameof(packageReference), 500);
+        if (completedAt == default || completedAt.Offset != TimeSpan.Zero || completedAt < SnapshotAt)
+            throw new ArgumentException("Completion must be UTC and not precede SnapshotAt.", nameof(completedAt));
+        CompletedAt = completedAt;
+        State = LifecycleOperationState.ReleasingFence;
+        foreach (var participant in participants.Where(IsFenceParticipant)) participant.RequestRelease();
+        Revision++;
+    }
+
+    public void RecordFenceReleased(string participantId)
+    {
+        DemandExportState(LifecycleOperationState.ReleasingFence);
+        FindExportParticipant(participantId, "organisation.export-fence").Release();
+        if (participants.Where(IsFenceParticipant).All(x => !x.Mandatory || x.State == LifecycleParticipantState.Released))
+        {
+            State = LifecycleOperationState.Completed;
+            IsActive = false;
+            Revision++;
+        }
+    }
+
+    public void Fail(string failureCode)
+    {
+        if (!IsActive || State is LifecycleOperationState.Completed or LifecycleOperationState.Failed)
+            throw new InvalidOperationException("Only an active lifecycle operation can fail.");
+        FailureCode = RequireStable(failureCode, nameof(failureCode), 200);
+        State = LifecycleOperationState.Failed;
+        IsActive = false;
+        Revision++;
+    }
+
+    private LifecycleParticipant FindExportParticipant(string participantId, string capability) =>
+        participants.SingleOrDefault(x => x.Family == LifecycleOperationFamily.Export
+            && x.ParticipantId == participantId && x.CapabilityKey == capability)
+        ?? throw new InvalidOperationException("Participant is not part of the frozen admitted export inventory.");
+
+    private LifecycleParticipant FindExportParticipant(string participantId, Func<string, bool> capability) =>
+        participants.SingleOrDefault(x => x.Family == LifecycleOperationFamily.Export
+            && x.ParticipantId == participantId && capability(x.CapabilityKey))
+        ?? throw new InvalidOperationException("Participant is not part of the frozen admitted export inventory.");
+
+    private static bool IsFenceParticipant(LifecycleParticipant participant) =>
+        participant.Family == LifecycleOperationFamily.Export
+        && participant.CapabilityKey == "organisation.export-fence";
+
+    private static bool IsFragmentParticipant(LifecycleParticipant participant) =>
+        participant.Family == LifecycleOperationFamily.Export
+        && IsFragmentCapability(participant.CapabilityKey);
+
+    private static bool IsFragmentCapability(string capability) =>
+        capability.EndsWith(".export-fragment", StringComparison.Ordinal);
+
+    private void DemandExportState(LifecycleOperationState expected)
+    {
+        if (Family != LifecycleOperationFamily.Export || State != expected || !IsActive)
+            throw new InvalidOperationException($"Export operation must be active in {expected} state.");
+    }
+
+    private static string RequireSha256(string value, string name)
+    {
+        if (value?.Length != 64 || value.Any(character => character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+            throw new ArgumentException("Value must be a lowercase SHA-256 hash.", name);
+        return value;
+    }
+
+    private static string RequireStable(string value, string name, int max)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > max || value != value.Trim())
+            throw new ArgumentException("Value must be a stable non-empty identifier.", name);
+        return value;
+    }
 }
 
 public sealed class LifecycleParticipant : ITenantOwnedEntity
@@ -62,4 +189,34 @@ public sealed class LifecycleParticipant : ITenantOwnedEntity
     public int ContractVersion { get; private set; }
     public bool Mandatory { get; private set; }
     public LifecycleParticipantState State { get; private set; } = LifecycleParticipantState.Pending;
+
+    internal void Request()
+    {
+        if (State != LifecycleParticipantState.Pending)
+            throw new InvalidOperationException("Only a pending participant can be requested.");
+        State = LifecycleParticipantState.Requested;
+    }
+
+    internal void Accept()
+    {
+        if (State == LifecycleParticipantState.Accepted) return;
+        if (State != LifecycleParticipantState.Requested)
+            throw new InvalidOperationException("Only a requested participant can be accepted.");
+        State = LifecycleParticipantState.Accepted;
+    }
+
+    internal void RequestRelease()
+    {
+        if (State != LifecycleParticipantState.Accepted)
+            throw new InvalidOperationException("Only an accepted fence can be released.");
+        State = LifecycleParticipantState.ReleaseRequested;
+    }
+
+    internal void Release()
+    {
+        if (State == LifecycleParticipantState.Released) return;
+        if (State != LifecycleParticipantState.ReleaseRequested)
+            throw new InvalidOperationException("Only a requested release can be accepted.");
+        State = LifecycleParticipantState.Released;
+    }
 }

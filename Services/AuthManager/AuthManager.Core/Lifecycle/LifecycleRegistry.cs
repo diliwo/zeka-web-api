@@ -5,8 +5,27 @@ using System.Text.Json;
 namespace AuthManager.Core.Lifecycle;
 
 public enum LifecycleOperationFamily { Export, Termination }
-public enum LifecycleOperationState { Requested, Pending }
-public enum LifecycleParticipantState { Pending }
+public enum LifecycleOperationState
+{
+    Requested,
+    Pending,
+    EnteringFence,
+    StagingFragments,
+    AssemblingPackage,
+    ReleasingFence,
+    Completed,
+    Failed
+}
+
+public enum LifecycleParticipantState
+{
+    Pending,
+    Requested,
+    Accepted,
+    ReleaseRequested,
+    Released,
+    Failed
+}
 
 public sealed record LifecycleCapability(LifecycleOperationFamily Family, string Key, string Scope);
 public sealed record LifecycleBinding(LifecycleCapability Capability, string ParticipantId,

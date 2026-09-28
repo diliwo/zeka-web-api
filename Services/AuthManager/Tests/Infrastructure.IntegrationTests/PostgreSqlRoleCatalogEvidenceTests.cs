@@ -159,7 +159,8 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
                 JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
                 WHERE n.nspname=ANY(ARRAY['public','zeka'])
                   AND pg_catalog.has_function_privilege('zeka_auth_runtime', p.oid, 'EXECUTE')
-              ) = ARRAY['zeka.current_organisation_id']
+              ) = ARRAY['zeka.current_organisation_id',
+                        'zeka.reject_auth_membership_write_during_export_fence']
             """));
 
         await ExecuteAdministratorAsync("""
@@ -241,7 +242,17 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
             ('OrganisationLifecycleParticipants','SELECT'),
             ('OrganisationLifecycleParticipants','INSERT'),
             ('MembershipPermissionGrants','SELECT'),
-            ('MembershipPermissionGrants','INSERT')
+            ('MembershipPermissionGrants','INSERT'),
+            ('LifecycleCoordinatorLeases','SELECT'),
+            ('LifecycleCoordinatorLeases','INSERT'),
+            ('LifecycleExportFenceReceipts','SELECT'),
+            ('LifecycleExportFenceReceipts','INSERT'),
+            ('LifecycleExportFragments','SELECT'),
+            ('LifecycleExportFragments','INSERT'),
+            ('LifecycleExportPackages','SELECT'),
+            ('LifecycleExportPackages','INSERT'),
+            ('LifecycleInboxReceipts','SELECT'),
+            ('LifecycleInboxReceipts','INSERT')
         ), actual(table_name, privilege) AS (
           SELECT c.relname, privilege_names.privilege
           FROM pg_catalog.pg_class c
