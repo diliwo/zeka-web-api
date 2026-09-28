@@ -128,7 +128,7 @@
     "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b",
     "zeka.reject_writes_during_closure_fence()": "a858d599981247d205fef484ff854cafe8c44d72c8fa29646a2c4084fdf2037a",
     "zeka.reject_writes_during_export_fence()": "feeed4b4ebdd58893964050a375614439736dde2e3429a676a867a147d1f4382",
-    "zeka.release_organisation_closure_fence(p_organisation_id uuid, p_operation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_release_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)": "2c242b867c5138132aca419752231e2e3c81d66c1e7d16427b5c5bbc14406c94"
+    "zeka.release_organisation_closure_fence(p_organisation_id uuid, p_operation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_release_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)": "85e9d22cf15b9709d2c6d588c2f54bbdced8ee4332483e505dd124e7c1ff2082"
   },
   "defaultPrivileges": [
     { "owner": "zeka_client_owner", "objectType": "FUNCTION", "scope": "GLOBAL", "grants": [] },

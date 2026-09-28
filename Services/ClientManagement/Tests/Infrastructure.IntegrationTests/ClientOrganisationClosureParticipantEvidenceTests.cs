@@ -103,6 +103,34 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
                 "UPDATE public.\"Clients\" SET \"ReferenceNumber\" = \"ReferenceNumber\""))).MessageText);
 
         var release = new ReleaseOrganisationClosureFenceV1(releaseHeader, completed.FenceToken);
+        var recoveryCapability = new NpgsqlClientClosureRecoveryCapability(
+            database.RecoveryConnectionString);
+        await RuntimeSql(organisation, $$"""
+            INSERT INTO public."OrganisationClosureInbox"
+              ("MessageId","OperationId","OperationRevision","RequestHash","ResponseType",
+               "ResponseJson","ResultMessageId","CompletedAt","CreatedBy","Created",
+               "LastModifiedBy","LastModified","Softdelete","OrganisationId")
+            VALUES ('{{completed.Header.MessageId:D}}'::uuid, '{{operation:D}}'::uuid,
+              {{release.Header.OperationRevision}}, repeat('0',64), 'ConflictingRecoveryEvidence',
+              '{}'::jsonb, '{{release.Header.MessageId:D}}'::uuid, now(),
+              'provider-real-test', now() at time zone 'UTC', 'provider-real-test', NULL, false,
+              '{{organisation:D}}'::uuid)
+            """);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => recoveryCapability.ReleaseAsync(
+            release, DateTimeOffset.UtcNow));
+        Assert.Equal("0|0|0|0", await ClosureRecoveryState(organisation, release));
+        await database.ExecuteAdministratorAsync($$"""
+            DELETE FROM public."OrganisationClosureInbox"
+            WHERE "MessageId"='{{completed.Header.MessageId:D}}'::uuid
+              AND "OrganisationId"='{{organisation:D}}'::uuid
+              AND "ResponseType"='ConflictingRecoveryEvidence'
+            """);
+        await recoveryCapability.ReleaseAsync(release, DateTimeOffset.UtcNow);
+        var hostileTimezoneRecovery = new NpgsqlClientClosureRecoveryCapability(
+            new NpgsqlConnectionStringBuilder(database.RecoveryConnectionString)
+            { Timezone = "Pacific/Kiritimati" }.ConnectionString);
+        await hostileTimezoneRecovery.ReleaseAsync(release, DateTimeOffset.UtcNow);
+        Assert.Equal("1|1|0|0", await ClosureRecoveryState(organisation, release));
         var released = await Invoke(providerA, organisation,
             participant => participant.ReleaseFenceAsync(release));
         var releasedReplay = await Invoke(providerB, organisation,
@@ -486,6 +514,7 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
         await SetContext(connection, transaction, organisation);
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         await command.ExecuteNonQueryAsync();
+        await transaction.CommitAsync();
     }
 
     private async Task RuntimeReleaseFunction(
@@ -515,6 +544,38 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
         command.Parameters.AddWithValue("correlation_id", header.CorrelationId);
         command.Parameters.AddWithValue("released_at", releasedAt);
         await command.ExecuteScalarAsync();
+    }
+
+    private async Task<string> ClosureRecoveryState(Guid organisation,
+        ReleaseOrganisationClosureFenceV1 release)
+    {
+        await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetContext(connection, transaction, organisation);
+        await using var command = new NpgsqlCommand("""
+            SELECT
+              (SELECT count(*) FROM public."OrganisationClosureFences"
+               WHERE "OperationId"=@operation AND "ReleasedAt" IS NOT NULL)::text || '|'
+              || (SELECT count(*) FROM public."OrganisationClosureInbox"
+                  WHERE "OperationId"=@operation
+                    AND "ResponseType"=
+                      'Zeka.Lifecycle.Contracts.OrganisationClosureRecoveryAuthorizedV1')::text || '|'
+              || (SELECT count(*) FROM public."OrganisationClosureInbox"
+                  WHERE "MessageId"=@release_message)::text || '|'
+              || (SELECT count(*) FROM public."OrganisationClosureFences" fence
+                  WHERE fence."OperationId"=@operation AND fence."ReleasedAt" IS NOT NULL
+                    AND NOT EXISTS (
+                      SELECT 1 FROM public."OrganisationClosureInbox" evidence
+                      WHERE evidence."OperationId"=fence."OperationId"
+                        AND evidence."ResponseType"=
+                          'Zeka.Lifecycle.Contracts.OrganisationClosureRecoveryAuthorizedV1'))::text
+            """, connection, transaction);
+        command.Parameters.AddWithValue("operation", release.Header.OperationId);
+        command.Parameters.AddWithValue("release_message", release.Header.MessageId);
+        var result = Assert.IsType<string>(await command.ExecuteScalarAsync());
+        await transaction.CommitAsync();
+        return result;
     }
 
     private static async Task<T> ReadReceipt<T>(

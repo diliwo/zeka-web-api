@@ -7,6 +7,7 @@ using AdminAreaManagement.Application.Teams.Commands.UpsertTeam;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Core.Interfaces;
 using AdminAreaManagement.Infrastructure;
+using AdminAreaManagement.Infrastructure.Closures;
 using AdminAreaManagement.Infrastructure.Messaging;
 using AdminAreaManagement.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -96,6 +97,32 @@ public sealed class AdminAreaClosureParticipantEvidenceTests(PostgreSqlRlsRuntim
             "UPDATE public.\"Teams\" SET \"Name\"=\"Name\" WHERE \"OrganisationId\"=@organisation");
         var releaseDocuments = new ReleaseOrganisationClosureFenceV1(
             RecoveryMessage(documents, documentReceipt.Header), documentReceipt.FenceToken);
+        var recoveryCapability = new NpgsqlAdminAreaClosureRecoveryCapability(
+            database.RecoveryConnectionString);
+        await ExecuteRuntimeAsync(database.SeedOrganisation, $$"""
+            INSERT INTO public."AdminAreaClosureInbox"
+              ("MessageId","OrganisationId","OperationId","ParticipantId","CommandType","RequestHash","ProcessedAt")
+            VALUES ('{{documentReceipt.Header.MessageId:D}}'::uuid, @organisation,
+              '{{documents.OperationId:D}}'::uuid, '{{documents.ParticipantId}}',
+              'conflicting-recovery-evidence', repeat('0',64), now())
+            """);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => recoveryCapability.ReleaseAsync(
+            releaseDocuments, DateTimeOffset.UtcNow));
+        Assert.Equal("0|0|0|0", await ClosureRecoveryStateAsync(
+            database.SeedOrganisation, releaseDocuments));
+        await ExecuteAdministratorAsync($$"""
+            DELETE FROM public."AdminAreaClosureInbox"
+            WHERE "MessageId"='{{documentReceipt.Header.MessageId:D}}'::uuid
+              AND "OrganisationId"='{{database.SeedOrganisation:D}}'::uuid
+              AND "CommandType"='conflicting-recovery-evidence'
+            """);
+        await recoveryCapability.ReleaseAsync(releaseDocuments, DateTimeOffset.UtcNow);
+        var hostileTimezoneRecovery = new NpgsqlAdminAreaClosureRecoveryCapability(
+            new NpgsqlConnectionStringBuilder(database.RecoveryConnectionString)
+            { Timezone = "Pacific/Kiritimati" }.ConnectionString);
+        await hostileTimezoneRecovery.ReleaseAsync(releaseDocuments, DateTimeOffset.UtcNow);
+        Assert.Equal("1|1|0|0", await ClosureRecoveryStateAsync(
+            database.SeedOrganisation, releaseDocuments));
         var releasedDocuments = await participant.ReleaseFenceAsync(releaseDocuments);
         Assert.Equal(documentReceipt.FenceToken, releasedDocuments.FenceToken);
         Assert.NotEqual(releaseDocuments.Header.MessageId, releasedDocuments.Header.MessageId);
@@ -716,6 +743,44 @@ public sealed class AdminAreaClosureParticipantEvidenceTests(PostgreSqlRlsRuntim
         return (long)(await command.ExecuteScalarAsync())!;
     }
 
+    private async Task<string> ClosureRecoveryStateAsync(Guid organisation,
+        ReleaseOrganisationClosureFenceV1 release)
+    {
+        await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var tenant = new NpgsqlCommand(
+            "select pg_catalog.set_config('zeka.organisation_id', @organisation, true)", connection, transaction))
+        {
+            tenant.Parameters.AddWithValue("organisation", organisation.ToString("D"));
+            await tenant.ExecuteScalarAsync();
+        }
+        await using var command = new NpgsqlCommand("""
+            SELECT
+              (SELECT count(*) FROM public."AdminAreaClosureFences"
+               WHERE "OperationId"=@operation AND "ParticipantId"=@participant
+                 AND "ReleasedAt" IS NOT NULL)::text || '|'
+              || (SELECT count(*) FROM public."AdminAreaClosureInbox"
+                  WHERE "OperationId"=@operation AND "ParticipantId"=@participant
+                    AND "CommandType"='recovery-authorized')::text || '|'
+              || (SELECT count(*) FROM public."AdminAreaClosureInbox"
+                  WHERE "MessageId"=@release_message)::text || '|'
+              || (SELECT count(*) FROM public."AdminAreaClosureFences" fence
+                  WHERE fence."OperationId"=@operation AND fence."ParticipantId"=@participant
+                    AND fence."ReleasedAt" IS NOT NULL AND NOT EXISTS (
+                      SELECT 1 FROM public."AdminAreaClosureInbox" evidence
+                      WHERE evidence."OperationId"=fence."OperationId"
+                        AND evidence."ParticipantId"=fence."ParticipantId"
+                        AND evidence."CommandType"='recovery-authorized'))::text
+            """, connection, transaction);
+        command.Parameters.AddWithValue("operation", release.Header.OperationId);
+        command.Parameters.AddWithValue("participant", release.Header.ParticipantId);
+        command.Parameters.AddWithValue("release_message", release.Header.MessageId);
+        var result = Assert.IsType<string>(await command.ExecuteScalarAsync());
+        await transaction.CommitAsync();
+        return result;
+    }
+
     private async Task<string> DocumentInvariantAsync(int documentId)
     {
         await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
@@ -728,6 +793,14 @@ public sealed class AdminAreaClosureParticipantEvidenceTests(PostgreSqlRlsRuntim
             """, connection);
         command.Parameters.AddWithValue("document", documentId);
         return Assert.IsType<string>(await command.ExecuteScalarAsync());
+    }
+
+    private async Task ExecuteAdministratorAsync(string sql)
+    {
+        await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
     }
 
     private async Task<long> ClosureRecordCountAsync(Guid operationId)

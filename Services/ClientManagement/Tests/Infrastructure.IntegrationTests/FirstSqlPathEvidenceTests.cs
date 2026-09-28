@@ -258,7 +258,7 @@ public sealed class PostgreSqlClientRuntimeDatabase : IAsyncLifetime
     private string Connection(string username, string password) => new NpgsqlConnectionStringBuilder(postgres.GetConnectionString())
     { Username = username, Password = password }.ConnectionString;
 
-    private async Task ExecuteAdministratorAsync(string sql)
+    public async Task ExecuteAdministratorAsync(string sql)
     {
         await using var connection = new NpgsqlConnection(postgres.GetConnectionString());
         await connection.OpenAsync();

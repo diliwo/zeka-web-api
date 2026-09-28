@@ -339,10 +339,47 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                 causationId: entered.Header.MessageId), entered.FenceToken);
         var recoveryCapability = new NpgsqlAuthClosureRecoveryCapability(
             environment.RecoveryConnection);
+        Assert.Null(await RuntimeCommandError(environment.RuntimeConnection, OrganisationA, $"""
+            INSERT INTO public."AuthClosureParticipantInbox"
+              ("MessageId","OperationId","OrganisationId","MessageType","PayloadSha256","ReceivedAt")
+            VALUES ('{entered.Header.MessageId:D}'::uuid, '{operation.Id:D}'::uuid,
+              '{OrganisationA:D}'::uuid, 'ConflictingRecoveryEvidence', repeat('0',64), now())
+            """));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => recoveryCapability.ReleaseAsync(
+            releaseCommand, LifecycleContractTimeV1.Normalize(clock.GetUtcNow())));
+        Assert.Equal("1|0", await RuntimeScalar(environment.RuntimeConnection, OrganisationA, $"""
+            SELECT "State"::text || '|' || ("ReleasedAt" IS NOT NULL)::int::text
+            FROM public."AuthClosureParticipantExecutions"
+            WHERE "OperationId"='{operation.Id:D}'::uuid
+            """));
+        await Execute(environment.AdministratorConnection, $"""
+            DELETE FROM public."AuthClosureParticipantInbox"
+            WHERE "MessageId"='{entered.Header.MessageId:D}'::uuid
+              AND "MessageType"='ConflictingRecoveryEvidence'
+            """);
         await recoveryCapability.ReleaseAsync(releaseCommand,
             LifecycleContractTimeV1.Normalize(clock.GetUtcNow()));
-        await recoveryCapability.ReleaseAsync(releaseCommand,
+        var hostileTimezoneRecovery = new NpgsqlAuthClosureRecoveryCapability(
+            new NpgsqlConnectionStringBuilder(environment.RecoveryConnection)
+            { Timezone = "Pacific/Kiritimati" }.ConnectionString);
+        await hostileTimezoneRecovery.ReleaseAsync(releaseCommand,
             LifecycleContractTimeV1.Normalize(clock.GetUtcNow()));
+        Assert.Equal("2|1|0|0", await RuntimeScalar(environment.RuntimeConnection, OrganisationA, $"""
+            SELECT execution."State"::text || '|'
+              || (SELECT count(*) FROM public."AuthClosureParticipantInbox"
+                  WHERE "MessageType"='AuthClosureRecoveryAuthorizedV1')::text || '|'
+              || (SELECT count(*) FROM public."AuthClosureParticipantInbox"
+                  WHERE "MessageId"='{releaseCommand.Header.MessageId:D}'::uuid)::text || '|'
+              || (SELECT count(*) FROM public."AuthClosureParticipantExecutions" released
+                  WHERE released."State"=2 AND released."ReleasedAt" IS NOT NULL
+                    AND NOT EXISTS (
+                      SELECT 1 FROM public."AuthClosureParticipantInbox" evidence
+                      WHERE evidence."OperationId"=released."OperationId"
+                        AND evidence."OrganisationId"=released."OrganisationId"
+                        AND evidence."MessageType"='AuthClosureRecoveryAuthorizedV1'))::text
+            FROM public."AuthClosureParticipantExecutions" execution
+            WHERE execution."OperationId"='{operation.Id:D}'::uuid
+            """));
         var released = await authAfterRestart.ReleaseAsync(releaseCommand);
         Assert.Equal(PostgresErrorCodes.ObjectNotInPrerequisiteState,
             await RuntimeMembershipUpdate(environment.RuntimeConnection, OrganisationA,

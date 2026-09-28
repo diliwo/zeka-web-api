@@ -115,6 +115,7 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                         identity_bytes bytea;
                         expected_message uuid;
                         effective_release timestamp with time zone;
+                        evidence_hash text;
                 BEGIN
                   IF zeka.current_organisation_id() <> p_organisation_id THEN
                     RAISE EXCEPTION USING ERRCODE='42501', MESSAGE='Closure release tenant mismatch.';
@@ -164,6 +165,30 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                   UPDATE public."AdminAreaClosureFences" SET "ReleasedAt"=effective_release
                   WHERE "OperationId"=p_operation_id AND "OrganisationId"=p_organisation_id
                     AND "ParticipantId"=p_participant_id AND "ReleasedAt" IS NULL;
+                  evidence_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+                    'adminarea-closure-recovery-v1' || chr(10) || p_operation_id::text || chr(10)
+                    || p_organisation_id::text || chr(10) || p_participant_id || chr(10)
+                    || p_operation_revision::text || chr(10) || p_fence_token || chr(10)
+                    || p_contract_version::text || chr(10) || p_message_id::text || chr(10)
+                    || p_causation_id::text || chr(10) || p_correlation_id::text || chr(10)
+                    || pg_catalog.to_char(effective_release AT TIME ZONE 'UTC',
+                         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'UTF8')), 'hex');
+                  INSERT INTO public."AdminAreaClosureInbox"
+                    ("MessageId", "OrganisationId", "OperationId", "ParticipantId",
+                     "CommandType", "RequestHash", "ProcessedAt")
+                  VALUES
+                    (p_causation_id, p_organisation_id, p_operation_id, p_participant_id,
+                     'recovery-authorized', evidence_hash, effective_release)
+                  ON CONFLICT ("MessageId", "OrganisationId") DO NOTHING;
+                  IF NOT EXISTS (
+                    SELECT 1 FROM public."AdminAreaClosureInbox"
+                    WHERE "MessageId"=p_causation_id AND "OrganisationId"=p_organisation_id
+                      AND "OperationId"=p_operation_id AND "ParticipantId"=p_participant_id
+                      AND "CommandType"='recovery-authorized'
+                      AND "RequestHash"=evidence_hash AND "ProcessedAt"=effective_release
+                  ) THEN
+                    RAISE EXCEPTION USING ERRCODE='55000', MESSAGE='Closure recovery evidence conflicts.';
+                  END IF;
                   RETURN effective_release;
                 END
                 $release_function$;
@@ -193,7 +218,7 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     ALTER TABLE "{{table}}" OWNER TO zeka_adminarea_owner;
                     ALTER TABLE "{{table}}" ENABLE ROW LEVEL SECURITY;
                     ALTER TABLE "{{table}}" FORCE ROW LEVEL SECURITY;
-                    CREATE POLICY {{policy}} ON "{{table}}" FOR ALL TO zeka_adminarea_runtime{{(table is "AdminAreaClosureFences" or "AdminAreaClosureOutbox" ? ", zeka_adminarea_owner" : string.Empty)}}
+                    CREATE POLICY {{policy}} ON "{{table}}" FOR ALL TO zeka_adminarea_runtime, zeka_adminarea_owner
                       USING ("OrganisationId" = zeka.current_organisation_id())
                       WITH CHECK ("OrganisationId" = zeka.current_organisation_id());
                     REVOKE ALL ON TABLE "{{table}}" FROM PUBLIC;

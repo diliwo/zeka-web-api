@@ -545,7 +545,7 @@
     },
     {
       "functionIdentity": "zeka.release_auth_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_revision bigint, p_fence_token text, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)",
-      "definitionSha256": "75c9d0685b98a45865aad24ab6044c3b9749ad0d90e77ad22476c359d1ccb758"
+      "definitionSha256": "06308fd4955b27116016155097b3870780c31d6b4f4f27c0cdcd7cebdc28d7a9"
     }
   ],
   "securityDefinerFunctions": [
@@ -727,6 +727,15 @@
       "object": {
         "schema": "public",
         "name": "AuthClosureParticipantExecutions"
+      },
+      "roles": [
+        "zeka_auth_owner"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthClosureParticipantInbox"
       },
       "roles": [
         "zeka_auth_owner"

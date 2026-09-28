@@ -160,6 +160,8 @@ namespace ClientManagement.Infrastructure.Migrations
                   persisted_fence_token text;
                   identity_bytes bytea;
                   expected_message_id uuid;
+                  effective_release timestamp with time zone;
+                  evidence_hash text;
                 BEGIN
                   IF p_organisation_id IS NULL
                     OR p_organisation_id <> zeka.current_organisation_id()
@@ -237,19 +239,59 @@ namespace ClientManagement.Infrastructure.Migrations
                       MESSAGE = 'organisation_closure_recovery_identity_conflict';
                   END IF;
 
-                  IF persisted_released_at IS NOT NULL THEN
-                    RETURN true;
+                  effective_release := coalesce(
+                    persisted_released_at, greatest(p_released_at, persisted_entered_at));
+                  IF persisted_released_at IS NULL THEN
+                    UPDATE public."OrganisationClosureFences"
+                    SET "ReleasedAt" = effective_release
+                    WHERE "OrganisationId" = p_organisation_id
+                      AND "OperationId" = p_operation_id
+                      AND "FenceToken" = p_fence_token
+                      AND "ReleasedAt" IS NULL;
+                    IF NOT FOUND THEN
+                      RAISE EXCEPTION USING ERRCODE = 'P0001',
+                        MESSAGE = 'organisation_closure_fence_release_conflict';
+                    END IF;
                   END IF;
-
-                  UPDATE public."OrganisationClosureFences"
-                  SET "ReleasedAt" = greatest(p_released_at, persisted_entered_at)
-                  WHERE "OrganisationId" = p_organisation_id
-                    AND "OperationId" = p_operation_id
-                    AND "FenceToken" = p_fence_token
-                    AND "ReleasedAt" IS NULL;
-                  IF NOT FOUND THEN
-                    RAISE EXCEPTION USING ERRCODE = 'P0001',
-                      MESSAGE = 'organisation_closure_fence_release_conflict';
+                  evidence_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+                    'client-closure-recovery-v1' || chr(10) || p_operation_id::text || chr(10)
+                    || p_organisation_id::text || chr(10) || p_participant_id || chr(10)
+                    || p_operation_revision::text || chr(10) || p_fence_token || chr(10)
+                    || p_contract_version::text || chr(10) || p_release_message_id::text || chr(10)
+                    || p_causation_id::text || chr(10) || p_correlation_id::text || chr(10)
+                    || pg_catalog.to_char(effective_release AT TIME ZONE 'UTC',
+                         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'UTF8')), 'hex');
+                  INSERT INTO public."OrganisationClosureInbox"
+                    ("MessageId", "OperationId", "OperationRevision", "RequestHash",
+                     "ResponseType", "ResponseJson", "ResultMessageId", "CompletedAt",
+                     "CreatedBy", "Created", "LastModifiedBy", "LastModified", "Softdelete",
+                     "OrganisationId")
+                  VALUES
+                    (p_causation_id, p_operation_id, p_operation_revision, evidence_hash,
+                     'Zeka.Lifecycle.Contracts.OrganisationClosureRecoveryAuthorizedV1',
+                     pg_catalog.jsonb_build_object(
+                       'operationId', p_operation_id, 'organisationId', p_organisation_id,
+                       'participantId', p_participant_id, 'operationRevision', p_operation_revision,
+                       'releaseMessageId', p_release_message_id, 'causationId', p_causation_id,
+                       'correlationId', p_correlation_id, 'fenceToken', p_fence_token,
+                       'releasedAt', effective_release, 'evidenceHash', evidence_hash),
+                     p_release_message_id, effective_release, 'lifecycle-recovery',
+                     effective_release AT TIME ZONE 'UTC', 'lifecycle-recovery', NULL, false,
+                     p_organisation_id)
+                  ON CONFLICT ("OrganisationId", "MessageId") DO NOTHING;
+                  IF NOT EXISTS (
+                    SELECT 1 FROM public."OrganisationClosureInbox"
+                    WHERE "OrganisationId"=p_organisation_id AND "MessageId"=p_causation_id
+                      AND "OperationId"=p_operation_id
+                      AND "OperationRevision"=p_operation_revision
+                      AND "RequestHash"=evidence_hash
+                      AND "ResponseType"=
+                        'Zeka.Lifecycle.Contracts.OrganisationClosureRecoveryAuthorizedV1'
+                      AND "ResultMessageId"=p_release_message_id
+                      AND "CompletedAt"=effective_release
+                  ) THEN
+                    RAISE EXCEPTION USING ERRCODE='P0001',
+                      MESSAGE='organisation_closure_recovery_evidence_conflict';
                   END IF;
                   RETURN true;
                 END $function$;

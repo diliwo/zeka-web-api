@@ -166,6 +166,8 @@ namespace AuthManager.Infrastructure.Migrations
             migrationBuilder.Sql("""
                 ALTER POLICY rls_authclosureparticipantexecutions_organisation
                   ON "AuthClosureParticipantExecutions" TO zeka_auth_runtime, zeka_auth_owner;
+                ALTER POLICY rls_authclosureparticipantinbox_organisation
+                  ON "AuthClosureParticipantInbox" TO zeka_auth_runtime, zeka_auth_owner;
                 ALTER POLICY rls_authclosureparticipantoutbox_organisation
                   ON "AuthClosureParticipantOutbox" TO zeka_auth_runtime, zeka_auth_owner;
                 GRANT UPDATE ("FailureBoundaryDisposition", "FailureCode", "FailureRetryable", "FailedAt", "State")
@@ -247,6 +249,8 @@ namespace AuthManager.Infrastructure.Migrations
                 SECURITY DEFINER
                 SET search_path = pg_catalog
                 AS $function$
+                DECLARE effective_release timestamptz;
+                        evidence_hash text;
                 BEGIN
                   IF p_released_at IS NULL THEN
                     RAISE EXCEPTION USING ERRCODE='22004', MESSAGE='closure release timestamp is required';
@@ -281,10 +285,37 @@ namespace AuthManager.Infrastructure.Migrations
                      SET "State"=2, "ReleasedAt"=p_released_at
                    WHERE "OperationId"=p_operation_id AND "OrganisationId"=p_organisation_id
                      AND "State"=1 AND "ReleasedAt" IS NULL;
-                  RETURN FOUND OR EXISTS (
-                    SELECT 1 FROM public."AuthClosureParticipantExecutions"
-                    WHERE "OperationId"=p_operation_id AND "OrganisationId"=p_organisation_id
-                      AND "State"=2 AND "ReleasedAt" IS NOT NULL);
+                  SELECT "ReleasedAt" INTO effective_release
+                  FROM public."AuthClosureParticipantExecutions"
+                  WHERE "OperationId"=p_operation_id AND "OrganisationId"=p_organisation_id
+                    AND "State"=2 AND "ReleasedAt" IS NOT NULL;
+                  IF effective_release IS NULL THEN
+                    RAISE EXCEPTION USING ERRCODE='55000', MESSAGE='closure release did not persist';
+                  END IF;
+                  evidence_hash := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+                    'auth-closure-recovery-v1' || chr(10) || p_operation_id::text || chr(10)
+                    || p_organisation_id::text || chr(10) || p_revision::text || chr(10)
+                    || p_fence_token || chr(10) || p_causation_id::text || chr(10)
+                    || p_correlation_id::text || chr(10)
+                    || pg_catalog.to_char(effective_release AT TIME ZONE 'UTC',
+                         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'UTF8')), 'hex');
+                  INSERT INTO public."AuthClosureParticipantInbox"
+                    ("MessageId", "OperationId", "OrganisationId", "MessageType",
+                     "PayloadSha256", "ReceivedAt")
+                  VALUES
+                    (p_causation_id, p_operation_id, p_organisation_id,
+                     'AuthClosureRecoveryAuthorizedV1', evidence_hash, effective_release)
+                  ON CONFLICT ("MessageId") DO NOTHING;
+                  IF NOT EXISTS (
+                    SELECT 1 FROM public."AuthClosureParticipantInbox"
+                    WHERE "MessageId"=p_causation_id AND "OperationId"=p_operation_id
+                      AND "OrganisationId"=p_organisation_id
+                      AND "MessageType"='AuthClosureRecoveryAuthorizedV1'
+                      AND "PayloadSha256"=evidence_hash AND "ReceivedAt"=effective_release
+                  ) THEN
+                    RAISE EXCEPTION USING ERRCODE='55000', MESSAGE='closure recovery evidence conflicts';
+                  END IF;
+                  RETURN true;
                 END
                 $function$;
                 ALTER FUNCTION zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamptz)
