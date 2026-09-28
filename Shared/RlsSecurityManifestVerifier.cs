@@ -46,7 +46,9 @@ public sealed record RlsSecurityManifest(int SchemaVersion, string Service, stri
     ColumnPrivilegeState[]? ColumnPrivileges = null,
     RuntimeFunctionDefinitionState[]? RuntimeFunctionDefinitions = null,
     AdditionalPolicyRoleState[]? AdditionalPolicyRoles = null,
-    SecurityDefinerFunctionState[]? SecurityDefinerFunctions = null);
+    SecurityDefinerFunctionState[]? SecurityDefinerFunctions = null,
+    string? RecoveryRole = null,
+    string[]? RecoveryFunctions = null);
 
 /// <summary>Deployment-only bidirectional comparison of the versioned model and effective PostgreSQL state.</summary>
 public static class RlsSecurityManifestVerifier
@@ -206,7 +208,8 @@ public static class RlsSecurityManifestVerifier
     private static async Task VerifyParameterPrivileges(DbConnection connection, RlsSecurityManifest manifest,
         CancellationToken cancellationToken)
     {
-        var managed = new[] { manifest.OwnerRole, manifest.MigratorRole, manifest.RuntimeRole };
+        var managed = new[] { manifest.OwnerRole, manifest.MigratorRole, manifest.RuntimeRole }
+            .Concat(manifest.RecoveryRole is null ? [] : [manifest.RecoveryRole]).ToArray();
         var rows = await RowsAsync(connection, """
             select lower(parameter.parname),coalesce(grantee.rolname,'PUBLIC'),
               acl.privilege_type,acl.is_grantable::text
@@ -224,7 +227,8 @@ public static class RlsSecurityManifestVerifier
     private static async Task VerifyRoles(DbConnection connection, RlsSecurityManifest manifest,
         CancellationToken cancellationToken)
     {
-        var managed = new[] { manifest.OwnerRole, manifest.MigratorRole, manifest.RuntimeRole };
+        var managed = new[] { manifest.OwnerRole, manifest.MigratorRole, manifest.RuntimeRole }
+            .Concat(manifest.RecoveryRole is null ? [] : [manifest.RecoveryRole]).ToArray();
         var roles = await RowsAsync(connection, """
             select rolname,rolcanlogin::text,rolsuper::text,rolbypassrls::text,rolcreatedb::text,
                    rolcreaterole::text,rolinherit::text,rolreplication::text,rolconnlimit::text,
@@ -235,6 +239,7 @@ public static class RlsSecurityManifestVerifier
         AssertRole(roles, manifest.OwnerRole, false);
         AssertRole(roles, manifest.MigratorRole, true);
         AssertRole(roles, manifest.RuntimeRole, true);
+        if (manifest.RecoveryRole is not null) AssertRole(roles, manifest.RecoveryRole, false);
         var memberships = await RowsAsync(connection, """
             select member.rolname,parent.rolname,m.admin_option::text,m.inherit_option::text,m.set_option::text
             from pg_catalog.pg_auth_members m join pg_catalog.pg_roles parent on parent.oid=m.roleid
@@ -357,7 +362,12 @@ public static class RlsSecurityManifestVerifier
             -- Owners have inherent privileges and their identity is verified separately.
             where d.datname=pg_catalog.current_database() and x.grantee<>d.datdba order by 1,2
             """, cancellationToken);
-        Equal(new[] { $"{manifest.MigratorRole}|CONNECT|false", $"{manifest.RuntimeRole}|CONNECT|false" },
+        var expectedDatabaseAcls = new[]
+            { $"{manifest.MigratorRole}|CONNECT|false", $"{manifest.RuntimeRole}|CONNECT|false" }
+            .Concat(manifest.RecoveryRole is null
+                ? []
+                : [$"{manifest.RecoveryRole}|CONNECT|false"]);
+        Equal(expectedDatabaseAcls,
             databaseAcls.Select(row => string.Join('|', row)), "database ACLs");
         var schemaAcls = await RowsAsync(connection, """
             select n.nspname,coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
@@ -371,6 +381,8 @@ public static class RlsSecurityManifestVerifier
         var expected = manifest.ManagedSchemas
             .Select(schema => $"{schema}|{manifest.RuntimeRole}|USAGE|false")
             .Append($"{migrationSchema}|{manifest.MigratorRole}|USAGE|false");
+        if (manifest.RecoveryRole is not null)
+            expected = expected.Append($"zeka|{manifest.RecoveryRole}|USAGE|false");
         Equal(expected, schemaAcls.Select(row => string.Join('|', row)), "schema ACLs");
     }
 
@@ -479,7 +491,9 @@ public static class RlsSecurityManifestVerifier
             left join pg_catalog.pg_roles grantee on grantee.oid=x.grantee
             where n.nspname=any(@schemas) and x.grantee<>p.proowner order by 1,2,3,4
             """, cancellationToken, ("schemas", manifest.ManagedSchemas));
-        Equal(manifest.RuntimeFunctions.Select(function => $"{function}|{manifest.RuntimeRole}|EXECUTE|false"),
+        var recoveryFunctions = (manifest.RecoveryFunctions ?? []).ToHashSet(StringComparer.Ordinal);
+        Equal(manifest.RuntimeFunctions.Select(function =>
+                $"{function}|{(recoveryFunctions.Contains(function) ? manifest.RecoveryRole : manifest.RuntimeRole)}|EXECUTE|false"),
             acls.Select(row => string.Join('|', row)), "function ACLs");
     }
 
@@ -597,7 +611,8 @@ public static class RlsSecurityManifestVerifier
 
     private static void ValidateParameterPrivilegeManifest(RlsSecurityManifest manifest)
     {
-        var managed = new[] { "PUBLIC", manifest.OwnerRole, manifest.MigratorRole, manifest.RuntimeRole };
+        var managed = new[] { "PUBLIC", manifest.OwnerRole, manifest.MigratorRole, manifest.RuntimeRole }
+            .Concat(manifest.RecoveryRole is null ? [] : [manifest.RecoveryRole]).ToArray();
         foreach (var grant in manifest.ParameterPrivileges)
         {
             if (string.IsNullOrWhiteSpace(grant.Parameter)
@@ -767,6 +782,18 @@ public static class RlsSecurityManifestVerifier
                 x.FunctionIdentity, StringComparer.Ordinal)))
             throw new InvalidOperationException(
                 "SECURITY DEFINER allowlist must be an exact runtime-function identity inventory.");
+        var recoveryFunctions = manifest.RecoveryFunctions ?? [];
+        if ((manifest.RecoveryRole is null) != (recoveryFunctions.Length == 0)
+            || recoveryFunctions.Any(string.IsNullOrWhiteSpace)
+            || !recoveryFunctions.SequenceEqual(
+                recoveryFunctions.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal),
+                StringComparer.Ordinal)
+            || recoveryFunctions.Any(function => !manifest.RuntimeFunctions.Contains(
+                function, StringComparer.Ordinal)
+                || !securityDefiners.Any(definition =>
+                    definition.FunctionIdentity.Equals(function, StringComparison.Ordinal))))
+            throw new InvalidOperationException(
+                "Recovery capability must name an exact SECURITY DEFINER function inventory.");
         ValidatePrivileges(manifest.TablePrivileges,
             manifest.ProtectedTables.Concat(manifest.ExcludedTables), Dml, "table");
         ValidatePrivileges(manifest.SequencePrivileges, manifest.Sequences,

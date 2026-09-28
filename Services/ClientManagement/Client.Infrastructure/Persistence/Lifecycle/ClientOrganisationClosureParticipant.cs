@@ -14,6 +14,7 @@ public sealed class ClientOrganisationClosureParticipant(
     ApplicationDbContext database,
     ITenantTransactionExecutor transactions,
     IClientClosureFixtureScope fixtureScope,
+    IClientClosureRecoveryCapability recoveryCapability,
     TimeProvider clock) : IClientOrganisationClosureParticipant
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -63,13 +64,15 @@ public sealed class ClientOrganisationClosureParticipant(
         }, cancellationToken);
     }
 
-    public Task<OrganisationClosureFenceReleasedV1> ReleaseFenceAsync(
+    public async Task<OrganisationClosureFenceReleasedV1> ReleaseFenceAsync(
         ReleaseOrganisationClosureFenceV1 command,
         CancellationToken cancellationToken = default)
     {
         ValidateHeader(command.Header, "release-fence");
         fixtureScope.Demand(command.Header.OrganisationId);
-        return ExecuteReplaySafeAsync(async token =>
+        await recoveryCapability.ReleaseAsync(command,
+            LifecycleContractTimeV1.Normalize(clock.GetUtcNow()), cancellationToken);
+        return await ExecuteReplaySafeAsync(async token =>
         {
             await AcquireBarrierLock(command.Header.OrganisationId, token);
             var replay = await Replay<OrganisationClosureFenceReleasedV1>(
@@ -103,11 +106,8 @@ public sealed class ClientOrganisationClosureParticipant(
                 || command.Header.CorrelationId != acceptedCompletion.Header.CorrelationId)
                 throw new InvalidOperationException("organisation_closure_recovery_identity_conflict");
 
-            var observedNow = clock.GetUtcNow();
-            var releasedAt = fence.ReleasedAt ?? LifecycleContractTimeV1.Normalize(
-                observedNow >= fence.EnteredAt ? observedNow : fence.EnteredAt);
-            if (fence.ReleasedAt is null)
-                await ReleaseFenceRow(command.Header, fence.FenceToken, releasedAt, token);
+            var releasedAt = fence.ReleasedAt
+                ?? throw new InvalidOperationException("organisation_closure_recovery_capability_failed");
             var response = new OrganisationClosureFenceReleasedV1(
                 ReplyHeader(command.Header, "release-completed"), fence.FenceToken, releasedAt);
             PersistReply(command.Header, command.PayloadHash, response, releasedAt);
@@ -193,43 +193,6 @@ public sealed class ClientOrganisationClosureParticipant(
             "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(@organisation_id, 0))";
         AddParameter(command, "organisation_id", organisationId.ToString("D"));
         await command.ExecuteScalarAsync(token);
-    }
-
-    private async Task ReleaseFenceRow(
-        LifecycleMessageHeaderV1 header,
-        string fenceToken,
-        DateTimeOffset releasedAt,
-        CancellationToken token)
-    {
-        var transaction = database.Database.CurrentTransaction?.GetDbTransaction()
-            ?? throw new InvalidOperationException("organisation_closure_transaction_missing");
-        await using var command = transaction.Connection!.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT zeka.release_organisation_closure_fence(
-              @organisation_id,
-              @operation_id,
-              @participant_id,
-              @operation_revision,
-              @fence_token,
-              @contract_version,
-              @release_message_id,
-              @causation_id,
-              @correlation_id,
-              @released_at)
-            """;
-        AddParameter(command, "released_at", releasedAt);
-        AddParameter(command, "organisation_id", header.OrganisationId);
-        AddParameter(command, "operation_id", header.OperationId);
-        AddParameter(command, "participant_id", header.ParticipantId);
-        AddParameter(command, "operation_revision", header.OperationRevision);
-        AddParameter(command, "fence_token", fenceToken);
-        AddParameter(command, "contract_version", header.ContractVersion);
-        AddParameter(command, "release_message_id", header.MessageId);
-        AddParameter(command, "causation_id", header.CausationId);
-        AddParameter(command, "correlation_id", header.CorrelationId);
-        if (await command.ExecuteScalarAsync(token) is not true)
-            throw new InvalidOperationException("organisation_closure_fence_release_conflict");
     }
 
     private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)

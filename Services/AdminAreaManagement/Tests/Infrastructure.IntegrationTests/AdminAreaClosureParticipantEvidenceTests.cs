@@ -27,8 +27,11 @@ namespace Infrastructure.IntegrationTests;
 [Trait("Issue", "46")]
 [Trait("Evidence", "Life02ProviderReal")]
 public sealed class AdminAreaClosureParticipantEvidenceTests(PostgreSqlRlsRuntimeDatabase database)
-    : IClassFixture<PostgreSqlRlsRuntimeDatabase>
+    : IClassFixture<PostgreSqlRlsRuntimeDatabase>, IAsyncLifetime
 {
+    public Task InitializeAsync() => database.ProvisionNonProductionRecoveryIdentityAsync();
+    public Task DisposeAsync() => Task.CompletedTask;
+
     [Fact]
     public async Task Both_boundaries_are_durable_idempotent_isolated_and_releasable_without_data_loss()
     {
@@ -555,7 +558,8 @@ public sealed class AdminAreaClosureParticipantEvidenceTests(PostgreSqlRlsRuntim
             services.RemoveAll<IFileService>();
             services.AddSingleton(files);
         }
-        services.AddAdminAreaFixtureClosureParticipants(fixtureOrganisation);
+        services.AddAdminAreaFixtureClosureParticipants(
+            fixtureOrganisation, database.RecoveryConnectionString);
         return services.BuildServiceProvider();
     }
 
@@ -692,7 +696,7 @@ public sealed class AdminAreaClosureParticipantEvidenceTests(PostgreSqlRlsRuntim
         release.Parameters.AddWithValue("correlation", header.CorrelationId);
         release.Parameters.AddWithValue("released_at", DateTimeOffset.UtcNow);
         var denied = await Assert.ThrowsAsync<PostgresException>(() => release.ExecuteScalarAsync());
-        Assert.Equal(PostgresErrorCodes.ObjectNotInPrerequisiteState, denied.SqlState);
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, denied.SqlState);
         await transaction.RollbackAsync();
     }
 

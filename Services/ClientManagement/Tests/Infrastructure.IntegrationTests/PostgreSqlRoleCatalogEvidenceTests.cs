@@ -44,6 +44,7 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
             Assert.Empty(await deployment.Database.GetPendingMigrationsAsync());
         }
 
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-client-roles.sql"));
         await using var verification = Deployment(migratorConnection);
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(ApplicationDbContext).Assembly);
         await new RuntimeDatabaseIdentityValidator(Connection("zeka_client_runtime", RuntimePassword),
@@ -92,6 +93,13 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
             ALTER ROLE zeka_client_owner IN DATABASE {databaseIdentifier} SET application_name='unexpected';
             ALTER ROLE zeka_client_migrator IN DATABASE {databaseIdentifier} SET application_name='unexpected';
             ALTER ROLE zeka_client_runtime IN DATABASE {databaseIdentifier} SET application_name='unexpected';
+            ALTER ROLE zeka_client_closure_recovery IN DATABASE {databaseIdentifier} SET application_name='unexpected';
+            ALTER ROLE zeka_client_closure_recovery LOGIN BYPASSRLS CREATEDB CREATEROLE INHERIT REPLICATION;
+            GRANT CREATE, TEMPORARY ON DATABASE {databaseIdentifier} TO zeka_client_closure_recovery;
+            GRANT CREATE, USAGE ON SCHEMA public, zeka TO zeka_client_closure_recovery;
+            GRANT zeka_client_closure_recovery TO zeka_client_runtime WITH ADMIN OPTION;
+            GRANT ALL ON TABLE public."Clients" TO zeka_client_closure_recovery;
+            GRANT ALL ON SEQUENCE public."Clients_Id_seq" TO zeka_client_closure_recovery;
             """);
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-client-roles.sql"));
         Assert.True(await ExecuteAdministratorScalarAsync<bool>("""
@@ -100,7 +108,9 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
                JOIN pg_catalog.pg_roles r ON r.oid=s.setrole
                JOIN pg_catalog.pg_database d ON d.oid=s.setdatabase
                WHERE d.datname=pg_catalog.current_database()
-                 AND r.rolname=ANY(ARRAY['zeka_client_owner','zeka_client_migrator','zeka_client_runtime']))
+                 AND r.rolname=ANY(ARRAY[
+                   'zeka_client_owner','zeka_client_migrator','zeka_client_runtime',
+                   'zeka_client_closure_recovery']))
               AND pg_catalog.has_table_privilege('zeka_client_runtime','public."Languages"','SELECT')
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public."Languages"','INSERT')
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public."Languages"','UPDATE')
@@ -110,6 +120,12 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public."__EFMigrationsHistory"','SELECT')
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public.issue45_unknown_client','SELECT')
               AND NOT pg_catalog.has_sequence_privilege('zeka_client_runtime','public.issue45_unknown_client_id_seq','USAGE')
+              AND NOT pg_catalog.has_table_privilege(
+                'zeka_client_closure_recovery','public."Clients"','SELECT')
+              AND NOT pg_catalog.has_sequence_privilege(
+                'zeka_client_closure_recovery','public."Clients_Id_seq"','USAGE')
+              AND NOT pg_catalog.pg_has_role(
+                'zeka_client_runtime','zeka_client_closure_recovery','MEMBER')
               AND (
                 SELECT pg_catalog.bool_and(pg_catalog.has_table_privilege(
                   'zeka_client_runtime', pg_catalog.format('public.%I', object_name), privilege_name))
@@ -232,9 +248,14 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
                   AND acl.grantee=0
                   AND acl.privilege_type='EXECUTE'
               )
-              AND pg_catalog.has_function_privilege(
+              AND NOT pg_catalog.has_function_privilege(
                 'zeka_client_runtime',
                 'zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)', 'EXECUTE')
+              AND pg_catalog.has_function_privilege(
+                'zeka_client_closure_recovery',
+                'zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)', 'EXECUTE')
+              AND NOT pg_catalog.has_function_privilege(
+                'zeka_client_closure_recovery', 'zeka.reject_writes_during_closure_fence()', 'EXECUTE')
               AND (
                 SELECT pg_catalog.pg_get_userbyid(procedure.proowner)='zeka_client_owner'
                   AND procedure.prosecdef
@@ -255,6 +276,8 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
             """));
         await ExecuteAdministratorAsync("DROP TABLE public.issue45_unknown_client");
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(ApplicationDbContext).Assembly);
+        await AssertInsufficientPrivilegeAsync(Connection("zeka_client_runtime", RuntimePassword),
+            "GRANT zeka_client_closure_recovery TO zeka_client_runtime");
     }
 
     private static DeploymentDbContext Deployment(string connectionString) => new(
@@ -278,6 +301,18 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand(sql, connection);
         return (T)(await command.ExecuteScalarAsync())!;
+    }
+
+    private static async Task AssertInsufficientPrivilegeAsync(string connectionString, string sql)
+    {
+        var exception = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand(sql, connection);
+            await command.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, exception.SqlState);
     }
 
     private static string ReadBootstrapScript(string fileName)

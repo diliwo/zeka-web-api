@@ -26,8 +26,11 @@ namespace Infrastructure.IntegrationTests;
 [Trait("Issue", "46")]
 [Trait("Evidence", "ProviderReal")]
 public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSqlClientRuntimeDatabase database)
-    : IClassFixture<PostgreSqlClientRuntimeDatabase>
+    : IClassFixture<PostgreSqlClientRuntimeDatabase>, IAsyncLifetime
 {
+    public Task InitializeAsync() => database.ProvisionNonProductionRecoveryIdentityAsync();
+    public Task DisposeAsync() => Task.CompletedTask;
+
     private static readonly string[] OrdinaryOwnedTables =
     [
         "Assessments", "Clients", "MonitoringReports", "ProfessionalAssessments",
@@ -91,10 +94,10 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
         var releaseHeader = RecoveryHeader(command.Header, completed.Header.MessageId, Guid.Empty);
         var wrongMessage = await Assert.ThrowsAsync<PostgresException>(() => RuntimeReleaseFunction(
             releaseHeader, completed.FenceToken, completed.BoundaryEstablishedAt, Guid.NewGuid()));
-        Assert.Equal("organisation_closure_release_message_invalid", wrongMessage.MessageText);
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, wrongMessage.SqlState);
         var wrongToken = await Assert.ThrowsAsync<PostgresException>(() => RuntimeReleaseFunction(
             releaseHeader, "forged", completed.BoundaryEstablishedAt));
-        Assert.Equal("organisation_closure_fence_release_conflict", wrongToken.MessageText);
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, wrongToken.SqlState);
         Assert.Equal("organisation_closure_fence_active",
             (await Assert.ThrowsAsync<PostgresException>(() => RuntimeSql(organisation,
                 "UPDATE public.\"Clients\" SET \"ReferenceNumber\" = \"ReferenceNumber\""))).MessageText);
@@ -377,7 +380,8 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
         var configuration = RuntimeConfiguration();
         var services = ProductionServices(configuration);
         services.AddSingleton<IHttpClientFactory>(new ClosureConsumerHttpClientFactory(handler));
-        services.AddClientClosureFixtureParticipant(organisation);
+        services.AddClientClosureFixtureParticipant(
+            organisation, database.RecoveryConnectionString);
         await using var provider = services.BuildServiceProvider();
 
         var enter = new CloseOrganisationParticipantV1(
@@ -401,7 +405,8 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
             services.RemoveAll<TimeProvider>();
             services.AddSingleton(clock);
         }
-        services.AddClientClosureFixtureParticipant(fixtureOrganisation);
+        services.AddClientClosureFixtureParticipant(
+            fixtureOrganisation, database.RecoveryConnectionString);
         return services.BuildServiceProvider();
     }
 

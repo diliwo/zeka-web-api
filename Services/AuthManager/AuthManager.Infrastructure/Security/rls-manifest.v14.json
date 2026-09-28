@@ -6,6 +6,10 @@
   "ownerRole": "zeka_auth_owner",
   "migratorRole": "zeka_auth_migrator",
   "runtimeRole": "zeka_auth_runtime",
+  "recoveryRole": "zeka_auth_closure_recovery",
+  "recoveryFunctions": [
+    "zeka.release_auth_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_revision bigint, p_fence_token text, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)"
+  ],
   "managedSchemas": [
     "public",
     "zeka"
@@ -533,15 +537,15 @@
     },
     {
       "functionIdentity": "zeka.reject_auth_organisation_write_during_closure_fence()",
-      "definitionSha256": "ce0bfb0e55d0158bdaabc99d1e6c516ee1360c9c8dd2979e4c1f6ea06bd21489"
+      "definitionSha256": "daf846e7196a740fe46b2f6bdd9c0fe859271149651b73b347646b7c46f0fdb5"
     },
     {
       "functionIdentity": "zeka.reject_auth_owned_write_during_closure_fence()",
-      "definitionSha256": "36d9021108006ca40a25e9e51fafb2238fb553a6e61e04c3cf96e6c9f01bc158"
+      "definitionSha256": "0e10422448a763e4bdf78af94770dd3f88ea98090906967262b56bd26a8d96b4"
     },
     {
       "functionIdentity": "zeka.release_auth_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_revision bigint, p_fence_token text, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)",
-      "definitionSha256": "2a3d2113a7b844a244546eebe1a9ad4ad178dc901fc496ebf41213f8ead186d2"
+      "definitionSha256": "75c9d0685b98a45865aad24ab6044c3b9749ad0d90e77ad22476c359d1ccb758"
     }
   ],
   "securityDefinerFunctions": [

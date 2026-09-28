@@ -156,6 +156,8 @@ namespace ClientManagement.Infrastructure.Migrations
                 DECLARE
                   persisted_revision bigint;
                   persisted_entered_at timestamp with time zone;
+                  persisted_released_at timestamp with time zone;
+                  persisted_fence_token text;
                   identity_bytes bytea;
                   expected_message_id uuid;
                 BEGIN
@@ -164,7 +166,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     OR p_operation_id IS NULL
                     OR p_participant_id <> 'client-management'
                     OR p_contract_version <> 1
-                    OR p_operation_revision <= 1
+                    OR p_operation_revision <= 0
                     OR p_release_message_id IS NULL
                     OR p_causation_id IS NULL
                     OR p_correlation_id IS NULL
@@ -200,26 +202,24 @@ namespace ClientManagement.Infrastructure.Migrations
 
                   PERFORM pg_catalog.pg_advisory_xact_lock(
                     pg_catalog.hashtextextended(pg_catalog.lower(p_organisation_id::text), 0));
-                  SELECT fence."OperationRevision", fence."EnteredAt"
-                  INTO persisted_revision, persisted_entered_at
+                  SELECT fence."OperationRevision", fence."EnteredAt", fence."ReleasedAt", fence."FenceToken"
+                  INTO persisted_revision, persisted_entered_at, persisted_released_at, persisted_fence_token
                   FROM public."OrganisationClosureFences" fence
                   WHERE fence."OrganisationId" = p_organisation_id
                     AND fence."OperationId" = p_operation_id
                     AND fence."ParticipantId" = p_participant_id
-                    AND fence."FenceToken" = p_fence_token
-                    AND fence."ReleasedAt" IS NULL
                   FOR UPDATE;
                   IF NOT FOUND THEN
                     RAISE EXCEPTION USING ERRCODE = 'P0001',
                       MESSAGE = 'organisation_closure_fence_release_conflict';
                   END IF;
+                  IF p_fence_token <> persisted_fence_token THEN
+                    RAISE EXCEPTION USING ERRCODE = 'P0001',
+                      MESSAGE = 'organisation_closure_fence_token_invalid';
+                  END IF;
                   IF p_operation_revision <> persisted_revision + 1 THEN
                     RAISE EXCEPTION USING ERRCODE = 'P0001',
                       MESSAGE = 'organisation_closure_revision_conflict';
-                  END IF;
-                  IF p_released_at < persisted_entered_at THEN
-                    RAISE EXCEPTION USING ERRCODE = 'P0001',
-                      MESSAGE = 'organisation_closure_release_time_invalid';
                   END IF;
                   IF NOT EXISTS (
                     SELECT 1 FROM public."OrganisationClosureInbox" receipt
@@ -237,8 +237,12 @@ namespace ClientManagement.Infrastructure.Migrations
                       MESSAGE = 'organisation_closure_recovery_identity_conflict';
                   END IF;
 
+                  IF persisted_released_at IS NOT NULL THEN
+                    RETURN true;
+                  END IF;
+
                   UPDATE public."OrganisationClosureFences"
-                  SET "ReleasedAt" = p_released_at
+                  SET "ReleasedAt" = greatest(p_released_at, persisted_entered_at)
                   WHERE "OrganisationId" = p_organisation_id
                     AND "OperationId" = p_operation_id
                     AND "FenceToken" = p_fence_token
@@ -250,10 +254,11 @@ namespace ClientManagement.Infrastructure.Migrations
                   RETURN true;
                 END $function$;
                 REVOKE ALL ON FUNCTION zeka.release_organisation_closure_fence(
-                  uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone) FROM PUBLIC;
+                  uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)
+                  FROM PUBLIC, zeka_client_runtime;
                 GRANT EXECUTE ON FUNCTION zeka.release_organisation_closure_fence(
                   uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)
-                  TO zeka_client_runtime;
+                  TO zeka_client_closure_recovery;
 
                 ALTER TABLE "OrganisationClosureFences" ENABLE ROW LEVEL SECURITY;
                 ALTER TABLE "OrganisationClosureFences" FORCE ROW LEVEL SECURITY;

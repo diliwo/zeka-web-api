@@ -122,8 +122,7 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                   SELECT * INTO fence FROM public."AdminAreaClosureFences"
                   WHERE "OperationId"=p_operation_id AND "OrganisationId"=p_organisation_id
                     AND "ParticipantId"=p_participant_id FOR UPDATE;
-                  IF NOT FOUND OR fence."ReleasedAt" IS NOT NULL
-                     OR p_operation_revision <> fence."OperationRevision" + 1
+                  IF NOT FOUND OR p_operation_revision <> fence."OperationRevision" + 1
                      OR p_fence_token <> fence."FenceToken"
                      OR p_contract_version <> fence."ContractVersion" THEN
                     RAISE EXCEPTION USING ERRCODE='55000', MESSAGE='Closure release does not match the active fence.';
@@ -161,18 +160,19 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                   IF p_message_id <> expected_message THEN
                     RAISE EXCEPTION USING ERRCODE='55000', MESSAGE='Closure release message identity is invalid.';
                   END IF;
-                  effective_release := greatest(p_released_at, fence."EnteredAt");
+                  effective_release := coalesce(fence."ReleasedAt", greatest(p_released_at, fence."EnteredAt"));
                   UPDATE public."AdminAreaClosureFences" SET "ReleasedAt"=effective_release
                   WHERE "OperationId"=p_operation_id AND "OrganisationId"=p_organisation_id
-                    AND "ParticipantId"=p_participant_id;
+                    AND "ParticipantId"=p_participant_id AND "ReleasedAt" IS NULL;
                   RETURN effective_release;
                 END
                 $release_function$;
                 REVOKE ALL ON FUNCTION zeka.release_adminarea_closure_fence(
-                  uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone) FROM PUBLIC;
+                  uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)
+                  FROM PUBLIC, zeka_adminarea_runtime;
                 GRANT EXECUTE ON FUNCTION zeka.release_adminarea_closure_fence(
                   uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)
-                  TO zeka_adminarea_runtime;
+                  TO zeka_adminarea_closure_recovery;
                 """);
 
             foreach (var table in new[]

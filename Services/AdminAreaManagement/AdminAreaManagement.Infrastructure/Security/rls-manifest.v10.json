@@ -6,6 +6,10 @@
   "ownerRole": "zeka_adminarea_owner",
   "migratorRole": "zeka_adminarea_migrator",
   "runtimeRole": "zeka_adminarea_runtime",
+  "recoveryRole": "zeka_adminarea_closure_recovery",
+  "recoveryFunctions": [
+    "zeka.release_adminarea_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)"
+  ],
   "additionalPolicyRoles": [
     { "object": { "schema": "public", "name": "AdminAreaClosureFences" }, "roles": ["zeka_adminarea_owner"] },
     { "object": { "schema": "public", "name": "AdminAreaClosureOutbox" }, "roles": ["zeka_adminarea_owner"] }
@@ -102,7 +106,7 @@
     "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b",
     "zeka.reject_adminarea_write_during_closure()": "3a06a46837fc57993dcc421d23873905444619d2c4cebc833504414606cf8ec9",
     "zeka.reject_adminarea_write_during_export()": "9d750b0df8e6bbde2b52cf03fab715bcddc5810c1de8ea0ee60dd904b788bf90",
-    "zeka.release_adminarea_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)": "55264036e5d72c9f934e46af1aef281a82759ee3b730e6e93cde4f97996eb30d"
+    "zeka.release_adminarea_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)": "8f3151eb96bd0bff637cd965ed45011c0805c19c0db939dfd984aefaa419be32"
   },
   "defaultPrivileges": [
     { "owner": "zeka_adminarea_owner", "objectType": "FUNCTION", "scope": "GLOBAL", "grants": [] },

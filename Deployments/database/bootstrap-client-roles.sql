@@ -5,9 +5,13 @@ DECLARE managed_role text;
         login_mode text;
 BEGIN
   FOREACH managed_role IN ARRAY ARRAY[
-    'zeka_client_owner', 'zeka_client_migrator', 'zeka_client_runtime'
+    'zeka_client_owner', 'zeka_client_migrator', 'zeka_client_runtime',
+    'zeka_client_closure_recovery'
   ] LOOP
-    login_mode := CASE WHEN managed_role='zeka_client_owner' THEN 'NOLOGIN' ELSE 'LOGIN' END;
+    login_mode := CASE
+      WHEN managed_role IN ('zeka_client_owner', 'zeka_client_closure_recovery') THEN 'NOLOGIN'
+      ELSE 'LOGIN'
+    END;
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname=managed_role) THEN
       EXECUTE pg_catalog.format(
         'CREATE ROLE %I %s NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT',
@@ -16,6 +20,9 @@ BEGIN
     EXECUTE pg_catalog.format(
       'ALTER ROLE %I %s NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION',
       managed_role, login_mode);
+    IF managed_role='zeka_client_closure_recovery' THEN
+      ALTER ROLE zeka_client_closure_recovery PASSWORD NULL;
+    END IF;
     EXECUTE pg_catalog.format('ALTER ROLE %I RESET ALL', managed_role);
     FOR database_name IN
       SELECT database.datname
@@ -31,7 +38,12 @@ BEGIN
 END $bootstrap$;
 DO $database$ BEGIN
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
-  EXECUTE format('GRANT CONNECT ON DATABASE %I TO zeka_client_migrator, zeka_client_runtime', current_database());
+  EXECUTE format(
+    'REVOKE ALL ON DATABASE %I FROM zeka_client_owner, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery',
+    current_database());
+  EXECUTE format(
+    'GRANT CONNECT ON DATABASE %I TO zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery',
+    current_database());
 END $database$;
 GRANT zeka_client_owner TO zeka_client_migrator WITH INHERIT FALSE, SET TRUE, ADMIN FALSE;
 DO $memberships$
@@ -40,17 +52,22 @@ BEGIN
   FOR membership IN
     SELECT parent.rolname AS parent_name, member.rolname AS member_name
     FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member
-    WHERE (parent.rolname IN ('zeka_client_owner','zeka_client_migrator','zeka_client_runtime')
-       OR member.rolname IN ('zeka_client_owner','zeka_client_migrator','zeka_client_runtime'))
+    WHERE (parent.rolname IN (
+             'zeka_client_owner','zeka_client_migrator','zeka_client_runtime',
+             'zeka_client_closure_recovery')
+       OR member.rolname IN (
+             'zeka_client_owner','zeka_client_migrator','zeka_client_runtime',
+             'zeka_client_closure_recovery'))
       AND NOT (parent.rolname='zeka_client_owner' AND member.rolname='zeka_client_migrator')
   LOOP EXECUTE format('REVOKE %I FROM %I', membership.parent_name, membership.member_name); END LOOP;
 END $memberships$;
 ALTER SCHEMA public OWNER TO zeka_client_owner;
 CREATE SCHEMA IF NOT EXISTS zeka AUTHORIZATION zeka_client_owner;
 ALTER SCHEMA zeka OWNER TO zeka_client_owner;
-REVOKE ALL ON SCHEMA zeka FROM PUBLIC, zeka_client_runtime;
-GRANT USAGE ON SCHEMA zeka TO zeka_client_runtime;
-REVOKE ALL ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON SCHEMA zeka FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery;
+GRANT USAGE ON SCHEMA zeka TO zeka_client_runtime, zeka_client_closure_recovery;
+REVOKE ALL ON SCHEMA public
+  FROM PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery;
 GRANT USAGE ON SCHEMA public TO zeka_client_migrator, zeka_client_runtime;
 DO $ownership$
 DECLARE object record;
@@ -69,28 +86,37 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'
   LOOP EXECUTE format('ALTER FUNCTION %I.%I(%s) OWNER TO zeka_client_owner', object.nspname, object.proname, object.arguments); END LOOP;
 END $functions$;
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC, zeka_client_runtime;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, zeka_client_runtime;
-REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, zeka_client_runtime;
+REVOKE ALL ON ALL TABLES IN SCHEMA public
+  FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public
+  FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery;
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public
+  FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery;
+REVOKE ALL ON ALL TABLES IN SCHEMA zeka
+  FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA zeka
+  FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery;
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA zeka
+  FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery;
 DO $default_privileges$
 DECLARE privilege_rule record;
 BEGIN
   FOR privilege_rule IN
     SELECT * FROM (VALUES
-      ('', 'ALL', 'TABLES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('', 'ALL', 'SEQUENCES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
+      ('', 'ALL', 'TABLES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('', 'ALL', 'SEQUENCES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
       ('', 'EXECUTE', 'FUNCTIONS', 'PUBLIC'),
-      ('', 'ALL', 'FUNCTIONS', 'zeka_client_migrator, zeka_client_runtime'),
-      ('', 'ALL', 'TYPES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('', 'ALL', 'SCHEMAS', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('IN SCHEMA public ', 'ALL', 'TABLES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('IN SCHEMA public ', 'ALL', 'SEQUENCES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('IN SCHEMA public ', 'ALL', 'FUNCTIONS', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('IN SCHEMA public ', 'ALL', 'TYPES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('IN SCHEMA zeka ', 'ALL', 'TABLES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('IN SCHEMA zeka ', 'ALL', 'SEQUENCES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('IN SCHEMA zeka ', 'ALL', 'FUNCTIONS', 'PUBLIC, zeka_client_migrator, zeka_client_runtime'),
-      ('IN SCHEMA zeka ', 'ALL', 'TYPES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime')
+      ('', 'ALL', 'FUNCTIONS', 'zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('', 'ALL', 'TYPES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('', 'ALL', 'SCHEMAS', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('IN SCHEMA public ', 'ALL', 'TABLES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('IN SCHEMA public ', 'ALL', 'SEQUENCES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('IN SCHEMA public ', 'ALL', 'FUNCTIONS', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('IN SCHEMA public ', 'ALL', 'TYPES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('IN SCHEMA zeka ', 'ALL', 'TABLES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('IN SCHEMA zeka ', 'ALL', 'SEQUENCES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('IN SCHEMA zeka ', 'ALL', 'FUNCTIONS', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery'),
+      ('IN SCHEMA zeka ', 'ALL', 'TYPES', 'PUBLIC, zeka_client_migrator, zeka_client_runtime, zeka_client_closure_recovery')
     ) AS manifest(scope_clause, privileges, object_kind, grantees)
   LOOP
     EXECUTE pg_catalog.format(
@@ -152,7 +178,7 @@ BEGIN
     target_table := pg_catalog.to_regclass(pg_catalog.format('public.%I', lifecycle_object.name));
     IF target_table IS NOT NULL THEN
       EXECUTE pg_catalog.format(
-        'REVOKE ALL ON TABLE public.%I FROM PUBLIC, zeka_client_runtime', lifecycle_object.name);
+        'REVOKE ALL ON TABLE public.%I FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery', lifecycle_object.name);
       FOR column_grant IN
         SELECT DISTINCT attribute.attname, acl.grantee, relation.relowner
         FROM pg_catalog.pg_class relation
@@ -186,16 +212,21 @@ BEGIN
     REVOKE ALL ON FUNCTION zeka.reject_writes_during_export_fence() FROM PUBLIC, zeka_client_runtime;
     GRANT EXECUTE ON FUNCTION zeka.reject_writes_during_export_fence() TO zeka_client_runtime;
   END IF;
-  FOREACH object_name IN ARRAY ARRAY[
-    'zeka.reject_writes_during_closure_fence()',
-    'zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)'
-  ] LOOP
-    IF pg_catalog.to_regprocedure(object_name) IS NOT NULL THEN
-      EXECUTE pg_catalog.format('ALTER FUNCTION %s OWNER TO zeka_client_owner', object_name);
-      EXECUTE pg_catalog.format(
-        'REVOKE ALL ON FUNCTION %s FROM PUBLIC, zeka_client_runtime', object_name);
-      EXECUTE pg_catalog.format(
-        'GRANT EXECUTE ON FUNCTION %s TO zeka_client_runtime', object_name);
-    END IF;
-  END LOOP;
+  object_name := 'zeka.reject_writes_during_closure_fence()';
+  IF pg_catalog.to_regprocedure(object_name) IS NOT NULL THEN
+    EXECUTE pg_catalog.format('ALTER FUNCTION %s OWNER TO zeka_client_owner', object_name);
+    EXECUTE pg_catalog.format(
+      'REVOKE ALL ON FUNCTION %s FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery',
+      object_name);
+    EXECUTE pg_catalog.format('GRANT EXECUTE ON FUNCTION %s TO zeka_client_runtime', object_name);
+  END IF;
+  object_name := 'zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)';
+  IF pg_catalog.to_regprocedure(object_name) IS NOT NULL THEN
+    EXECUTE pg_catalog.format('ALTER FUNCTION %s OWNER TO zeka_client_owner', object_name);
+    EXECUTE pg_catalog.format(
+      'REVOKE ALL ON FUNCTION %s FROM PUBLIC, zeka_client_runtime, zeka_client_closure_recovery',
+      object_name);
+    EXECUTE pg_catalog.format(
+      'GRANT EXECUTE ON FUNCTION %s TO zeka_client_closure_recovery', object_name);
+  END IF;
 END $existing_objects$;

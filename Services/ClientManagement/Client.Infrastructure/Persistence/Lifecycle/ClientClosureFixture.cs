@@ -21,10 +21,13 @@ public static class ClientClosureFixtureRegistration
 {
     public static IServiceCollection AddClientClosureFixtureParticipant(
         this IServiceCollection services,
-        Guid fixtureOrganisationId)
+        Guid fixtureOrganisationId,
+        string recoveryConnectionString)
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddSingleton<IClientClosureFixtureScope>(new ClientClosureFixtureScope(fixtureOrganisationId));
+        services.AddSingleton<IClientClosureRecoveryCapability>(
+            new NpgsqlClientClosureRecoveryCapability(recoveryConnectionString));
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<IClientOrganisationClosureParticipant, ClientOrganisationClosureParticipant>();
         return services;

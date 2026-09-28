@@ -11,6 +11,9 @@ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'zeka_auth_runtime') THEN
     CREATE ROLE zeka_auth_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT;
   END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'zeka_auth_closure_recovery') THEN
+    CREATE ROLE zeka_auth_closure_recovery NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT;
+  END IF;
 END $bootstrap$;
 ALTER ROLE zeka_auth_owner NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
 ALTER ROLE zeka_auth_owner RESET ALL;
@@ -18,6 +21,9 @@ ALTER ROLE zeka_auth_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATER
 ALTER ROLE zeka_auth_migrator RESET ALL;
 ALTER ROLE zeka_auth_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
 ALTER ROLE zeka_auth_runtime RESET ALL;
+ALTER ROLE zeka_auth_closure_recovery NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+ALTER ROLE zeka_auth_closure_recovery PASSWORD NULL;
+ALTER ROLE zeka_auth_closure_recovery RESET ALL;
 DO $settings$
 DECLARE setting record;
 BEGIN
@@ -26,7 +32,8 @@ BEGIN
     FROM pg_catalog.pg_db_role_setting role_setting
     JOIN pg_catalog.pg_roles role ON role.oid=role_setting.setrole
     JOIN pg_catalog.pg_database database ON database.oid=role_setting.setdatabase
-    WHERE role.rolname IN ('zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime')
+    WHERE role.rolname IN (
+      'zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime','zeka_auth_closure_recovery')
   LOOP
     EXECUTE pg_catalog.format('ALTER ROLE %I IN DATABASE %I RESET ALL', setting.rolname, setting.datname);
   END LOOP;
@@ -49,7 +56,12 @@ BEGIN
 END $managed_schema$;
 DO $database$ BEGIN
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
-  EXECUTE format('GRANT CONNECT ON DATABASE %I TO zeka_auth_migrator, zeka_auth_runtime', current_database());
+  EXECUTE format(
+    'REVOKE ALL ON DATABASE %I FROM zeka_auth_owner, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery',
+    current_database());
+  EXECUTE format(
+    'GRANT CONNECT ON DATABASE %I TO zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery',
+    current_database());
 END $database$;
 GRANT zeka_auth_owner TO zeka_auth_migrator WITH INHERIT FALSE, SET TRUE, ADMIN FALSE;
 DO $memberships$
@@ -58,16 +70,20 @@ BEGIN
   FOR membership IN
     SELECT parent.rolname AS parent_name, member.rolname AS member_name
     FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member
-    WHERE (parent.rolname IN ('zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime')
-       OR member.rolname IN ('zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime'))
+    WHERE (parent.rolname IN (
+             'zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime','zeka_auth_closure_recovery')
+       OR member.rolname IN (
+             'zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime','zeka_auth_closure_recovery'))
       AND NOT (parent.rolname='zeka_auth_owner' AND member.rolname='zeka_auth_migrator')
   LOOP EXECUTE format('REVOKE %I FROM %I', membership.parent_name, membership.member_name); END LOOP;
 END $memberships$;
 ALTER SCHEMA public OWNER TO zeka_auth_owner;
-REVOKE ALL ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON SCHEMA public
+  FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
 GRANT USAGE ON SCHEMA public TO zeka_auth_migrator, zeka_auth_runtime;
-REVOKE ALL ON SCHEMA zeka FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-GRANT USAGE ON SCHEMA zeka TO zeka_auth_runtime;
+REVOKE ALL ON SCHEMA zeka
+  FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+GRANT USAGE ON SCHEMA zeka TO zeka_auth_runtime, zeka_auth_closure_recovery;
 DO $ownership$
 DECLARE object record;
         table_grant record;
@@ -107,34 +123,40 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('public','zeka')
   LOOP EXECUTE format('ALTER FUNCTION %I.%I(%s) OWNER TO zeka_auth_owner', object.nspname, object.proname, object.arguments); END LOOP;
 END $functions$;
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC, zeka_auth_runtime;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, zeka_auth_runtime;
-REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, zeka_auth_runtime;
+REVOKE ALL ON ALL TABLES IN SCHEMA public
+  FROM PUBLIC, zeka_auth_runtime, zeka_auth_closure_recovery;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public
+  FROM PUBLIC, zeka_auth_runtime, zeka_auth_closure_recovery;
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public
+  FROM PUBLIC, zeka_auth_runtime, zeka_auth_closure_recovery;
 DO $managed_schema_objects$
 BEGIN
   IF pg_catalog.to_regnamespace('zeka') IS NOT NULL THEN
-    REVOKE ALL ON ALL TABLES IN SCHEMA zeka FROM PUBLIC, zeka_auth_runtime;
-    REVOKE ALL ON ALL SEQUENCES IN SCHEMA zeka FROM PUBLIC, zeka_auth_runtime;
-    REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA zeka FROM PUBLIC, zeka_auth_runtime;
+    REVOKE ALL ON ALL TABLES IN SCHEMA zeka
+      FROM PUBLIC, zeka_auth_runtime, zeka_auth_closure_recovery;
+    REVOKE ALL ON ALL SEQUENCES IN SCHEMA zeka
+      FROM PUBLIC, zeka_auth_runtime, zeka_auth_closure_recovery;
+    REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA zeka
+      FROM PUBLIC, zeka_auth_runtime, zeka_auth_closure_recovery;
   END IF;
 END $managed_schema_objects$;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON TABLES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON TABLES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
 ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON FUNCTIONS FROM zeka_auth_migrator, zeka_auth_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON TYPES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON SCHEMAS FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON TYPES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON FUNCTIONS FROM zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON TYPES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner REVOKE ALL ON SCHEMAS FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA public REVOKE ALL ON TYPES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
 DO $managed_schema_defaults$
 BEGIN
   IF pg_catalog.to_regnamespace('zeka') IS NOT NULL THEN
-    ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA zeka REVOKE ALL ON TABLES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-    ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA zeka REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-    ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA zeka REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
-    ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA zeka REVOKE ALL ON TYPES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime;
+    ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA zeka REVOKE ALL ON TABLES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+    ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA zeka REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+    ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA zeka REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
+    ALTER DEFAULT PRIVILEGES FOR ROLE zeka_auth_owner IN SCHEMA zeka REVOKE ALL ON TYPES FROM PUBLIC, zeka_auth_migrator, zeka_auth_runtime, zeka_auth_closure_recovery;
   END IF;
 END $managed_schema_defaults$;
 DO $existing_objects$
@@ -276,9 +298,9 @@ BEGIN
     ALTER FUNCTION zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamptz)
       OWNER TO zeka_auth_owner;
     REVOKE ALL ON FUNCTION zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamptz)
-      FROM PUBLIC, zeka_auth_runtime;
+      FROM PUBLIC, zeka_auth_runtime, zeka_auth_closure_recovery;
     GRANT EXECUTE ON FUNCTION zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamptz)
-      TO zeka_auth_runtime;
+      TO zeka_auth_closure_recovery;
   END IF;
   IF pg_catalog.to_regclass('public."AuthClosureParticipantExecutions"') IS NOT NULL THEN
     ALTER POLICY rls_authclosureparticipantexecutions_organisation

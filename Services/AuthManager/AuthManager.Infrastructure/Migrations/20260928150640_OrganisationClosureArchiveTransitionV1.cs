@@ -186,8 +186,11 @@ namespace AuthManager.Infrastructure.Migrations
                     pg_catalog.hashtextextended(scoped_organisation::text, 0));
                   IF EXISTS (
                     SELECT 1 FROM public."AuthClosureParticipantExecutions" execution
+                    JOIN public."Organisations" organisation
+                      ON organisation."Id"=execution."OrganisationId"
                     WHERE execution."OrganisationId"=scoped_organisation
-                      AND execution."State"=1
+                      AND (execution."State"=1
+                        OR execution."State"=2 AND organisation."Status"=5)
                   ) THEN
                     RAISE EXCEPTION USING ERRCODE='55000',
                       MESSAGE='organisation closure fence blocks Auth ordinary mutation';
@@ -215,7 +218,7 @@ namespace AuthManager.Infrastructure.Migrations
                   IF EXISTS (
                     SELECT 1 FROM public."AuthClosureParticipantExecutions" execution
                     WHERE execution."OrganisationId"=scoped_organisation
-                      AND execution."State"=1
+                      AND (execution."State"=1 OR execution."State"=2 AND OLD."Status"=5)
                   ) THEN
                     IF TG_OP<>'UPDATE'
                        OR OLD."Status"<>5 OR NEW."Status" NOT IN (2,6)
@@ -264,11 +267,11 @@ namespace AuthManager.Infrastructure.Migrations
                      AND entered."MessageType"='OrganisationClosureParticipantCompletedV1'
                     WHERE execution."OperationId"=p_operation_id
                       AND execution."OrganisationId"=p_organisation_id
-                      AND execution."State"=1
+                      AND (execution."State"=1 AND organisation."Status"=5
+                        OR execution."State"=2 AND organisation."Status" IN (2,5))
                       AND execution."OperationRevision"+1=p_revision
                       AND execution."FenceToken"=p_fence_token
                       AND p_released_at>=execution."BoundaryEstablishedAt"
-                      AND organisation."Status"=5
                       AND (entered."PayloadJson"->'header'->>'messageId')::uuid=p_causation_id
                       AND (entered."PayloadJson"->'header'->>'correlationId')::uuid=p_operation_id
                   ) THEN
@@ -276,16 +279,20 @@ namespace AuthManager.Infrastructure.Migrations
                   END IF;
                   UPDATE public."AuthClosureParticipantExecutions"
                      SET "State"=2, "ReleasedAt"=p_released_at
-                   WHERE "OperationId"=p_operation_id AND "OrganisationId"=p_organisation_id;
-                  RETURN FOUND;
+                   WHERE "OperationId"=p_operation_id AND "OrganisationId"=p_organisation_id
+                     AND "State"=1 AND "ReleasedAt" IS NULL;
+                  RETURN FOUND OR EXISTS (
+                    SELECT 1 FROM public."AuthClosureParticipantExecutions"
+                    WHERE "OperationId"=p_operation_id AND "OrganisationId"=p_organisation_id
+                      AND "State"=2 AND "ReleasedAt" IS NOT NULL);
                 END
                 $function$;
                 ALTER FUNCTION zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamptz)
                   OWNER TO zeka_auth_owner;
                 REVOKE ALL ON FUNCTION zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamptz)
-                  FROM PUBLIC;
+                  FROM PUBLIC, zeka_auth_runtime;
                 GRANT EXECUTE ON FUNCTION zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamptz)
-                  TO zeka_auth_runtime;
+                  TO zeka_auth_closure_recovery;
 
                 CREATE TRIGGER trg_auth_membership_closure_fence
                   BEFORE INSERT OR UPDATE OR DELETE ON public."OrganisationMemberships"

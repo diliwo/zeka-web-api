@@ -210,8 +210,11 @@ public sealed class PostgreSqlClientRuntimeDatabase : IAsyncLifetime
 {
     private const string MigratorPassword = "test-migrator-password";
     private const string RuntimePassword = "test-runtime-password";
+    private const string RecoveryPassword = "test-recovery-password";
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
     public string RuntimeConnectionString => Connection("zeka_client_runtime", RuntimePassword);
+    public string RecoveryConnectionString =>
+        Connection("zeka_client_closure_recovery_test", RecoveryPassword);
 
     public async Task InitializeAsync()
     {
@@ -225,11 +228,29 @@ public sealed class PostgreSqlClientRuntimeDatabase : IAsyncLifetime
         await deployment.Database.ExecuteSqlRawAsync(
             "CREATE TABLE \"__OrganisationTenantMap\" (\"TenantName\" text PRIMARY KEY, \"OrganisationId\" uuid NOT NULL UNIQUE)");
         await deployment.GetService<IMigrator>().MigrateAsync();
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-client-roles.sql"));
         await RlsSecurityManifestVerifier.VerifyAsync(deployment, typeof(ApplicationDbContext).Assembly);
         await new RuntimeDatabaseIdentityValidator(RuntimeConnectionString, "zeka_client_runtime").StartAsync(default);
     }
 
     public Task DisposeAsync() => postgres.DisposeAsync().AsTask();
+
+    public Task ProvisionNonProductionRecoveryIdentityAsync() => ExecuteAdministratorAsync($"""
+        DO $test_identity$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT FROM pg_catalog.pg_roles
+            WHERE rolname='zeka_client_closure_recovery_test') THEN
+            CREATE ROLE zeka_client_closure_recovery_test
+              LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+          END IF;
+        END $test_identity$;
+        ALTER ROLE zeka_client_closure_recovery_test
+          LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION
+          PASSWORD '{RecoveryPassword}';
+        GRANT zeka_client_closure_recovery TO zeka_client_closure_recovery_test
+          WITH INHERIT TRUE, SET TRUE, ADMIN FALSE;
+        """);
 
     private static DeploymentDbContext Deployment(string connectionString) => new(
         new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(connectionString).Options);

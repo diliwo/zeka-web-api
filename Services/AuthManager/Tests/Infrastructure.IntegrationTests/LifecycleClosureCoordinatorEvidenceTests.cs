@@ -30,6 +30,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private const string MigratorPassword = "synthetic-life02-migrator";
     private const string RuntimePassword = "synthetic-life02-runtime";
+    private const string RecoveryPassword = "synthetic-life02-recovery";
     private static readonly Guid OrganisationA = Guid.Parse("46020000-0000-0000-0000-000000000001");
     private static readonly Guid OrganisationB = Guid.Parse("46020000-0000-0000-0000-000000000099");
     private static readonly DateTimeOffset Now = new(2026, 9, 28, 16, 0, 0, TimeSpan.Zero);
@@ -75,7 +76,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         var recovered = Assert.Single(await coordinator.RecoverAsync(OrganisationA));
         Assert.Equal(operation.Id, recovered.OperationId);
         Assert.Equal(ClosureProgressStatus.AwaitingParticipants, recovered.Status);
-        var auth = new AuthClosureParticipant(Options(environment.RuntimeConnection), clock);
+        var auth = Participant(environment, clock);
         var authCommand = (await ReadCloseCommands(environment.RuntimeConnection, OrganisationA))
             .First(x => x.Header.ParticipantId == "auth-management");
         await using var beforeBoundaryConnection = new NpgsqlConnection(environment.RuntimeConnection);
@@ -91,7 +92,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             Assert.Equal(1, await mutation.ExecuteNonQueryAsync());
         }
         var firstEnter = auth.EnterAsync(authCommand);
-        var duplicateEnter = new AuthClosureParticipant(Options(environment.RuntimeConnection), clock)
+        var duplicateEnter = Participant(environment, clock)
             .EnterAsync(authCommand);
         await Task.Delay(100);
         Assert.False(firstEnter.IsCompleted);
@@ -152,7 +153,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             Header(operation.Id, "auth-management", concurrent[0].Header.OperationRevision + 1,
                 causationId: concurrent[0].Header.MessageId), concurrent[0].FenceToken);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            new AuthClosureParticipant(Options(environment.RuntimeConnection), clock)
+            Participant(environment, clock)
                 .ReleaseAsync(postArchiveRelease));
         Assert.Equal(((int)AuthClosureParticipantState.FenceEntered).ToString(),
             await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
@@ -199,7 +200,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         var coordinator = new LifecycleClosureCoordinator(
             new LifecycleClosureStore(Options(environment.RuntimeConnection), clock));
         await coordinator.BeginAsync(operation.Id, OrganisationA);
-        var auth = new AuthClosureParticipant(Options(environment.RuntimeConnection), clock);
+        var auth = Participant(environment, clock);
         var authCommand = (await ReadCloseCommands(environment.RuntimeConnection, OrganisationA))
             .First(x => x.Header.ParticipantId == "auth-management");
         var randomHeader = new LifecycleMessageHeaderV1(authCommand.Header.OperationId,
@@ -274,28 +275,28 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             .GetRequiredService<IOutboxDispatcher>().DispatchBatchAsync());
         Assert.Contains(recoveryPublisher.Messages,
             x => x.MessageType == nameof(ReleaseOrganisationClosureFenceV1));
-        var authAfterRestart = new AuthClosureParticipant(Options(environment.RuntimeConnection), clock);
+        var authAfterRestart = Participant(environment, clock);
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
             await RuntimeCommandError(environment.RuntimeConnection, OrganisationA, $"""
                 UPDATE public."AuthClosureParticipantExecutions"
                 SET "State"=2, "ReleasedAt"=now()
                 WHERE "OperationId"='{operation.Id:D}'::uuid
                 """));
-        Assert.Equal(PostgresErrorCodes.ObjectNotInPrerequisiteState,
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
             await RuntimeCommandError(environment.RuntimeConnection, OrganisationA, $"""
                 SELECT zeka.release_auth_closure_fence(
                   '{operation.Id:D}'::uuid, '{OrganisationA:D}'::uuid, 3,
                   'wrong-token', '{entered.Header.MessageId:D}'::uuid,
                   '{operation.Id:D}'::uuid, now())
                 """));
-        Assert.Equal("22004",
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
             await RuntimeCommandError(environment.RuntimeConnection, OrganisationA, $"""
                 SELECT zeka.release_auth_closure_fence(
                   '{operation.Id:D}'::uuid, '{OrganisationA:D}'::uuid, 3,
                   '{entered.FenceToken}', '{entered.Header.MessageId:D}'::uuid,
                   '{operation.Id:D}'::uuid, NULL)
                 """));
-        Assert.Equal(PostgresErrorCodes.ObjectNotInPrerequisiteState,
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege,
             await RuntimeCommandError(environment.RuntimeConnection, OrganisationA, $"""
                 SELECT zeka.release_auth_closure_fence(
                   '{operation.Id:D}'::uuid, '{OrganisationA:D}'::uuid, 3,
@@ -336,11 +337,20 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                 messageId: LifecycleMessageIdentityV1.ForPhase(
                     operation.Id, "auth-management", "release-fence", 3),
                 causationId: entered.Header.MessageId), entered.FenceToken);
+        var recoveryCapability = new NpgsqlAuthClosureRecoveryCapability(
+            environment.RecoveryConnection);
+        await recoveryCapability.ReleaseAsync(releaseCommand,
+            LifecycleContractTimeV1.Normalize(clock.GetUtcNow()));
+        await recoveryCapability.ReleaseAsync(releaseCommand,
+            LifecycleContractTimeV1.Normalize(clock.GetUtcNow()));
         var released = await authAfterRestart.ReleaseAsync(releaseCommand);
+        Assert.Equal(PostgresErrorCodes.ObjectNotInPrerequisiteState,
+            await RuntimeMembershipUpdate(environment.RuntimeConnection, OrganisationA,
+                environment.OwnerMembershipA));
         Assert.Equal(ClosureProgressStatus.Recovered,
             (await coordinator.ReceiveAsync(released)).Status);
         Assert.Equal(released.ReceiptHash,
-            (await new AuthClosureParticipant(Options(environment.RuntimeConnection), clock)
+            (await Participant(environment, clock)
                 .ReleaseAsync(releaseCommand)).ReceiptHash);
         Assert.Null(await RuntimeMembershipUpdate(environment.RuntimeConnection, OrganisationA,
             environment.OwnerMembershipA));
@@ -403,7 +413,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         var dispatcher = new FixtureClosureContractDispatcher(
             environment.RuntimeConnection, clock, coordinator);
         var authCommand = first.Single(x => x.Header.ParticipantId == "auth-management");
-        var authParticipant = new AuthClosureParticipant(Options(environment.RuntimeConnection), clock);
+        var authParticipant = Participant(environment, clock);
         await Assert.ThrowsAsync<InvalidOperationException>(() => authParticipant.EnterAsync(
             new CloseOrganisationParticipantV1(new LifecycleMessageHeaderV1(
                 authCommand.Header.OperationId, authCommand.Header.OrganisationId,
@@ -423,11 +433,11 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             """));
         await dispatcher.DispatchAsync(first);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            new AuthClosureParticipant(Options(environment.RuntimeConnection), clock)
+            Participant(environment, clock)
                 .EnterAsync(new CloseOrganisationParticipantV1(
                     authCommand.Header, authCommand.ClosingAt.AddSeconds(1))));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            new AuthClosureParticipant(Options(environment.RuntimeConnection), clock)
+            Participant(environment, clock)
                 .EnterAsync(new CloseOrganisationParticipantV1(
                     new LifecycleMessageHeaderV1(authCommand.Header.OperationId,
                         authCommand.Header.OrganisationId, authCommand.Header.OperationRevision,
@@ -516,7 +526,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         publisher.BlockNext();
         var dispatchBeforeBoundary = dispatcher.DispatchBatchAsync();
         await publisher.WaitUntilBlockedAsync();
-        var auth = new AuthClosureParticipant(Options(environment.RuntimeConnection), clock);
+        var auth = Participant(environment, clock);
         var enter = auth.EnterAsync((await ReadCloseCommands(
             environment.RuntimeConnection, OrganisationA))
             .First(x => x.Header.ParticipantId == "auth-management"));
@@ -567,6 +577,39 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             clock.GetUtcNow());
         Assert.Equal(1, await dispatcher.DispatchBatchAsync());
         Assert.Contains(publisher.Messages, x => x.Id == lifecycleId);
+
+        Assert.Equal(ClosureProgressStatus.AwaitingParticipants,
+            (await coordinator.ReceiveAsync(entered)).Status);
+        foreach (var participantId in new[] { "admin-area", "admin-area-documents", "client-management" })
+        {
+            var header = ParticipantReplyHeader(operation.Id, participantId);
+            var result = await coordinator.ReceiveAsync(new OrganisationClosureParticipantCompletedV1(
+                header, $"{participantId}-closure-token", 1,
+                LifecycleContractTimeV1.Normalize(clock.GetUtcNow())));
+            Assert.Contains(result.Status,
+                [ClosureProgressStatus.AwaitingParticipants, ClosureProgressStatus.Archived]);
+        }
+
+        var archivedOrdinaryId = await StageOutbox(environment.RuntimeConnection,
+            "SyntheticArchivedOrdinaryOrganisationMessageV1", "{}", operation.Id, clock.GetUtcNow());
+        var publishedAfterArchive = publisher.Messages.Count;
+        Assert.Equal(0, await dispatcher.DispatchBatchAsync());
+        Assert.Equal(publishedAfterArchive, publisher.Messages.Count);
+        Assert.Equal("|OrganisationArchived|0|{}|", await ExecuteScalar(
+            environment.AdministratorConnection, $"""
+                SELECT coalesce("ProcessedAtUtc"::text, '') || '|' || coalesce("LastError", '')
+                       || '|' || "AttemptCount"::text || '|' || "Payload"
+                       || '|' || coalesce("LeaseId"::text, '')
+                FROM public."OutboxMessages" WHERE "Id"='{archivedOrdinaryId:D}'::uuid
+                """));
+
+        Assert.Equal(0, await dispatcher.DispatchBatchAsync());
+        Assert.Equal(publishedAfterArchive, publisher.Messages.Count);
+        Assert.Equal(1L, await ExecuteScalar(environment.AdministratorConnection, $"""
+            SELECT count(*) FROM public."OutboxMessages"
+            WHERE "Id"='{archivedOrdinaryId:D}'::uuid
+              AND "ProcessedAtUtc" IS NULL AND "DeadLetteredAtUtc" IS NOT NULL
+            """));
     }
 
     private async Task<TestEnvironment> CreateEnvironmentAsync()
@@ -584,6 +627,17 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             await database.GetService<IMigrator>().MigrateAsync();
         }
         await Execute(administrator, Bootstrap());
+        await Execute(administrator, $"""
+            DO $block$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles
+                             WHERE rolname='zeka_auth_closure_recovery_test') THEN
+                CREATE ROLE zeka_auth_closure_recovery_test LOGIN
+                  PASSWORD '{RecoveryPassword}';
+              END IF;
+            END $block$;
+            ALTER ROLE zeka_auth_closure_recovery_test PASSWORD '{RecoveryPassword}';
+            GRANT zeka_auth_closure_recovery TO zeka_auth_closure_recovery_test;
+            """);
 
         var owner = User.Create("life02-owner@example.invalid", "life02-owner", "Synthetic", "Owner", Now);
         owner.EmailConfirmed = true;
@@ -608,7 +662,8 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             await database.SaveChangesAsync();
             await transaction.CommitAsync();
         }
-        return new(administrator, migrator, runtime, owner.Id, membershipA.Id, membershipB.Id);
+        var recovery = Connection(administrator, "zeka_auth_closure_recovery_test", RecoveryPassword);
+        return new(administrator, migrator, runtime, recovery, owner.Id, membershipA.Id, membershipB.Id);
     }
 
     private static LifecycleMessageHeaderV1 Header(Guid operationId, string participant,
@@ -768,6 +823,9 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
 
     private static DbContextOptions<AuthDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connection).Options;
+    private static AuthClosureParticipant Participant(TestEnvironment environment, TimeProvider clock) =>
+        new(Options(environment.RuntimeConnection), clock,
+            new NpgsqlAuthClosureRecoveryCapability(environment.RecoveryConnection));
     private static string Connection(string administrator, string username, string password) =>
         new NpgsqlConnectionStringBuilder(administrator)
             { Username = username, Password = password, Pooling = false }.ConnectionString;
@@ -913,6 +971,6 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
     }
 
     private sealed record TestEnvironment(string AdministratorConnection,
-        string MigratorConnection, string RuntimeConnection,
+        string MigratorConnection, string RuntimeConnection, string RecoveryConnection,
         Guid OwnerUserId, Guid OwnerMembershipA, Guid OwnerMembershipB);
 }

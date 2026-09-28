@@ -33,9 +33,11 @@ public static class DependencyInjection
     /// Production registration remains deliberately absent.
     /// </summary>
     public static IServiceCollection AddAdminAreaFixtureClosureParticipants(this IServiceCollection services,
-        Guid fixtureOrganisationId)
+        Guid fixtureOrganisationId, string recoveryConnectionString)
     {
         services.AddSingleton(new AdminAreaClosureFixtureScope(fixtureOrganisationId));
+        services.AddSingleton<IAdminAreaClosureRecoveryCapability>(
+            new NpgsqlAdminAreaClosureRecoveryCapability(recoveryConnectionString));
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<IAdminAreaClosureParticipant, AdminAreaClosureParticipant>();
         return services;

@@ -8,7 +8,8 @@ BEGIN
     SELECT * FROM (VALUES
       ('zeka_adminarea_owner', 'NOLOGIN'),
       ('zeka_adminarea_migrator', 'LOGIN'),
-      ('zeka_adminarea_runtime', 'LOGIN')
+      ('zeka_adminarea_runtime', 'LOGIN'),
+      ('zeka_adminarea_closure_recovery', 'NOLOGIN')
     ) AS managed_roles(name, login_mode)
   LOOP
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname=role_spec.name) THEN
@@ -19,6 +20,9 @@ BEGIN
     EXECUTE pg_catalog.format(
       'ALTER ROLE %I %s NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION',
       role_spec.name, role_spec.login_mode);
+    IF role_spec.name='zeka_adminarea_closure_recovery' THEN
+      ALTER ROLE zeka_adminarea_closure_recovery PASSWORD NULL;
+    END IF;
     EXECUTE pg_catalog.format('ALTER ROLE %I RESET ALL', role_spec.name);
   END LOOP;
   FOR database_setting IN
@@ -27,7 +31,8 @@ BEGIN
     JOIN pg_catalog.pg_roles role ON role.oid=role_setting.setrole
     JOIN pg_catalog.pg_database database ON database.oid=role_setting.setdatabase
     WHERE role.rolname=ANY(ARRAY[
-      'zeka_adminarea_owner', 'zeka_adminarea_migrator', 'zeka_adminarea_runtime'
+      'zeka_adminarea_owner', 'zeka_adminarea_migrator', 'zeka_adminarea_runtime',
+      'zeka_adminarea_closure_recovery'
     ])
   LOOP
     EXECUTE pg_catalog.format(
@@ -36,7 +41,12 @@ BEGIN
 END $bootstrap$;
 DO $database$ BEGIN
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
-  EXECUTE format('GRANT CONNECT ON DATABASE %I TO zeka_adminarea_migrator, zeka_adminarea_runtime', current_database());
+  EXECUTE format(
+    'REVOKE ALL ON DATABASE %I FROM zeka_adminarea_owner, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery',
+    current_database());
+  EXECUTE format(
+    'GRANT CONNECT ON DATABASE %I TO zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery',
+    current_database());
 END $database$;
 GRANT zeka_adminarea_owner TO zeka_adminarea_migrator WITH INHERIT FALSE, SET TRUE, ADMIN FALSE;
 DO $memberships$
@@ -47,17 +57,23 @@ BEGIN
     FROM pg_auth_members m
     JOIN pg_roles parent ON parent.oid=m.roleid
     JOIN pg_roles member ON member.oid=m.member
-    WHERE (parent.rolname IN ('zeka_adminarea_owner','zeka_adminarea_migrator','zeka_adminarea_runtime')
-       OR member.rolname IN ('zeka_adminarea_owner','zeka_adminarea_migrator','zeka_adminarea_runtime'))
+    WHERE (parent.rolname IN (
+             'zeka_adminarea_owner','zeka_adminarea_migrator','zeka_adminarea_runtime',
+             'zeka_adminarea_closure_recovery')
+       OR member.rolname IN (
+             'zeka_adminarea_owner','zeka_adminarea_migrator','zeka_adminarea_runtime',
+             'zeka_adminarea_closure_recovery'))
       AND NOT (parent.rolname='zeka_adminarea_owner' AND member.rolname='zeka_adminarea_migrator')
   LOOP EXECUTE format('REVOKE %I FROM %I', membership.parent_name, membership.member_name); END LOOP;
 END $memberships$;
 ALTER SCHEMA public OWNER TO zeka_adminarea_owner;
 CREATE SCHEMA IF NOT EXISTS zeka AUTHORIZATION zeka_adminarea_owner;
 ALTER SCHEMA zeka OWNER TO zeka_adminarea_owner;
-REVOKE ALL ON SCHEMA zeka FROM PUBLIC, zeka_adminarea_runtime;
-GRANT USAGE ON SCHEMA zeka TO zeka_adminarea_runtime;
-REVOKE ALL ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON SCHEMA zeka
+  FROM PUBLIC, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+GRANT USAGE ON SCHEMA zeka TO zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+REVOKE ALL ON SCHEMA public
+  FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
 GRANT USAGE ON SCHEMA public TO zeka_adminarea_migrator, zeka_adminarea_runtime;
 DO $ownership$
 DECLARE object record;
@@ -80,23 +96,32 @@ BEGIN
        OR p.oid=pg_catalog.to_regprocedure('zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)')
   LOOP EXECUTE format('ALTER FUNCTION %I.%I(%s) OWNER TO zeka_adminarea_owner', object.nspname, object.proname, object.arguments); END LOOP;
 END $functions$;
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC, zeka_adminarea_runtime;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, zeka_adminarea_runtime;
-REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON TABLES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
+REVOKE ALL ON ALL TABLES IN SCHEMA public
+  FROM PUBLIC, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public
+  FROM PUBLIC, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public
+  FROM PUBLIC, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+REVOKE ALL ON ALL TABLES IN SCHEMA zeka
+  FROM PUBLIC, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA zeka
+  FROM PUBLIC, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA zeka
+  FROM PUBLIC, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON TABLES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
 ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON FUNCTIONS FROM zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON TYPES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON SCHEMAS FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE ALL ON TYPES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON TABLES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON TYPES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON FUNCTIONS FROM zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON TYPES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner REVOKE ALL ON SCHEMAS FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA public REVOKE ALL ON TYPES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON TABLES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON SEQUENCES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON FUNCTIONS FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
+ALTER DEFAULT PRIVILEGES FOR ROLE zeka_adminarea_owner IN SCHEMA zeka REVOKE ALL ON TYPES FROM PUBLIC, zeka_adminarea_migrator, zeka_adminarea_runtime, zeka_adminarea_closure_recovery;
 DO $existing_objects$
 DECLARE object_name text;
         lifecycle_object record;
@@ -116,7 +141,7 @@ BEGIN
   LOOP
     IF pg_catalog.to_regclass(pg_catalog.format('public.%I', lifecycle_object.name)) IS NOT NULL THEN
       EXECUTE pg_catalog.format(
-        'REVOKE ALL ON TABLE public.%I FROM PUBLIC, zeka_adminarea_runtime', lifecycle_object.name);
+        'REVOKE ALL ON TABLE public.%I FROM PUBLIC, zeka_adminarea_runtime, zeka_adminarea_closure_recovery', lifecycle_object.name);
       FOR column_grant IN
         SELECT DISTINCT attribute.attname, acl.grantee,
           pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
@@ -167,8 +192,7 @@ BEGIN
   END IF;
   FOREACH object_name IN ARRAY ARRAY[
     'zeka.reject_adminarea_write_during_export()',
-    'zeka.reject_adminarea_write_during_closure()',
-    'zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)'
+    'zeka.reject_adminarea_write_during_closure()'
   ] LOOP
     IF pg_catalog.to_regprocedure(object_name) IS NOT NULL THEN
       EXECUTE pg_catalog.format(
@@ -177,6 +201,14 @@ BEGIN
         'GRANT EXECUTE ON FUNCTION %s TO zeka_adminarea_runtime', object_name);
     END IF;
   END LOOP;
+  object_name := 'zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)';
+  IF pg_catalog.to_regprocedure(object_name) IS NOT NULL THEN
+    EXECUTE pg_catalog.format(
+      'REVOKE ALL ON FUNCTION %s FROM PUBLIC, zeka_adminarea_runtime, zeka_adminarea_closure_recovery',
+      object_name);
+    EXECUTE pg_catalog.format(
+      'GRANT EXECUTE ON FUNCTION %s TO zeka_adminarea_closure_recovery', object_name);
+  END IF;
   FOREACH object_name IN ARRAY ARRAY['public.zeka_city_key(text)', 'public.zeka_city_text(text)'] LOOP
     IF pg_catalog.to_regprocedure(object_name) IS NOT NULL THEN
       EXECUTE pg_catalog.format(

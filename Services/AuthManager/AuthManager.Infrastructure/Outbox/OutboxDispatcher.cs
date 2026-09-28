@@ -112,7 +112,19 @@ internal sealed class OutboxDispatcher(
             return true;
         }
 
-        if (await IsPublicationBoundaryEstablished(organisationId, cancellationToken))
+        var boundary = await PublicationBoundary(organisationId, cancellationToken);
+        if (boundary == OrganisationPublicationBoundary.Archived)
+        {
+            message.MarkTerminallyRetained(timeProvider.GetUtcNow(), "OrganisationArchived");
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            logger.LogInformation(
+                "Outbox message {MessageId} ({MessageType}) was terminally retained because the organisation is archived.",
+                message.Id, message.MessageType);
+            return false;
+        }
+
+        if (boundary == OrganisationPublicationBoundary.Closing)
         {
             message.Defer(timeProvider.GetUtcNow().Add(_options.InitialRetryDelay),
                 "OrganisationLifecycleBoundary");
@@ -131,7 +143,7 @@ internal sealed class OutboxDispatcher(
         return true;
     }
 
-    private async Task<bool> IsPublicationBoundaryEstablished(Guid organisationId,
+    private async Task<OrganisationPublicationBoundary> PublicationBoundary(Guid organisationId,
         CancellationToken cancellationToken)
     {
         var transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction()
@@ -139,14 +151,15 @@ internal sealed class OutboxDispatcher(
         await using var command = transaction.Connection!.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT EXISTS (
-              SELECT 1 FROM public."Organisations" o
-              WHERE o."Id"=@organisation_id
-                AND (o."Status"=@archived
-                  OR (o."Status"=@closing AND EXISTS (
-                    SELECT 1 FROM public."AuthClosureParticipantExecutions" e
-                    WHERE e."OrganisationId"=o."Id")))
-            )
+            SELECT CASE
+              WHEN o."Status"=@archived THEN 2
+              WHEN o."Status"=@closing AND EXISTS (
+                SELECT 1 FROM public."AuthClosureParticipantExecutions" e
+                WHERE e."OrganisationId"=o."Id") THEN 1
+              ELSE 0
+            END
+            FROM public."Organisations" o
+            WHERE o."Id"=@organisation_id
             """;
         var organisation = command.CreateParameter();
         organisation.ParameterName = "organisation_id";
@@ -160,7 +173,10 @@ internal sealed class OutboxDispatcher(
         archived.ParameterName = "archived";
         archived.Value = (int)OrganisationStatus.Archived;
         command.Parameters.Add(archived);
-        return Equals(await command.ExecuteScalarAsync(cancellationToken), true);
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is int state && Enum.IsDefined(typeof(OrganisationPublicationBoundary), state)
+            ? (OrganisationPublicationBoundary)state
+            : OrganisationPublicationBoundary.Open;
     }
 
     private async Task<List<Guid>> CandidateIdsAsync(DateTimeOffset now, CancellationToken cancellationToken)
@@ -235,5 +251,12 @@ internal sealed class OutboxDispatcher(
         if (_options.BatchSize < 1 || _options.MaxAttempts < 1 || _options.LeaseDuration <= TimeSpan.Zero ||
             _options.InitialRetryDelay <= TimeSpan.Zero || _options.MaxRetryDelay < _options.InitialRetryDelay)
             throw new InvalidOperationException("Outbox dispatcher options are invalid.");
+    }
+
+    private enum OrganisationPublicationBoundary
+    {
+        Open = 0,
+        Closing = 1,
+        Archived = 2
     }
 }

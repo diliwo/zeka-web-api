@@ -70,4 +70,12 @@ public sealed class OutboxMessage
         LeaseId = null;
         LeaseExpiresAtUtc = null;
     }
+
+    public void MarkTerminallyRetained(DateTimeOffset now, string reason)
+    {
+        DeadLetteredAtUtc = now;
+        LastError = reason;
+        LeaseId = null;
+        LeaseExpiresAtUtc = null;
+    }
 }

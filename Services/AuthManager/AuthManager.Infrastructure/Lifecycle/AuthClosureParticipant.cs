@@ -16,7 +16,10 @@ namespace AuthManager.Infrastructure.Lifecycle;
 /// AuthManagement-owned durable LIFE-02 closure participant. The ordinary-write boundary, inbox
 /// identity and outbound acknowledgement commit atomically under the organisation barrier lock.
 /// </summary>
-public sealed class AuthClosureParticipant(DbContextOptions<AuthDbContext> options, TimeProvider clock)
+public sealed class AuthClosureParticipant(
+    DbContextOptions<AuthDbContext> options,
+    TimeProvider clock,
+    IAuthClosureRecoveryCapability? recoveryCapability = null)
 {
     private const string ParticipantId = "auth-management";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -48,10 +51,16 @@ public sealed class AuthClosureParticipant(DbContextOptions<AuthDbContext> optio
             return completed;
         }, cancellationToken);
 
-    public Task<OrganisationClosureFenceReleasedV1> ReleaseAsync(
+    public async Task<OrganisationClosureFenceReleasedV1> ReleaseAsync(
         ReleaseOrganisationClosureFenceV1 command,
-        CancellationToken cancellationToken = default) => ExecuteAsync(
-        command.Header, nameof(ReleaseOrganisationClosureFenceV1), command, async database =>
+        CancellationToken cancellationToken = default)
+    {
+        ValidateCommandHeader(command.Header, nameof(ReleaseOrganisationClosureFenceV1));
+        var observedAt = LifecycleContractTimeV1.Normalize(clock.GetUtcNow());
+        await (recoveryCapability ?? new UnavailableAuthClosureRecoveryCapability())
+            .ReleaseAsync(command, observedAt, cancellationToken);
+        return await ExecuteAsync(
+            command.Header, nameof(ReleaseOrganisationClosureFenceV1), command, async database =>
         {
             await AcquireBarrierLock(database, command.Header.OrganisationId, cancellationToken);
             var organisation = await database.Organisations.SingleOrDefaultAsync(
@@ -61,7 +70,8 @@ public sealed class AuthClosureParticipant(DbContextOptions<AuthDbContext> optio
                     "Auth closure release requires a durable Closing organisation.");
             var execution = await database.AuthClosureParticipantExecutions.SingleAsync(
                 x => x.OperationId == command.Header.OperationId, cancellationToken);
-            if (execution.State != AuthClosureParticipantState.FenceEntered
+            if (execution.State != AuthClosureParticipantState.Released
+                || execution.ReleasedAt is null
                 || command.Header.OperationRevision != execution.OperationRevision + 1)
                 throw new InvalidOperationException(
                     "Auth closure release must bind exactly to the successor recovery revision.");
@@ -77,21 +87,11 @@ public sealed class AuthClosureParticipant(DbContextOptions<AuthDbContext> optio
                 || command.Header.CorrelationId != command.Header.OperationId)
                 throw new InvalidOperationException(
                     "Auth closure release causation must bind to the durable enter receipt.");
-            var observedAt = LifecycleContractTimeV1.Normalize(clock.GetUtcNow());
-            var releasedAt = observedAt >= execution.BoundaryEstablishedAt
-                ? observedAt : execution.BoundaryEstablishedAt;
-            var released = await database.Database.SqlQueryRaw<bool>(
-                "SELECT zeka.release_auth_closure_fence({0}, {1}, {2}, {3}, {4}, {5}, {6}) AS \"Value\"",
-                command.Header.OperationId, command.Header.OrganisationId,
-                command.Header.OperationRevision, command.FenceToken,
-                command.Header.CausationId, command.Header.CorrelationId, releasedAt)
-                .SingleAsync(cancellationToken);
-            if (!released)
-                throw new InvalidOperationException("Auth closure release was rejected by the durable owner boundary.");
-            await database.Entry(execution).ReloadAsync(cancellationToken);
             return new OrganisationClosureFenceReleasedV1(
-                ReplyHeader(command.Header, "release-completed"), command.FenceToken, releasedAt);
+                ReplyHeader(command.Header, "release-completed"), command.FenceToken,
+                execution.ReleasedAt.Value);
         }, cancellationToken);
+    }
 
     private async Task<T> ExecuteAsync<T>(LifecycleMessageHeaderV1 header, string messageType,
         object command, Func<AuthDbContext, Task<T>> transition, CancellationToken cancellationToken)

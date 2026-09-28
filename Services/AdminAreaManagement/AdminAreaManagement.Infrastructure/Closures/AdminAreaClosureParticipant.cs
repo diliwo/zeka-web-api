@@ -17,6 +17,7 @@ internal sealed class AdminAreaClosureParticipant(
     ITenantTransactionExecutor transactions,
     TenantTransactionAttemptState attempt,
     AdminAreaClosureFixtureScope fixture,
+    IAdminAreaClosureRecoveryCapability recoveryCapability,
     TimeProvider clock) : IAdminAreaClosureParticipant
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -60,19 +61,21 @@ internal sealed class AdminAreaClosureParticipant(
             return response;
         }, cancellationToken);
 
-    public Task<OrganisationClosureFenceReleasedV1> ReleaseFenceAsync(
+    public async Task<OrganisationClosureFenceReleasedV1> ReleaseFenceAsync(
         ReleaseOrganisationClosureFenceV1 command, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
         DemandHeader(command.Header);
         DemandMessageIdentity(command.Header, "release-fence");
         fixture.Demand(command.Header.OrganisationId);
-        return transactions.ExecuteAsync(async token =>
+        await recoveryCapability.ReleaseAsync(command,
+            LifecycleContractTimeV1.Normalize(clock.GetUtcNow()), cancellationToken);
+        return await transactions.ExecuteAsync(async token =>
         {
             await AdminAreaClosureGate.AcquireOrganisationLockAsync(
                 database, attempt, command.Header.OrganisationId, token);
             var duplicate = await DemandInboxReplayAsync(command.Header, "release-fence", command.PayloadHash, token);
-            var fence = await database.AdminAreaClosureFences.SingleOrDefaultAsync(x =>
+            var fence = await database.AdminAreaClosureFences.AsNoTracking().SingleOrDefaultAsync(x =>
                 x.OperationId == command.Header.OperationId
                 && x.ParticipantId == command.Header.ParticipantId, token)
                 ?? throw new InvalidOperationException("The closure fence does not exist.");
@@ -93,7 +96,7 @@ internal sealed class AdminAreaClosureParticipant(
                 return Released(command.Header, fence);
 
             if (fence.ReleasedAt is null)
-                await ReleaseThroughOwnerFunctionAsync(command, fence, token);
+                throw new InvalidOperationException("The recovery capability did not release the matching fence.");
             var response = Released(command.Header, fence);
             await RecordInboxAndOutboxAsync(command.Header, "release-fence", command.PayloadHash,
                 response.Header, response, token);
@@ -114,41 +117,6 @@ internal sealed class AdminAreaClosureParticipant(
                 cancellationToken))
             throw new InvalidOperationException(
                 "Pre-boundary document file operations must drain before the closure fence can be established.");
-    }
-
-    private async Task ReleaseThroughOwnerFunctionAsync(ReleaseOrganisationClosureFenceV1 command,
-        AdminAreaClosureFence fence, CancellationToken cancellationToken)
-    {
-        var transaction = database.Database.CurrentTransaction?.GetDbTransaction()
-            ?? throw new InvalidOperationException("Closure release requires an active database transaction.");
-        await using var release = database.Database.GetDbConnection().CreateCommand();
-        release.Transaction = transaction;
-        release.CommandText = """
-            SELECT zeka.release_adminarea_closure_fence(
-              @operation,@organisation,@participant,@revision,@token,@contract,
-              @message,@causation,@correlation,@released_at)
-            """;
-        release.Parameters.Add(new Npgsql.NpgsqlParameter("operation", command.Header.OperationId));
-        release.Parameters.Add(new Npgsql.NpgsqlParameter("organisation", command.Header.OrganisationId));
-        release.Parameters.Add(new Npgsql.NpgsqlParameter("participant", command.Header.ParticipantId));
-        release.Parameters.Add(new Npgsql.NpgsqlParameter<long>("revision", command.Header.OperationRevision));
-        release.Parameters.Add(new Npgsql.NpgsqlParameter("token", command.FenceToken));
-        release.Parameters.Add(new Npgsql.NpgsqlParameter<int>("contract", command.Header.ContractVersion));
-        release.Parameters.Add(new Npgsql.NpgsqlParameter("message", command.Header.MessageId));
-        release.Parameters.Add(new Npgsql.NpgsqlParameter("causation", command.Header.CausationId));
-        release.Parameters.Add(new Npgsql.NpgsqlParameter("correlation", command.Header.CorrelationId));
-        release.Parameters.Add(new Npgsql.NpgsqlParameter("released_at",
-            LifecycleContractTimeV1.Normalize(clock.GetUtcNow())));
-        var result = await release.ExecuteScalarAsync(cancellationToken)
-            ?? throw new InvalidOperationException("Closure release did not return a timestamp.");
-        var releasedAt = result switch
-        {
-            DateTimeOffset value => value,
-            DateTime value => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)),
-            _ => throw new InvalidOperationException("Closure release returned an invalid timestamp.")
-        };
-        database.Entry(fence).State = EntityState.Detached;
-        fence.Release(LifecycleContractTimeV1.Normalize(releasedAt));
     }
 
     private async Task<AdminAreaClosureFence> CreateFenceAsync(
