@@ -65,12 +65,6 @@ namespace AuthManager.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_LifecycleCoordinatorLeases", x => x.OperationId);
-                    table.ForeignKey(
-                        name: "FK_LifecycleCoordinatorLeases_OrganisationLifecycleOperations_~",
-                        columns: x => new { x.OperationId, x.OrganisationId },
-                        principalTable: "OrganisationLifecycleOperations",
-                        principalColumns: new[] { "Id", "OrganisationId" },
-                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -93,12 +87,6 @@ namespace AuthManager.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_LifecycleExportFenceReceipts", x => new { x.OperationId, x.ParticipantId });
-                    table.ForeignKey(
-                        name: "FK_LifecycleExportFenceReceipts_OrganisationLifecycleOperation~",
-                        columns: x => new { x.OperationId, x.OrganisationId },
-                        principalTable: "OrganisationLifecycleOperations",
-                        principalColumns: new[] { "Id", "OrganisationId" },
-                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -119,12 +107,6 @@ namespace AuthManager.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_LifecycleExportFragments", x => new { x.OperationId, x.ParticipantId });
-                    table.ForeignKey(
-                        name: "FK_LifecycleExportFragments_OrganisationLifecycleOperations_Op~",
-                        columns: x => new { x.OperationId, x.OrganisationId },
-                        principalTable: "OrganisationLifecycleOperations",
-                        principalColumns: new[] { "Id", "OrganisationId" },
-                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -141,12 +123,6 @@ namespace AuthManager.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_LifecycleExportPackages", x => x.OperationId);
-                    table.ForeignKey(
-                        name: "FK_LifecycleExportPackages_OrganisationLifecycleOperations_Ope~",
-                        columns: x => new { x.OperationId, x.OrganisationId },
-                        principalTable: "OrganisationLifecycleOperations",
-                        principalColumns: new[] { "Id", "OrganisationId" },
-                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -163,13 +139,23 @@ namespace AuthManager.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_LifecycleInboxReceipts", x => x.MessageId);
-                    table.ForeignKey(
-                        name: "FK_LifecycleInboxReceipts_OrganisationLifecycleOperations_Oper~",
-                        columns: x => new { x.OperationId, x.OrganisationId },
-                        principalTable: "OrganisationLifecycleOperations",
-                        principalColumns: new[] { "Id", "OrganisationId" },
-                        onDelete: ReferentialAction.Restrict);
                 });
+
+            foreach (var (table, constraint) in new[]
+                     {
+                         ("LifecycleCoordinatorLeases", "FK_LifecycleCoordinatorLeases_OrganisationLifecycleOperations_~"),
+                         ("LifecycleExportFenceReceipts", "FK_LifecycleExportFenceReceipts_OrganisationLifecycleOperation~"),
+                         ("LifecycleExportFragments", "FK_LifecycleExportFragments_OrganisationLifecycleOperations_Op~"),
+                         ("LifecycleExportPackages", "FK_LifecycleExportPackages_OrganisationLifecycleOperations_Ope~"),
+                         ("LifecycleInboxReceipts", "FK_LifecycleInboxReceipts_OrganisationLifecycleOperations_Oper~")
+                     })
+                migrationBuilder.AddForeignKey(
+                    name: constraint,
+                    table: table,
+                    columns: new[] { "OperationId", "OrganisationId" },
+                    principalTable: "OrganisationLifecycleOperations",
+                    principalColumns: new[] { "Id", "OrganisationId" },
+                    onDelete: ReferentialAction.Restrict);
 
             foreach (var table in new[]
                      {
