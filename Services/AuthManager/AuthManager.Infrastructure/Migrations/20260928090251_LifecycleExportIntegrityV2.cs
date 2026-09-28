@@ -156,6 +156,8 @@ namespace AuthManager.Infrastructure.Migrations
                 DECLARE scoped_organisation uuid;
                 BEGIN
                   scoped_organisation := CASE WHEN TG_OP='DELETE' THEN OLD."OrganisationId" ELSE NEW."OrganisationId" END;
+                  PERFORM pg_catalog.pg_advisory_xact_lock(
+                    pg_catalog.hashtextextended(scoped_organisation::text, 0));
                   IF EXISTS (
                     SELECT 1
                     FROM public."AuthExportParticipantExecutions" execution
@@ -172,6 +174,11 @@ namespace AuthManager.Infrastructure.Migrations
                   FROM PUBLIC, zeka_auth_runtime;
                 GRANT EXECUTE ON FUNCTION zeka.reject_auth_membership_write_during_export_fence()
                   TO zeka_auth_runtime;
+                DROP TRIGGER IF EXISTS trg_auth_permission_grant_export_fence
+                  ON public."MembershipPermissionGrants";
+                CREATE TRIGGER trg_auth_permission_grant_export_fence
+                  BEFORE INSERT OR UPDATE OR DELETE ON public."MembershipPermissionGrants"
+                  FOR EACH ROW EXECUTE FUNCTION zeka.reject_auth_membership_write_during_export_fence();
                 RESET ROLE;
                 """);
         }
@@ -190,6 +197,8 @@ namespace AuthManager.Infrastructure.Migrations
                 DECLARE scoped_organisation uuid;
                 BEGIN
                   scoped_organisation := CASE WHEN TG_OP='DELETE' THEN OLD."OrganisationId" ELSE NEW."OrganisationId" END;
+                  PERFORM pg_catalog.pg_advisory_xact_lock(
+                    pg_catalog.hashtextextended(scoped_organisation::text, 0));
                   IF EXISTS (
                     SELECT 1
                     FROM public."LifecycleExportFenceReceipts" receipt
@@ -209,6 +218,8 @@ namespace AuthManager.Infrastructure.Migrations
                   FROM PUBLIC, zeka_auth_runtime;
                 GRANT EXECUTE ON FUNCTION zeka.reject_auth_membership_write_during_export_fence()
                   TO zeka_auth_runtime;
+                DROP TRIGGER IF EXISTS trg_auth_permission_grant_export_fence
+                  ON public."MembershipPermissionGrants";
                 """);
 
             migrationBuilder.DropTable(

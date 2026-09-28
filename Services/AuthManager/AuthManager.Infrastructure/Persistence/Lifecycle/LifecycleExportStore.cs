@@ -97,8 +97,10 @@ public sealed class LifecycleExportStore(
             operation.Id, operation.Revision);
     }, cancellationToken);
 
-    public Task<ExportProgressResult> AcceptFragmentAsync(OrganisationExportFragmentReadyV1 fragment,
-        CancellationToken cancellationToken) => ExecuteAsync(fragment.Header.OperationId,
+    public async Task<ExportProgressResult> AcceptFragmentAsync(OrganisationExportFragmentReadyV1 fragment,
+        CancellationToken cancellationToken)
+    {
+        var result = await ExecuteAsync(fragment.Header.OperationId,
         fragment.Header.OrganisationId, async database =>
     {
         var operation = await Operation(database, fragment.Header.OperationId, cancellationToken);
@@ -146,7 +148,15 @@ public sealed class LifecycleExportStore(
         if (operation.State != LifecycleOperationState.AssemblingPackage)
             return Result(ExportProgressStatus.AwaitingParticipants, operation.Id, operation.Revision);
         return await AssembleAsync(database, operation, cancellationToken);
-    }, cancellationToken);
+        }, cancellationToken);
+
+        // Package preparation is committed in its own attempt before the external sink is called.
+        // This second attempt therefore uses a durable timestamp and package hash after a crash/retry.
+        return result.Status == ExportProgressStatus.Progressed
+            && result.PackageSha256 is not null && result.PackageReference is null
+            ? await ResumeAsync(fragment.Header.OperationId, fragment.Header.OrganisationId, cancellationToken)
+            : result;
+    }
 
     public Task<ExportProgressResult> AcceptReleaseAsync(OrganisationExportFenceReleasedV1 release,
         CancellationToken cancellationToken) => ExecuteAsync(release.Header.OperationId,
@@ -158,11 +168,12 @@ public sealed class LifecycleExportStore(
         var dedupe = await Dedupe(database, release.Header, nameof(OrganisationExportFenceReleasedV1), payload, cancellationToken);
         if (dedupe is not null) return Result(dedupe.Value, operation.Id, operation.Revision,
             operation.PackageSha256, operation.PackageReference);
-        var fence = await database.LifecycleExportFenceReceipts.SingleAsync(x =>
-            x.OperationId == operation.Id && x.ParticipantId == release.Header.ParticipantId, cancellationToken);
         if (operation.State != LifecycleOperationState.ReleasingFence
-            || release.Header.OperationRevision != fence.OperationRevision
             || !Matches(operation, release.Header, OrganisationExportCapabilityV1.Fence))
+            return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
+        var fence = await database.LifecycleExportFenceReceipts.SingleOrDefaultAsync(x =>
+            x.OperationId == operation.Id && x.ParticipantId == release.Header.ParticipantId, cancellationToken);
+        if (fence is null || release.Header.OperationRevision != fence.OperationRevision)
             return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
         if (!string.Equals(fence.FenceToken, release.FenceToken, StringComparison.Ordinal))
             return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
@@ -220,18 +231,21 @@ public sealed class LifecycleExportStore(
             return Result(ExportProgressStatus.Progressed, operation.Id, operation.Revision,
                 existing.PackageSha256, existing.PackageReference);
 
-        var now = clock.GetUtcNow();
-        var leaseId = Guid.NewGuid();
-        var lease = await database.LifecycleCoordinatorLeases.SingleOrDefaultAsync(
-            x => x.OperationId == operation.Id, cancellationToken);
-        if (lease is null)
+        var now = operation.CompletedAt ?? clock.GetUtcNow();
+        if (operation.PackageSha256 is null || operation.CompletedAt is null)
         {
-            lease = LifecycleCoordinatorLease.Create(operation.Id, operation.OrganisationId,
-                leaseId, now.AddMinutes(5));
-            database.Add(lease);
+            var leaseId = Guid.NewGuid();
+            var lease = await database.LifecycleCoordinatorLeases.SingleOrDefaultAsync(
+                x => x.OperationId == operation.Id, cancellationToken);
+            if (lease is null)
+            {
+                lease = LifecycleCoordinatorLease.Create(operation.Id, operation.OrganisationId,
+                    leaseId, now.AddMinutes(5));
+                database.Add(lease);
+            }
+            else if (!lease.TryAcquire(leaseId, now, now.AddMinutes(5)))
+                return Result(ExportProgressStatus.AwaitingParticipants, operation.Id, operation.Revision);
         }
-        else if (!lease.TryAcquire(leaseId, now, now.AddMinutes(5)))
-            return Result(ExportProgressStatus.AwaitingParticipants, operation.Id, operation.Revision);
 
         var fragments = await database.LifecycleExportFragments.Where(x => x.OperationId == operation.Id)
             .OrderBy(x => x.ParticipantId).ToListAsync(cancellationToken);
@@ -249,11 +263,23 @@ public sealed class LifecycleExportStore(
             operation.RegistryRevision, operation.InventoryHash, operation.ExportInventoryHash!, operation.SnapshotAt!.Value,
             operation.FenceEvidenceHash!, operation.RequestingSubjectId, operation.RequestedAt,
             now, "completed", categories, bytes));
+
+        if (operation.PackageSha256 is null || operation.CompletedAt is null)
+        {
+            operation.PreparePackage(output.PackageSha256, now);
+            await database.SaveChangesAsync(cancellationToken);
+            return Result(ExportProgressStatus.Progressed, operation.Id, operation.Revision,
+                output.PackageSha256);
+        }
+        if (!string.Equals(operation.PackageSha256, output.PackageSha256, StringComparison.Ordinal))
+            return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision,
+                operation.PackageSha256, operation.PackageReference);
+
         var packageReference = await packages.StoreAsync(operation.Id, output.PackageSha256,
             output.Content, cancellationToken);
         database.Add(LifecycleExportPackage.Create(operation.Id, operation.OrganisationId,
             output.ManifestSha256, output.PackageSha256, packageReference, now));
-        operation.RecordPackage(output.PackageSha256, packageReference, now);
+        operation.RecordPackage(output.PackageSha256, packageReference);
         foreach (var participant in FenceParticipants(operation))
         {
             var receipt = await database.LifecycleExportFenceReceipts.SingleAsync(x =>

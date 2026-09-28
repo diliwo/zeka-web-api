@@ -5,6 +5,7 @@ using ClientManagement.Core.Entities;
 using ClientManagement.Core.Lifecycle;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
 using Zeka.Lifecycle.Contracts;
 
 namespace ClientManagement.Infrastructure.Persistence.Lifecycle;
@@ -25,11 +26,13 @@ public sealed class ClientOrganisationExportParticipant(
         ValidateHeader(command.Header);
         fixtureScope.Demand(command.Header.OrganisationId);
         var requestHash = ClientExportCanonical.RequestHash(command);
-        return transactions.ExecuteAsync(async token =>
+        return ExecuteReplaySafeAsync(async token =>
         {
             var replay = await Replay<OrganisationExportFenceEnteredV1>(command.Header, requestHash, token);
             if (replay is not null) return replay;
             await AcquireBarrierLock(command.Header.OrganisationId, token);
+            replay = await Replay<OrganisationExportFenceEnteredV1>(command.Header, requestHash, token);
+            if (replay is not null) return replay;
             var active = await database.OrganisationExportFences.SingleOrDefaultAsync(
                 x => x.ReleasedAt == null, token);
             if (active is not null && active.OperationId != command.Header.OperationId)
@@ -55,7 +58,7 @@ public sealed class ClientOrganisationExportParticipant(
         ValidateHeader(command.Header);
         fixtureScope.Demand(command.Header.OrganisationId);
         var requestHash = ClientExportCanonical.RequestHash(command);
-        return transactions.ExecuteAsync(async token =>
+        return ExecuteReplaySafeAsync(async token =>
         {
             await AcquireBarrierLock(command.Header.OrganisationId, token);
             var replay = await Replay<OrganisationExportFragmentReadyV1>(command.Header, requestHash, token);
@@ -127,11 +130,13 @@ public sealed class ClientOrganisationExportParticipant(
         ValidateHeader(command.Header);
         fixtureScope.Demand(command.Header.OrganisationId);
         var requestHash = ClientExportCanonical.RequestHash(command);
-        return transactions.ExecuteAsync(async token =>
+        return ExecuteReplaySafeAsync(async token =>
         {
             var replay = await Replay<OrganisationExportFenceReleasedV1>(command.Header, requestHash, token);
             if (replay is not null) return replay;
             await AcquireBarrierLock(command.Header.OrganisationId, token);
+            replay = await Replay<OrganisationExportFenceReleasedV1>(command.Header, requestHash, token);
+            if (replay is not null) return replay;
             var fence = await database.OrganisationExportFences.AsNoTracking().SingleOrDefaultAsync(
                 x => x.OperationId == command.Header.OperationId, token)
                 ?? throw new InvalidOperationException("organisation_export_fence_missing");
@@ -148,6 +153,26 @@ public sealed class ClientOrganisationExportParticipant(
             return response;
         }, cancellationToken);
     }
+
+    private async Task<T> ExecuteReplaySafeAsync<T>(Func<CancellationToken, Task<T>> work,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try { return await transactions.ExecuteAsync(work, cancellationToken); }
+            catch (Exception exception) when (IsRetryable(exception)) { }
+        }
+        throw new InvalidOperationException("Client export participant could not reconcile a concurrent delivery.");
+    }
+
+    private static bool IsRetryable(Exception exception) => exception switch
+    {
+        PostgresException { SqlState: PostgresErrorCodes.UniqueViolation
+            or PostgresErrorCodes.SerializationFailure } => true,
+        DbUpdateException { InnerException: not null } update => IsRetryable(update.InnerException),
+        InvalidOperationException { InnerException: not null } wrapper => IsRetryable(wrapper.InnerException),
+        _ => false
+    };
 
     private async Task<List<MaterializedCategory>> Materialize(StageOrganisationExportV1 command,
         CancellationToken token)

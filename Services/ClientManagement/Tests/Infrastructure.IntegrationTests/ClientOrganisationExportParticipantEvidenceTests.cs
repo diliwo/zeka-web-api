@@ -160,6 +160,33 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
     }
 
     [Fact]
+    public async Task Concurrent_duplicate_enter_and_release_return_the_durable_receipts()
+    {
+        var organisation = Guid.NewGuid();
+        using var artifacts = new TemporaryArtifacts();
+        await using var providerA = Provider(organisation, artifacts.Root);
+        await using var providerB = Provider(organisation, artifacts.Root);
+        var operation = Guid.NewGuid();
+        var correlation = Guid.NewGuid();
+        var enter = new EnterOrganisationExportFenceV1(
+            Header(operation, organisation, Guid.NewGuid(), correlation));
+
+        var entered = await Task.WhenAll(
+            Invoke(providerA, organisation, participant => participant.EnterFenceAsync(enter)),
+            Invoke(providerB, organisation, participant => participant.EnterFenceAsync(enter)));
+        Assert.Equal(entered[0].Header.MessageId, entered[1].Header.MessageId);
+        Assert.Equal(entered[0].ReceiptHash, entered[1].ReceiptHash);
+
+        var release = new ReleaseOrganisationExportFenceV1(
+            Header(operation, organisation, Guid.NewGuid(), correlation), entered[0].FenceToken);
+        var released = await Task.WhenAll(
+            Invoke(providerA, organisation, participant => participant.ReleaseFenceAsync(release)),
+            Invoke(providerB, organisation, participant => participant.ReleaseFenceAsync(release)));
+        Assert.Equal(released[0].Header.MessageId, released[1].Header.MessageId);
+        Assert.Equal(released[0].ReleasedAt, released[1].ReleasedAt);
+    }
+
+    [Fact]
     public async Task Runtime_lifecycle_evidence_is_append_only_except_for_fence_release()
     {
         var organisation = Guid.NewGuid();

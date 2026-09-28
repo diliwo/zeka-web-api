@@ -51,7 +51,7 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
         Assert.Equal(64, operation.ExportInventoryHash!.Length);
         Assert.Equal(21, JsonDocument.Parse(operation.ExportInventoryJson!).RootElement.GetArrayLength());
         var artifactStore = new InMemoryExportArtifactStore();
-        var packageSink = new InMemoryExportPackageSink();
+        var packageSink = new FailAfterFirstStorePackageSink();
         var clock = new ManualTimeProvider(Now.AddMinutes(1));
         LifecycleExportStore Store(IReviewedExportCategoryInventory? inventory = null) => new(Options(environment.RuntimeConnection),
             new DeterministicExportPackageAssembler(), artifactStore, packageSink,
@@ -82,16 +82,20 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
         {
             var header = Header(operation.Id, fenceRevision, participant);
             var enter = new EnterOrganisationExportFenceV1(header);
-            var receipt = participant == AuthExportInventoryV1.ParticipantId
-                ? await authParticipant.EnterAsync(enter)
-                : new OrganisationExportFenceEnteredV1(header, fenceTokens[participant], 1, Now.AddSeconds(30));
+            OrganisationExportFenceEnteredV1 receipt;
             if (participant == AuthExportInventoryV1.ParticipantId)
             {
+                var concurrent = await Task.WhenAll(
+                    authParticipant.EnterAsync(enter),
+                    new AuthExportParticipant(Options(environment.RuntimeConnection), artifactStore, participantClock)
+                        .EnterAsync(enter));
+                receipt = concurrent[0];
+                Assert.Equal(receipt.Header.MessageId, concurrent[1].Header.MessageId);
+                Assert.Equal(receipt.ReceiptHash, concurrent[1].ReceiptHash);
                 fenceTokens[participant] = receipt.FenceToken;
-                var replay = await new AuthExportParticipant(Options(environment.RuntimeConnection),
-                    artifactStore, participantClock).EnterAsync(enter);
-                Assert.Equal(receipt.ReceiptHash, replay.ReceiptHash);
             }
+            else receipt = new OrganisationExportFenceEnteredV1(
+                header, fenceTokens[participant], 1, Now.AddSeconds(30));
             fenceReceipts.Add(receipt);
             firstReceipt ??= receipt;
             var result = await coordinator.ReceiveAsync(receipt);
@@ -137,8 +141,15 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
                 ["partner-document-artifacts"], artifactStore),
             await ClientFragment(operation.Id, fenceTokens["client-management"], artifactStore)
         };
-        foreach (var fragment in fragments)
-            await coordinator.ReceiveAsync(fragment);
+        await coordinator.ReceiveAsync(fragments[0]);
+        await coordinator.ReceiveAsync(fragments[1]);
+        await Assert.ThrowsAsync<IOException>(() => coordinator.ReceiveAsync(fragments[2]));
+        coordinator = new LifecycleExportCoordinator(Store(new InventoryMustNotBeConsultedAfterAdmission()));
+        var packageRecovery = Assert.Single(await coordinator.RecoverAsync(OrganisationId, clock.GetUtcNow()));
+        Assert.Equal(ExportProgressStatus.Progressed, packageRecovery.Status);
+        Assert.Equal(2, packageSink.Attempts);
+        Assert.Single(packageSink.ObservedHashes.Distinct(StringComparer.Ordinal));
+        Assert.True(packageSink.ObservedContents[0].AsSpan().SequenceEqual(packageSink.ObservedContents[1]));
 
         var persistedHash = Assert.IsType<string>(await RuntimeScalar(environment.RuntimeConnection,
             "SELECT \"PackageSha256\" FROM public.\"LifecycleExportPackages\""));
@@ -165,20 +176,34 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
         Assert.Equal(4L, await RuntimeScalar(environment.RuntimeConnection,
             "SELECT count(DISTINCT \"FragmentHash\") FROM public.\"LifecycleExportFragments\""));
 
+        var unknownRelease = new OrganisationExportFenceReleasedV1(
+            new LifecycleMessageHeaderV1(operation.Id, OrganisationId, 2, "unknown-participant", 1,
+                Guid.NewGuid(), operation.Id, operation.Id), "unknown-fence", Now.AddMinutes(2));
+        Assert.Equal(ExportProgressStatus.Conflict,
+            (await coordinator.ReceiveAsync(unknownRelease)).Status);
+        var crossOrganisationRelease = new OrganisationExportFenceReleasedV1(
+            new LifecycleMessageHeaderV1(operation.Id, Guid.NewGuid(), 2, "auth-management", 1,
+                Guid.NewGuid(), operation.Id, operation.Id), fenceTokens["auth-management"], Now.AddMinutes(2));
+        Assert.Equal(ExportProgressStatus.Rejected,
+            (await coordinator.ReceiveAsync(crossOrganisationRelease)).Status);
+
         foreach (var participant in fenceTokens.Keys.Order(StringComparer.Ordinal))
         {
             var releaseCommand = new ReleaseOrganisationExportFenceV1(
                 Header(operation.Id, 2, participant), fenceTokens[participant]);
-            var release = participant == AuthExportInventoryV1.ParticipantId
-                ? await authParticipant.ReleaseAsync(releaseCommand)
-                : new OrganisationExportFenceReleasedV1(
-                    Header(operation.Id, 2, participant), fenceTokens[participant], Now.AddMinutes(2));
+            OrganisationExportFenceReleasedV1 release;
             if (participant == AuthExportInventoryV1.ParticipantId)
             {
-                var replay = await new AuthExportParticipant(Options(environment.RuntimeConnection),
-                    artifactStore, participantClock).ReleaseAsync(releaseCommand);
-                Assert.Equal(release.ReleasedAt, replay.ReleasedAt);
+                var concurrent = await Task.WhenAll(
+                    authParticipant.ReleaseAsync(releaseCommand),
+                    new AuthExportParticipant(Options(environment.RuntimeConnection), artifactStore, participantClock)
+                        .ReleaseAsync(releaseCommand));
+                release = concurrent[0];
+                Assert.Equal(release.Header.MessageId, concurrent[1].Header.MessageId);
+                Assert.Equal(release.ReleasedAt, concurrent[1].ReleasedAt);
             }
+            else release = new OrganisationExportFenceReleasedV1(
+                Header(operation.Id, 2, participant), fenceTokens[participant], Now.AddMinutes(2));
             await coordinator.ReceiveAsync(release);
         }
         Assert.Equal($"{(int)LifecycleOperationState.Completed}|false", await RuntimeScalar(
@@ -269,6 +294,91 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
             "SELECT \"State\"::text || '|' || \"Revision\"::text FROM public.\"OrganisationLifecycleOperations\""));
         Assert.Equal(true, await RuntimeScalar(environment.RuntimeConnection,
             "SELECT \"SnapshotAt\" IS NULL FROM public.\"OrganisationLifecycleOperations\""));
+    }
+
+    [Fact]
+    public async Task Membership_write_started_before_auth_fence_commits_before_snapshot_and_is_exported()
+    {
+        var environment = await CreateEnvironmentAsync();
+        var registry = Registry();
+        await using (var activation = new AuthDbContext(Options(environment.MigratorConnection)))
+        {
+            await activation.Database.OpenConnectionAsync();
+            await activation.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            Assert.True(await new ReviewedLifecycleRegistryActivation(activation).ActivateAsync(registry, 0, default));
+        }
+        var admission = await new LifecycleAdmission(new CurrentAccess(),
+            new LifecycleAdmissionStore(Options(environment.RuntimeConnection), new ManualTimeProvider(Now)))
+            .AdmitAsync(environment.OwnerUserId, OrganisationId, LifecycleOperationFamily.Export, Guid.NewGuid());
+        var operation = Assert.IsType<LifecycleOperation>(admission.Operation);
+        var artifactStore = new InMemoryExportArtifactStore();
+        var coordinator = new LifecycleExportCoordinator(new LifecycleExportStore(
+            Options(environment.RuntimeConnection), new DeterministicExportPackageAssembler(), artifactStore,
+            new InMemoryExportPackageSink(), new ReviewedExportCategoryInventoryV1(),
+            new ManualTimeProvider(Now.AddMinutes(1))));
+        Assert.Equal(ExportProgressStatus.Progressed,
+            (await coordinator.BeginAsync(operation.Id, OrganisationId)).Status);
+
+        await using var writer = new NpgsqlConnection(environment.RuntimeConnection);
+        await writer.OpenAsync();
+        await using var writerTransaction = await writer.BeginTransactionAsync();
+        await using (var context = new NpgsqlCommand(
+                         "SELECT pg_catalog.set_config('zeka.organisation_id', @organisation, true)",
+                         writer, writerTransaction))
+        {
+            context.Parameters.AddWithValue("organisation", OrganisationId.ToString("D"));
+            await context.ExecuteScalarAsync();
+        }
+        await using (var update = new NpgsqlCommand(
+                         "UPDATE public.\"OrganisationMemberships\" SET \"PermissionSetId\"=@permission WHERE \"Id\"=@id",
+                         writer, writerTransaction))
+        {
+            update.Parameters.AddWithValue("permission", PermissionSet.OrganisationAdministratorId);
+            update.Parameters.AddWithValue("id", environment.OwnerMembershipId);
+            Assert.Equal(1, await update.ExecuteNonQueryAsync());
+        }
+
+        var participantClock = new ManualTimeProvider(Now.AddSeconds(30));
+        var authParticipant = new AuthExportParticipant(Options(environment.RuntimeConnection), artifactStore,
+            participantClock);
+        var authHeader = Header(operation.Id, 2, "auth-management");
+        var enterTask = authParticipant.EnterAsync(new EnterOrganisationExportFenceV1(authHeader));
+        await Task.Delay(TimeSpan.FromMilliseconds(200));
+        Assert.False(enterTask.IsCompleted);
+        await writerTransaction.CommitAsync();
+        var authReceipt = await enterTask;
+
+        var receipts = new[]
+        {
+            authReceipt,
+            new OrganisationExportFenceEnteredV1(Header(operation.Id, 2, "admin-area"),
+                "admin-fence", 1, Now.AddSeconds(30)),
+            new OrganisationExportFenceEnteredV1(Header(operation.Id, 2, "client-management"),
+                "client-fence", 1, Now.AddSeconds(30))
+        };
+        foreach (var receipt in receipts) await coordinator.ReceiveAsync(receipt);
+
+        var snapshotValue = await RuntimeScalar(environment.RuntimeConnection,
+            "SELECT \"SnapshotAt\" FROM public.\"OrganisationLifecycleOperations\"");
+        var snapshotAt = snapshotValue switch
+        {
+            DateTimeOffset value => value,
+            DateTime value => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)),
+            _ => throw new InvalidOperationException("SnapshotAt was not persisted as a timestamp.")
+        };
+        Assert.True(authReceipt.EnteredAt <= snapshotAt);
+        Assert.Equal(PostgresErrorCodes.ObjectNotInPrerequisiteState,
+            await RuntimeGrant(environment.RuntimeConnection, environment.OwnerMembershipId,
+                environment.OwnerUserId));
+        var requirements = receipts.OrderBy(x => x.Header.ParticipantId, StringComparer.Ordinal)
+            .Select(x => new ExportFenceParticipantRequirementV1(x.Header.ParticipantId, 1));
+        var evidence = new CompleteExportFenceEvidenceV1(RegistryRevision, operation.InventoryHash,
+            requirements, receipts.Select(x => new ExportFenceReceiptV1(x)));
+        var fragment = await authParticipant.StageAsync(new StageOrganisationExportV1(
+            Header(operation.Id, 2, "auth-management"), snapshotAt, evidence));
+        var membership = fragment.Categories.Single(x => x.Category == AuthExportInventoryV1.Memberships);
+        var csv = Encoding.UTF8.GetString((await artifactStore.ReadAsync(membership.ArtifactReference!, default)).Span);
+        Assert.Contains(PermissionSet.OrganisationAdministratorId.ToString("D"), csv, StringComparison.Ordinal);
     }
 
     private static async Task<OrganisationExportFragmentReadyV1> Fragment(Guid operationId,
@@ -376,6 +486,34 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
         catch (PostgresException exception) { await transaction.RollbackAsync(); return exception.SqlState; }
     }
 
+    private static async Task<string?> RuntimeGrant(string connectionString, Guid membershipId, Guid subjectId)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var context = new NpgsqlCommand(
+                         "SELECT pg_catalog.set_config('zeka.organisation_id', @organisation, true)",
+                         connection, transaction))
+        {
+            context.Parameters.AddWithValue("organisation", OrganisationId.ToString("D"));
+            await context.ExecuteScalarAsync();
+        }
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO public."MembershipPermissionGrants"
+              ("Id", "OrganisationId", "OrganisationMembershipId", "PermissionKey",
+               "GrantedByMembershipId", "GrantedBySubjectId", "GrantedAtUtc", "ConcurrencyVersion")
+            VALUES (@id, @organisation, @membership, 'Organisations.Export',
+                    @membership, @subject, @at, 1)
+            """, connection, transaction);
+        command.Parameters.AddWithValue("id", Guid.NewGuid());
+        command.Parameters.AddWithValue("organisation", OrganisationId);
+        command.Parameters.AddWithValue("membership", membershipId);
+        command.Parameters.AddWithValue("subject", subjectId);
+        command.Parameters.AddWithValue("at", Now.AddMinutes(1));
+        try { await command.ExecuteNonQueryAsync(); await transaction.CommitAsync(); return null; }
+        catch (PostgresException exception) { await transaction.RollbackAsync(); return exception.SqlState; }
+    }
+
     private static async Task<object?> RuntimeScalar(string connectionString, string sql, Guid? organisation = null)
     {
         await using var connection = new NpgsqlConnection(connectionString);
@@ -430,6 +568,27 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
             throw new InvalidOperationException("Current code-local category inventory must not be consulted.");
         public LifecycleExportInventory Freeze(LifecycleRegistry registry) =>
             throw new InvalidOperationException("Admission already froze the inventory.");
+    }
+
+    private sealed class FailAfterFirstStorePackageSink : IExportPackageSink
+    {
+        private readonly InMemoryExportPackageSink inner = new();
+        public int Attempts { get; private set; }
+        public List<string> ObservedHashes { get; } = [];
+        public List<byte[]> ObservedContents { get; } = [];
+
+        public async Task<string> StoreAsync(Guid operationId, string packageSha256,
+            ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
+        {
+            Attempts++;
+            ObservedHashes.Add(packageSha256);
+            ObservedContents.Add(content.ToArray());
+            var reference = await inner.StoreAsync(operationId, packageSha256, content, cancellationToken);
+            if (Attempts == 1) throw new IOException("synthetic-crash-after-package-store");
+            return reference;
+        }
+
+        public ReadOnlyMemory<byte> Read(Guid operationId) => inner.Read(operationId);
     }
 
     private sealed record TestEnvironment(string MigratorConnection, string RuntimeConnection,

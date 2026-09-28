@@ -3,6 +3,7 @@ using AuthManager.Application.Lifecycle;
 using AuthManager.Core.Lifecycle;
 using AuthManager.Infrastructure.Persistence;
 using AuthManager.Infrastructure.Persistence.Lifecycle;
+using AuthManager.Infrastructure.Lifecycle;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -305,6 +306,39 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
     }
 
     [Fact]
+    public async Task Resume_after_successor_activation_awaits_the_unavailable_frozen_original_participant()
+    {
+        var originalRegistry = ExportRegistry(RevisionOne, "participant-original");
+        Assert.True(await Activate(originalRegistry, 0));
+        var admitted = await new LifecycleAdmission(new CurrentAccess(),
+            new LifecycleAdmissionStore(Options("zeka_auth_runtime"), TimeProvider.System,
+                new FixtureExportInventory()))
+            .AdmitAsync(Guid.Parse("46000000-0000-0000-0000-000000000010"), Organisation,
+                LifecycleOperationFamily.Export, Guid.NewGuid());
+        var operation = Assert.IsType<LifecycleOperation>(admitted.Operation);
+        Assert.True(await Activate(ExportRegistry(RevisionTwo, "participant-successor"), 1));
+
+        var store = new LifecycleExportStore(Options("zeka_auth_runtime"),
+            new DeterministicExportPackageAssembler(), new InMemoryExportArtifactStore(),
+            new InMemoryExportPackageSink(), new FixtureExportInventory(), TimeProvider.System);
+        Assert.Equal(ExportProgressStatus.Progressed,
+            (await store.ResumeAsync(operation.Id, Organisation, default)).Status);
+        Assert.Equal(ExportProgressStatus.AwaitingParticipants,
+            (await store.ResumeAsync(operation.Id, Organisation, default)).Status);
+
+        Assert.Equal($"{(int)LifecycleOperationState.EnteringFence}|true|{RevisionOne:D}",
+            await Runtime(Organisation,
+                $"SELECT \"State\"::text || '|' || \"IsActive\"::text || '|' || \"RegistryRevision\"::text " +
+                $"FROM public.\"OrganisationLifecycleOperations\" WHERE \"Id\"='{operation.Id:D}'"));
+        var participants = (string)(await Runtime(Organisation,
+            $"SELECT string_agg(DISTINCT \"ParticipantId\", ',' ORDER BY \"ParticipantId\") " +
+            $"FROM public.\"OrganisationLifecycleParticipants\" WHERE \"OperationId\"='{operation.Id:D}'"))!;
+        Assert.Equal("participant-original", participants);
+        Assert.Equal(1L, await Runtime(Organisation,
+            $"SELECT count(*) FROM public.\"OutboxMessages\" WHERE \"CorrelationId\"='{operation.Id:D}'"));
+    }
+
+    [Fact]
     public async Task Families_are_unique_and_export_is_denied_during_active_termination()
     {
         Assert.True(await Activate(Registry(RevisionOne, "participant-original"), 0));
@@ -600,6 +634,23 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
             "fixture.export-fragment", "fixture-owned-records");
         var validated = LifecycleRegistry.Validate(revision, "Issue46-LIFE-FND-01-fixture-v1",
             [capability], [new LifecycleBinding(capability, participant, 1, true)]);
+        Assert.Null(validated.Error);
+        return Assert.IsType<LifecycleRegistry>(validated.Registry);
+    }
+
+    private static LifecycleRegistry ExportRegistry(Guid revision, string participant)
+    {
+        var fence = new LifecycleCapability(LifecycleOperationFamily.Export,
+            OrganisationExportCapabilityV1.Fence, "fixture-owned-records");
+        var fragment = new LifecycleCapability(LifecycleOperationFamily.Export,
+            "fixture.export-fragment", "fixture-owned-records");
+        var bindings = new[]
+        {
+            new LifecycleBinding(fence, participant, 1, true),
+            new LifecycleBinding(fragment, participant, 1, true)
+        };
+        var validated = LifecycleRegistry.Validate(revision, "Issue46-LIFE-01-resume-v1",
+            [fence, fragment], bindings);
         Assert.Null(validated.Error);
         return Assert.IsType<LifecycleRegistry>(validated.Registry);
     }

@@ -465,7 +465,7 @@
   ],
   "runtimeFunctionDefinitionSha256": {
     "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b",
-    "zeka.reject_auth_membership_write_during_export_fence()": "1b111436feaafc8ee4a82011870a1814982b1bc2e4796bb7d8bf9d7b076d3c96"
+    "zeka.reject_auth_membership_write_during_export_fence()": "1254b4409b72c1882a794419bc67961668d096ade2355f4f6b90ef08b4a39cdd"
   },
   "defaultPrivileges": [
     {

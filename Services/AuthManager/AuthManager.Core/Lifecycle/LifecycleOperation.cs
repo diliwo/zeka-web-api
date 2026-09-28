@@ -103,14 +103,29 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
         }
     }
 
-    public void RecordPackage(string packageSha256, string packageReference, DateTimeOffset completedAt)
+    public void PreparePackage(string packageSha256, DateTimeOffset completedAt)
     {
         DemandExportState(LifecycleOperationState.AssemblingPackage);
-        PackageSha256 = RequireSha256(packageSha256, nameof(packageSha256));
-        PackageReference = RequireStable(packageReference, nameof(packageReference), 500);
         if (completedAt == default || completedAt.Offset != TimeSpan.Zero || completedAt < SnapshotAt)
             throw new ArgumentException("Completion must be UTC and not precede SnapshotAt.", nameof(completedAt));
+        var hash = RequireSha256(packageSha256, nameof(packageSha256));
+        if (PackageSha256 is not null || CompletedAt is not null)
+        {
+            if (PackageSha256 != hash || CompletedAt != completedAt)
+                throw new InvalidOperationException("Prepared export package identity is immutable.");
+            return;
+        }
+        PackageSha256 = hash;
         CompletedAt = completedAt;
+    }
+
+    public void RecordPackage(string packageSha256, string packageReference)
+    {
+        DemandExportState(LifecycleOperationState.AssemblingPackage);
+        var hash = RequireSha256(packageSha256, nameof(packageSha256));
+        if (PackageSha256 != hash || CompletedAt is null)
+            throw new InvalidOperationException("Export package must match its durable prepared identity.");
+        PackageReference = RequireStable(packageReference, nameof(packageReference), 500);
         State = LifecycleOperationState.ReleasingFence;
         foreach (var participant in participants.Where(IsFenceParticipant)) participant.RequestRelease();
         Revision++;
