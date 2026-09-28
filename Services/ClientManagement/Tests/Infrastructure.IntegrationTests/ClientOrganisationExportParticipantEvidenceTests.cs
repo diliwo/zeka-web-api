@@ -53,7 +53,9 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
         await using var provider = Provider(organisation, artifacts.Root);
         await SeedSyntheticClient(provider, organisation, 21, softDeleted: true);
         await SeedSyntheticClient(provider, organisation, 25, softDeleted: false);
-        await SeedSyntheticAssessment(provider, organisation, 25);
+        await SeedSyntheticAssessment(provider, organisation, 25, professionalSoftDeleted: true);
+        await SeedSyntheticClient(provider, organisation, 26, softDeleted: false);
+        await SeedSyntheticAssessment(provider, organisation, 26, includeProfessionalAssessment: false);
 
         var operation = Guid.NewGuid();
         var correlation = Guid.NewGuid();
@@ -78,8 +80,9 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
         Assert.Equal(ready.FragmentHash, replay.FragmentHash);
         Assert.Equal(ready.Header.MessageId, replay.Header.MessageId);
         Assert.Equal(ClientExportContract.Categories, ready.Categories.Select(x => x.Category));
-        Assert.Equal(2, ready.Categories.Single(x => x.Category == "beneficiaries").RecordCount);
-        Assert.Equal(1, ready.Categories.Single(x => x.Category == "structured-assessments").RecordCount);
+        Assert.Equal(3, ready.Categories.Single(x => x.Category == "beneficiaries").RecordCount);
+        var assessments = ready.Categories.Single(x => x.Category == "structured-assessments");
+        Assert.Equal(2, assessments.RecordCount);
         Assert.Equal(ExportCategoryDispositionV1.Withheld,
             ready.Categories.Single(x => x.Category == "notes").Disposition);
         foreach (var category in new[] { "generated-report-artifacts", "audit-events", "integration-events" })
@@ -90,9 +93,13 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
         {
             await services.GetRequiredService<ITenantTransactionExecutor>().ExecuteAsync(async token =>
             {
-                var persisted = await services.GetRequiredService<ApplicationDbContext>().OrganisationExportFragments
+                var database = services.GetRequiredService<ApplicationDbContext>();
+                var persisted = await database.OrganisationExportFragments
                     .AsNoTracking().SingleAsync(x => x.OperationId == operation && x.Category == "beneficiaries", token);
                 Assert.Equal(1, persisted.SoftDeletedRecordCount);
+                var persistedAssessments = await database.OrganisationExportFragments.AsNoTracking()
+                    .SingleAsync(x => x.OperationId == operation && x.Category == "structured-assessments", token);
+                Assert.Equal(0, persistedAssessments.SoftDeletedRecordCount);
             }, default);
         });
 
@@ -112,6 +119,27 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
         Assert.Contains("synthetic-acquired-knowledge", assessmentContent, StringComparison.Ordinal);
         Assert.Contains("synthetic-knowledge-to-develop", assessmentContent, StringComparison.Ordinal);
         Assert.DoesNotContain(otherOrganisation.ToString("D"), assessmentContent, StringComparison.OrdinalIgnoreCase);
+        var assessmentLines = assessmentContent.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var assessmentHeaders = assessmentLines[0].Split(',');
+        var parentDeletedIndex = Array.IndexOf(assessmentHeaders, "soft_deleted");
+        var professionalDeletedIndex = Array.IndexOf(
+            assessmentHeaders, "professional_assessment_soft_deleted");
+        var professionalIdIndex = Array.IndexOf(assessmentHeaders, "professional_assessment_id");
+        Assert.True(parentDeletedIndex >= 0);
+        Assert.True(professionalDeletedIndex >= 0);
+        Assert.True(professionalIdIndex >= 0);
+        var deletedProfessionalRow = Assert.Single(assessmentLines
+            .Where(line => line.Contains("synthetic-family-context-25", StringComparison.Ordinal)))
+            .Split(',');
+        Assert.Equal("false", deletedProfessionalRow[parentDeletedIndex]);
+        Assert.Equal("true", deletedProfessionalRow[professionalDeletedIndex]);
+        Assert.NotEmpty(deletedProfessionalRow[professionalIdIndex]);
+        var noProfessionalRow = Assert.Single(assessmentLines
+            .Where(line => line.Contains("synthetic-family-context-26", StringComparison.Ordinal)))
+            .Split(',');
+        Assert.Equal("false", noProfessionalRow[parentDeletedIndex]);
+        Assert.Empty(noProfessionalRow[professionalDeletedIndex]);
+        Assert.Empty(noProfessionalRow[professionalIdIndex]);
 
         await Invoke(provider, organisation, participant => participant.ReleaseFenceAsync(
             new ReleaseOrganisationExportFenceV1(Header(operation, organisation, Guid.NewGuid(), correlation), entered.FenceToken)));
@@ -303,7 +331,9 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
     private static async Task SeedSyntheticAssessment(
         IServiceProvider provider,
         Guid organisation,
-        int clientSequence)
+        int clientSequence,
+        bool includeProfessionalAssessment = true,
+        bool professionalSoftDeleted = false)
     {
         await InTenant(provider, organisation, services =>
             services.GetRequiredService<ITenantTransactionExecutor>().ExecuteAsync(async token =>
@@ -314,7 +344,7 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
                 var score = ClientManagement.Core.Enums.PersonalExpectationLanguageknowledgeScore.Autonomous;
                 var assessment = new ClientManagement.Core.Entities.Assessment(
                     true, client, "synthetic-assessor",
-                    "synthetic-family-context", "synthetic-housing-context", "synthetic-health-context",
+                    $"synthetic-family-context-{clientSequence:D2}", "synthetic-housing-context", "synthetic-health-context",
                     "synthetic-financial-context", "synthetic-administrative-context",
                     "synthetic-language-note", "synthetic-training-difficulty", "synthetic-training-opinion",
                     "synthetic-training-strengths", "synthetic-training-improvements",
@@ -340,9 +370,11 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
                     AcquiredKnowHow = "synthetic-acquired-know-how",
                     KnowledgeToDevelop = "synthetic-knowledge-to-develop",
                     BehaviouralKnowledgeToDevelop = "synthetic-behaviour-to-develop",
-                    KnowHowToDevelop = "synthetic-know-how-to-develop"
+                    KnowHowToDevelop = "synthetic-know-how-to-develop",
+                    Softdelete = professionalSoftDeleted
                 };
-                assessment.BilanProfessions.Add(profession);
+                if (includeProfessionalAssessment)
+                    assessment.BilanProfessions.Add(profession);
                 database.Assessments.Add(assessment);
                 await database.SaveChangesAsync(token);
             }, default));

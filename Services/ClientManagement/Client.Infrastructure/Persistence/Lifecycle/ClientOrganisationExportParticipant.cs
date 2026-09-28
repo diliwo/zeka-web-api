@@ -223,7 +223,8 @@ public sealed class ClientOrganisationExportParticipant(
                 "fr_written_score", "it_email", "it_internet", "it_word",
                 "professional_assessment_id", "profession_id", "acquired_knowledge",
                 "acquired_behavioural_knowledge", "acquired_know_how", "knowledge_to_develop",
-                "behavioural_knowledge_to_develop", "know_how_to_develop", "soft_deleted"
+                "behavioural_knowledge_to_develop", "know_how_to_develop",
+                "professional_assessment_soft_deleted", "soft_deleted"
             ],
             """
             SELECT assessment."AssessmentId"::text, assessment."ClientId"::text,
@@ -254,8 +255,9 @@ public sealed class ClientOrganisationExportParticipant(
               profession."AcquiredKnowledge", profession."AcquiredBehaviouralKnowledge",
               profession."AcquiredKnowHow", profession."KnowledgeToDevelop",
               profession."BehaviouralKnowledgeToDevelop", profession."KnowHowToDevelop",
-              CASE WHEN assessment."Softdelete" OR COALESCE(profession."Softdelete", false)
-                   THEN 'true' ELSE 'false' END
+              CASE WHEN profession."Id" IS NULL THEN NULL
+                   WHEN profession."Softdelete" THEN 'true' ELSE 'false' END,
+              CASE WHEN assessment."Softdelete" THEN 'true' ELSE 'false' END
             FROM public."Assessments" assessment
             LEFT JOIN public."ProfessionalAssessments" profession
               ON profession."AssessmentId" = assessment."AssessmentId"
