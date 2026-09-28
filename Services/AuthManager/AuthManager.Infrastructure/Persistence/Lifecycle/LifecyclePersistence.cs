@@ -74,8 +74,20 @@ internal sealed class LifecycleCommandGuard(AuthDbContext database) : DbCommandI
     { Demand(command, data); return ValueTask.FromResult(result); }
 }
 
-public sealed class LifecycleAdmissionStore(DbContextOptions<AuthDbContext> options, TimeProvider clock) : ILifecycleAdmissionStore
+public sealed class LifecycleAdmissionStore : ILifecycleAdmissionStore
 {
+    private readonly DbContextOptions<AuthDbContext> options;
+    private readonly TimeProvider clock;
+    private readonly IReviewedExportCategoryInventory exportInventory;
+
+    public LifecycleAdmissionStore(DbContextOptions<AuthDbContext> options, TimeProvider clock,
+        IReviewedExportCategoryInventory? exportInventory = null)
+    {
+        this.options = options;
+        this.clock = clock;
+        this.exportInventory = exportInventory ?? new ReviewedExportCategoryInventoryV1();
+    }
+
     public async Task<AdmissionResult> AdmitAsync(AuthorizedLifecycleAdmission admission, CancellationToken cancellationToken)
     {
         // Retry the complete serializable attempt with a fresh context; uniqueness resolves concurrent replays.
@@ -102,8 +114,10 @@ public sealed class LifecycleAdmissionStore(DbContextOptions<AuthDbContext> opti
                         if (conflict is not null) return new AdmissionResult(AdmissionStatus.Conflict, conflict);
                         var registry = await new LifecycleRegistryReader(database).ReadActiveAsync(cancellationToken);
                         if (registry is null) return new AdmissionResult(AdmissionStatus.RegistryUnavailable);
+                        var frozenExportInventory = admission.Family == LifecycleOperationFamily.Export
+                            ? exportInventory.Freeze(registry) : null;
                         var operation = LifecycleOperation.Admit(Guid.NewGuid(), admission.OrganisationId, admission.SubjectId,
-                            admission.Family, admission.IdempotencyId, registry, clock.GetUtcNow());
+                            admission.Family, admission.IdempotencyId, registry, clock.GetUtcNow(), frozenExportInventory);
                         database.Add(operation);
                         await database.SaveChangesAsync(cancellationToken);
                         await transaction.CommitAsync(cancellationToken);

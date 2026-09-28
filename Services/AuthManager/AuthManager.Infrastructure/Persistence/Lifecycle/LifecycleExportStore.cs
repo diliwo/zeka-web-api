@@ -17,10 +17,13 @@ public sealed class LifecycleExportStore(
     IExportPackageAssembler assembler,
     IExportArtifactSource artifacts,
     IExportPackageSink packages,
-    IReviewedExportCategoryInventory categoryInventory,
+    IReviewedExportCategoryInventory admissionInventoryContract,
     TimeProvider clock) : ILifecycleExportStore
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    // DI proves that an architecture-reviewed inventory provider is configured for admission.
+    // Workflow processing intentionally never consults it; the operation's frozen inventory is authoritative.
+    private readonly IReviewedExportCategoryInventory _admissionInventoryContract = admissionInventoryContract;
 
     public Task<ExportProgressResult> BeginAsync(Guid operationId, Guid organisationId,
         CancellationToken cancellationToken) => ExecuteAsync(operationId, organisationId, async database =>
@@ -72,21 +75,21 @@ public sealed class LifecycleExportStore(
             var evidence = new CompleteExportFenceEvidenceV1(operation.RegistryRevision,
                 operation.InventoryHash, requirements, receipts);
             var snapshotAt = clock.GetUtcNow();
-            operation.EstablishSnapshot(snapshotAt, evidence.EvidenceHash);
 
-            foreach (var participant in FragmentParticipants(operation))
+            // Constructing the typed command is the canonical validation boundary. In particular,
+            // a future-skewed receipt cannot silently create a SnapshotAt before the complete fence.
+            var stages = FragmentParticipants(operation).Select(participant =>
             {
                 var fenceOwner = ResolveFenceOwner(operation, participant);
-                var header = Header(operation, participant, Guid.NewGuid(), receipt.Header.MessageId);
-                var payloadModel = new
-                {
-                    Header = header,
-                    SnapshotAt = snapshotAt,
-                    FenceEvidence = evidence,
-                    FenceOwnerParticipantId = fenceOwner.ParticipantId
-                };
-                Enqueue(database, operation, nameof(StageOrganisationExportV1), payloadModel);
-            }
+                var header = new LifecycleMessageHeaderV1(operation.Id, operation.OrganisationId,
+                    evidence.OperationRevision, participant.ParticipantId, participant.ContractVersion,
+                    Guid.NewGuid(), receipt.Header.MessageId, operation.Id);
+                return new StageOrganisationExportV1(header, snapshotAt, evidence, fenceOwner.ParticipantId);
+            }).ToArray();
+            operation.EstablishSnapshot(snapshotAt, evidence.EvidenceHash);
+
+            foreach (var stage in stages)
+                Enqueue(database, operation, nameof(StageOrganisationExportV1), stage);
         }
         await database.SaveChangesAsync(cancellationToken);
         return Result(operation.State == LifecycleOperationState.StagingFragments
@@ -105,15 +108,27 @@ public sealed class LifecycleExportStore(
         if (dedupe is not null) return Result(dedupe.Value, operation.Id, operation.Revision);
         if (operation.State != LifecycleOperationState.StagingFragments
             || operation.SnapshotAt != fragment.SnapshotAt
-            || fragment.Header.OperationRevision != operation.Revision
+            || fragment.Header.OperationRevision != operation.Revision - 1
             || !MatchesFragment(operation, fragment.Header))
             return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
-        var requirements = categoryInventory.RequirementsFor(fragment.Header.ParticipantId)
+        if (operation.ExportInventoryJson is null || operation.ExportInventoryHash is null)
+            return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
+        LifecycleExportInventory frozen;
+        try
+        {
+            frozen = LifecycleExportInventory.Rehydrate(operation.RegistryRevision, operation.InventoryHash,
+                operation.ExportInventoryJson, operation.ExportInventoryHash);
+        }
+        catch (InvalidOperationException)
+        {
+            return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
+        }
+        var requirements = frozen.For(fragment.Header.ParticipantId)
             .OrderBy(x => x.Category, StringComparer.Ordinal).ToArray();
         var observed = fragment.Categories.OrderBy(x => x.Category, StringComparer.Ordinal).ToArray();
         if (requirements.Length != observed.Length || requirements.Zip(observed).Any(pair =>
                 pair.First.Category != pair.Second.Category
-                || !pair.First.AllowedDispositions.Contains(pair.Second.Disposition)))
+                || !pair.First.AllowedDispositions.Contains(pair.Second.DispositionCode, StringComparer.Ordinal)))
             return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
         var fenceOwner = ResolveFenceOwner(operation,
             FragmentParticipants(operation).Single(x => x.ParticipantId == fragment.Header.ParticipantId));
@@ -143,12 +158,12 @@ public sealed class LifecycleExportStore(
         var dedupe = await Dedupe(database, release.Header, nameof(OrganisationExportFenceReleasedV1), payload, cancellationToken);
         if (dedupe is not null) return Result(dedupe.Value, operation.Id, operation.Revision,
             operation.PackageSha256, operation.PackageReference);
-        if (operation.State != LifecycleOperationState.ReleasingFence
-            || release.Header.OperationRevision != operation.Revision
-            || !Matches(operation, release.Header, OrganisationExportCapabilityV1.Fence))
-            return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
         var fence = await database.LifecycleExportFenceReceipts.SingleAsync(x =>
             x.OperationId == operation.Id && x.ParticipantId == release.Header.ParticipantId, cancellationToken);
+        if (operation.State != LifecycleOperationState.ReleasingFence
+            || release.Header.OperationRevision != fence.OperationRevision
+            || !Matches(operation, release.Header, OrganisationExportCapabilityV1.Fence))
+            return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
         if (!string.Equals(fence.FenceToken, release.FenceToken, StringComparison.Ordinal))
             return Result(ExportProgressStatus.Conflict, operation.Id, operation.Revision);
         operation.RecordFenceReleased(release.Header.ParticipantId);
@@ -224,15 +239,16 @@ public sealed class LifecycleExportStore(
             JsonSerializer.Deserialize<ExportCategoryFragmentV1[]>(fragment.CategoriesJson, Json)!
                 .Select(category => new ExportPackageCategory(fragment.ParticipantId, category.Category,
                     category.DispositionCode, category.RecordCount, category.SchemaVersion, category.ContentSha256,
-                    category.ArtifactReference, category.ReasonCode))).ToArray();
+                    category.ArtifactReference, category.ReasonCode, fragment.FragmentHash))).ToArray();
         var bytes = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         foreach (var reference in categories.Where(x => x.ArtifactReference is not null)
                      .Select(x => x.ArtifactReference!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
             bytes.Add(reference, (await artifacts.ReadAsync(reference, cancellationToken)).ToArray());
 
         var output = assembler.Assemble(new ExportPackageInput(operation.Id, operation.OrganisationId,
-            operation.RegistryRevision, operation.InventoryHash, operation.SnapshotAt!.Value,
-            operation.FenceEvidenceHash!, categories, bytes));
+            operation.RegistryRevision, operation.InventoryHash, operation.ExportInventoryHash!, operation.SnapshotAt!.Value,
+            operation.FenceEvidenceHash!, operation.RequestingSubjectId, operation.RequestedAt,
+            now, "completed", categories, bytes));
         var packageReference = await packages.StoreAsync(operation.Id, output.PackageSha256,
             output.Content, cancellationToken);
         database.Add(LifecycleExportPackage.Create(operation.Id, operation.OrganisationId,
@@ -242,7 +258,9 @@ public sealed class LifecycleExportStore(
         {
             var receipt = await database.LifecycleExportFenceReceipts.SingleAsync(x =>
                 x.OperationId == operation.Id && x.ParticipantId == participant.ParticipantId, cancellationToken);
-            var header = Header(operation, participant, Guid.NewGuid(), operation.Id);
+            var header = new LifecycleMessageHeaderV1(operation.Id, operation.OrganisationId,
+                receipt.OperationRevision, participant.ParticipantId, participant.ContractVersion,
+                Guid.NewGuid(), operation.Id, operation.Id);
             Enqueue(database, operation, nameof(ReleaseOrganisationExportFenceV1),
                 new ReleaseOrganisationExportFenceV1(header, receipt.FenceToken));
         }

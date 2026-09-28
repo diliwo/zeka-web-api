@@ -577,7 +577,8 @@ public static class RlsSecurityManifestVerifier
                     "LifecycleParticipantRegistryRevisions" }.Select(name => ObjectKey("public", name)),
                 manifest.GlobalControlPlaneTables.Select(ObjectKey), "global control-plane classification");
             var surviving = manifest.SchemaVersion >= 13
-                ? new[] { "LifecycleCoordinatorLeases", "LifecycleExportFenceReceipts", "LifecycleExportFragments",
+                ? new[] { "AuthExportParticipantExecutions", "AuthExportParticipantInbox", "AuthExportParticipantOutbox",
+                    "LifecycleCoordinatorLeases", "LifecycleExportFenceReceipts", "LifecycleExportFragments",
                     "LifecycleExportPackages", "LifecycleInboxReceipts", "MembershipPermissionGrants",
                     "OrganisationLifecycleOperations", "OrganisationLifecycleParticipants" }
                 : manifest.SchemaVersion >= 12
@@ -594,6 +595,12 @@ public static class RlsSecurityManifestVerifier
             var expectedColumns = manifest.SchemaVersion >= 13
                 ? new[]
                 {
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|CategoriesJson",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|FenceEvidenceHash",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|FragmentHash",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|ReleasedAt",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|SnapshotAt",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|State",
                     ObjectKey("public", "LifecycleCoordinatorLeases") + "|ExpiresAt",
                     ObjectKey("public", "LifecycleCoordinatorLeases") + "|LeaseId",
                     ObjectKey("public", "LifecycleCoordinatorLeases") + "|Version",
@@ -760,6 +767,9 @@ public static class RlsSecurityManifestVerifier
         if (manifest.SchemaVersion >= 13)
         {
             expected.AddRange([
+                "AuthExportParticipantExecutions|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "AuthExportParticipantInbox|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "AuthExportParticipantOutbox|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
                 "LifecycleCoordinatorLeases|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
                 "LifecycleExportFenceReceipts|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
                 "LifecycleExportFragments|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",

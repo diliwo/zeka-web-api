@@ -32,6 +32,9 @@ internal static class LifecycleMapping
         operation.HasKey(x => x.Id);
         operation.HasAlternateKey(x => new { x.Id, x.OrganisationId });
         operation.Property(x => x.InventoryHash).HasMaxLength(64);
+        // Canonical bytes are hash-bound; jsonb would normalize their representation on round-trip.
+        operation.Property(x => x.ExportInventoryJson).HasColumnType("text");
+        operation.Property(x => x.ExportInventoryHash).HasMaxLength(64);
         operation.Property(x => x.FenceEvidenceHash).HasMaxLength(64);
         operation.Property(x => x.PackageSha256).HasMaxLength(64);
         operation.Property(x => x.PackageReference).HasMaxLength(500);
@@ -112,8 +115,50 @@ internal static class LifecycleMapping
             .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
         lease.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
 
-        foreach (var entity in new[] { inbox.Metadata, receipt.Metadata, fragment.Metadata, package.Metadata })
+        var authExecution = model.Entity<AuthExportParticipantExecution>();
+        authExecution.ToTable("AuthExportParticipantExecutions");
+        authExecution.HasKey(x => x.OperationId);
+        authExecution.Property(x => x.FenceToken).HasMaxLength(200);
+        authExecution.Property(x => x.FenceReceiptHash).HasMaxLength(64);
+        authExecution.Property(x => x.FenceEvidenceHash).HasMaxLength(64);
+        authExecution.Property(x => x.FragmentHash).HasMaxLength(64);
+        authExecution.Property(x => x.CategoriesJson).HasColumnType("jsonb");
+        authExecution.HasOne<LifecycleOperation>().WithMany().HasForeignKey(x => new { x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
+        authExecution.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+
+        var authInbox = model.Entity<AuthExportParticipantInboxReceipt>();
+        authInbox.ToTable("AuthExportParticipantInbox");
+        authInbox.HasKey(x => x.MessageId);
+        authInbox.Property(x => x.MessageType).HasMaxLength(300);
+        authInbox.Property(x => x.PayloadSha256).HasMaxLength(64);
+        authInbox.HasIndex(x => new { x.OperationId, x.MessageType });
+        authInbox.HasOne<LifecycleOperation>().WithMany().HasForeignKey(x => new { x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
+        authInbox.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+
+        var authOutbox = model.Entity<AuthExportParticipantOutboxMessage>();
+        authOutbox.ToTable("AuthExportParticipantOutbox");
+        authOutbox.HasKey(x => x.MessageId);
+        authOutbox.Property(x => x.MessageType).HasMaxLength(300);
+        authOutbox.Property(x => x.PayloadJson).HasColumnType("jsonb");
+        authOutbox.Property(x => x.PayloadSha256).HasMaxLength(64);
+        authOutbox.HasIndex(x => new { x.OperationId, x.MessageType }).IsUnique();
+        authOutbox.HasOne<LifecycleOperation>().WithMany().HasForeignKey(x => new { x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
+        authOutbox.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+
+        foreach (var entity in new[] { inbox.Metadata, receipt.Metadata, fragment.Metadata, package.Metadata,
+                     authInbox.Metadata, authOutbox.Metadata })
             foreach (var property in entity.GetProperties()) property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+        foreach (var property in authExecution.Metadata.GetProperties().Where(p =>
+                     p.Name is not nameof(AuthExportParticipantExecution.SnapshotAt)
+                         and not nameof(AuthExportParticipantExecution.FenceEvidenceHash)
+                         and not nameof(AuthExportParticipantExecution.FragmentHash)
+                         and not nameof(AuthExportParticipantExecution.CategoriesJson)
+                         and not nameof(AuthExportParticipantExecution.ReleasedAt)
+                         and not nameof(AuthExportParticipantExecution.State)))
+            property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
         foreach (var property in lease.Metadata.GetProperties().Where(p =>
                      p.Name is not nameof(LifecycleCoordinatorLease.LeaseId)
                          and not nameof(LifecycleCoordinatorLease.ExpiresAt)

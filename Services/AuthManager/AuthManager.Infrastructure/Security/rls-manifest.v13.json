@@ -2,7 +2,7 @@
   "schemaVersion": 13,
   "service": "AuthManagement",
   "modelContext": "AuthManager.Infrastructure.Persistence.AuthDbContext",
-  "migrationId": "20260928074856_LifecycleExportCoordinatorV1",
+  "migrationId": "20260928090251_LifecycleExportIntegrityV2",
   "ownerRole": "zeka_auth_owner",
   "migratorRole": "zeka_auth_migrator",
   "runtimeRole": "zeka_auth_runtime",
@@ -17,6 +17,18 @@
   ],
   "relationTopology": [],
   "protectedTables": [
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantExecutions"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantInbox"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantOutbox"
+    },
     {
       "schema": "public",
       "name": "LifecycleCoordinatorLeases"
@@ -131,6 +143,36 @@
     }
   ],
   "tablePrivileges": [
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantInbox"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantOutbox"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
     {
       "object": {
         "schema": "public",
@@ -423,7 +465,7 @@
   ],
   "runtimeFunctionDefinitionSha256": {
     "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b",
-    "zeka.reject_auth_membership_write_during_export_fence()": "18bc755e429724e17937c3e9a53cabc1320f71da95d8258a8ef78475501558b9"
+    "zeka.reject_auth_membership_write_during_export_fence()": "1b111436feaafc8ee4a82011870a1814982b1bc2e4796bb7d8bf9d7b076d3c96"
   },
   "defaultPrivileges": [
     {
@@ -535,6 +577,18 @@
   "organisationScopedSurvivingControlTables": [
     {
       "schema": "public",
+      "name": "AuthExportParticipantExecutions"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantInbox"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantOutbox"
+    },
+    {
+      "schema": "public",
       "name": "LifecycleCoordinatorLeases"
     },
     {
@@ -567,6 +621,72 @@
     }
   ],
   "columnPrivileges": [
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "CategoriesJson",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "FenceEvidenceHash",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "FragmentHash",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "ReleasedAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "SnapshotAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "State",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
     {
       "object": {
         "schema": "public",

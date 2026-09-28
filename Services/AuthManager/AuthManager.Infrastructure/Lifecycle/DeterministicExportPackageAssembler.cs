@@ -15,8 +15,15 @@ public sealed class DeterministicExportPackageAssembler : IExportPackageAssemble
         ArgumentNullException.ThrowIfNull(input);
         if (input.OperationId == Guid.Empty || input.OrganisationId == Guid.Empty || input.RegistryRevision == Guid.Empty)
             throw new ArgumentException("Export package identity is incomplete.", nameof(input));
-        if (input.SnapshotAt == default || input.SnapshotAt.Offset != TimeSpan.Zero)
-            throw new ArgumentException("SnapshotAt must be UTC.", nameof(input));
+        if (input.RequestedBySubjectId == Guid.Empty
+            || input.SnapshotAt == default || input.SnapshotAt.Offset != TimeSpan.Zero
+            || input.RequestedAt == default || input.RequestedAt.Offset != TimeSpan.Zero
+            || input.CompletedAt == default || input.CompletedAt.Offset != TimeSpan.Zero
+            || input.RequestedAt > input.SnapshotAt || input.CompletedAt < input.SnapshotAt
+            || input.CompletionStatus != "completed"
+            || !IsHash(input.InventoryHash) || !IsHash(input.ExportInventoryHash)
+            || !IsHash(input.FenceEvidenceHash))
+            throw new ArgumentException("Export package provenance is incomplete or inconsistent.", nameof(input));
 
         var categories = input.Categories
             .OrderBy(x => x.ParticipantId, StringComparer.Ordinal)
@@ -36,6 +43,9 @@ public sealed class DeterministicExportPackageAssembler : IExportPackageAssemble
         }
         if (input.Artifacts.Keys.Except(materialized.Select(x => x.ArtifactReference!), StringComparer.Ordinal).Any())
             throw new InvalidOperationException("Unreferenced export artifacts are not permitted.");
+        var validatedPaths = input.Artifacts.Keys.Select(ValidatePath).ToArray();
+        if (validatedPaths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != validatedPaths.Length)
+            throw new InvalidOperationException("Artifact references must map to unique ZIP entry paths.");
 
         var manifestModel = new
         {
@@ -44,8 +54,13 @@ public sealed class DeterministicExportPackageAssembler : IExportPackageAssemble
             organisationId = input.OrganisationId,
             registryRevision = input.RegistryRevision,
             inventoryHash = input.InventoryHash,
+            exportInventoryHash = input.ExportInventoryHash,
             snapshotAt = input.SnapshotAt,
             fenceEvidenceHash = input.FenceEvidenceHash,
+            requestedBy = input.RequestedBySubjectId,
+            requestedAt = input.RequestedAt,
+            completedAt = input.CompletedAt,
+            completionStatus = input.CompletionStatus,
             categories = categories.Select(x => new
             {
                 participantId = x.ParticipantId,
@@ -55,7 +70,8 @@ public sealed class DeterministicExportPackageAssembler : IExportPackageAssemble
                 schemaVersion = x.SchemaVersion,
                 contentSha256 = x.ContentSha256,
                 artifactReference = x.ArtifactReference,
-                reasonCode = x.ReasonCode
+                reasonCode = x.ReasonCode,
+                fragmentHash = x.FragmentHash
             })
         };
         var manifest = JsonSerializer.SerializeToUtf8Bytes(manifestModel, Json);
@@ -67,7 +83,6 @@ public sealed class DeterministicExportPackageAssembler : IExportPackageAssemble
             Write(archive, "manifest.json", manifest);
             foreach (var artifact in input.Artifacts.OrderBy(x => x.Key, StringComparer.Ordinal))
             {
-                ValidatePath(artifact.Key);
                 Write(archive, artifact.Key, artifact.Value);
             }
         }
@@ -84,15 +99,19 @@ public sealed class DeterministicExportPackageAssembler : IExportPackageAssemble
         stream.Write(content);
     }
 
-    private static void ValidatePath(string path)
+    private static string ValidatePath(string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || path.StartsWith('/') || path.StartsWith('\\')
-            || path.Contains("..", StringComparison.Ordinal) || path.Contains('\\'))
+        if (string.IsNullOrWhiteSpace(path) || path != path.Trim() || path.StartsWith('/') || path.StartsWith('\\')
+            || path.Contains('\\') || path.Split('/').Any(segment => segment is "" or "." or "..")
+            || string.Equals(path, "manifest.json", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Artifact references must be safe relative ZIP paths.");
+        return path;
     }
 
     private static string Hash(ReadOnlySpan<byte> content) =>
         Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+    private static bool IsHash(string value) => value?.Length == 64
+        && value.All(x => x is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
 
 /// <summary>Deterministic in-memory sink for provider-real non-production evidence only.</summary>

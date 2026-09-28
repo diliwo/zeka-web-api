@@ -13,6 +13,8 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
     public Guid IdempotencyId { get; private set; }
     public Guid RegistryRevision { get; private set; }
     public string InventoryHash { get; private set; } = "";
+    public string? ExportInventoryJson { get; private set; }
+    public string? ExportInventoryHash { get; private set; }
     public DateTimeOffset RequestedAt { get; private set; }
     public DateTimeOffset? SnapshotAt { get; private set; }
     public string? FenceEvidenceHash { get; private set; }
@@ -26,7 +28,8 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
     public IReadOnlyCollection<LifecycleParticipant> Participants => participants.AsReadOnly();
 
     public static LifecycleOperation Admit(Guid id, Guid organisationId, Guid subjectId,
-        LifecycleOperationFamily family, Guid idempotencyId, LifecycleRegistry registry, DateTimeOffset now)
+        LifecycleOperationFamily family, Guid idempotencyId, LifecycleRegistry registry, DateTimeOffset now,
+        LifecycleExportInventory? exportInventory = null)
     {
         if (id == Guid.Empty || organisationId == Guid.Empty || subjectId == Guid.Empty
             || idempotencyId == Guid.Empty || !Enum.IsDefined(family))
@@ -39,6 +42,13 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
             State = family == LifecycleOperationFamily.Export
                 ? LifecycleOperationState.Requested : LifecycleOperationState.Pending
         };
+        if (family == LifecycleOperationFamily.Export)
+        {
+            if (exportInventory is null) throw new ArgumentNullException(nameof(exportInventory));
+            exportInventory.DemandRegistry(registry);
+            operation.ExportInventoryJson = exportInventory.InventoryJson;
+            operation.ExportInventoryHash = exportInventory.InventoryHash;
+        }
         // Freeze the complete reviewed inventory, including capabilities for other families.
         operation.participants.AddRange(registry.Inventory.Select(b =>
             new LifecycleParticipant(id, organisationId, b)));

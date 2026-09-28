@@ -53,7 +53,10 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
                 or AuthManager.Core.Lifecycle.LifecycleExportFenceReceipt
                 or AuthManager.Core.Lifecycle.LifecycleExportFragment
                 or AuthManager.Core.Lifecycle.LifecycleExportPackage
-                or AuthManager.Core.Lifecycle.LifecycleCoordinatorLease)
+                or AuthManager.Core.Lifecycle.LifecycleCoordinatorLease
+                or AuthManager.Core.Lifecycle.AuthExportParticipantExecution
+                or AuthManager.Core.Lifecycle.AuthExportParticipantInboxReceipt
+                or AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage)
             {
                 var organisation = (Guid)entry.Property("OrganisationId").CurrentValue!;
                 if (!LifecycleOnly || LifecycleTransaction is null || organisation == Guid.Empty
@@ -75,6 +78,9 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<AuthManager.Core.Lifecycle.LifecycleExportFragment> LifecycleExportFragments => Set<AuthManager.Core.Lifecycle.LifecycleExportFragment>();
     public DbSet<AuthManager.Core.Lifecycle.LifecycleExportPackage> LifecycleExportPackages => Set<AuthManager.Core.Lifecycle.LifecycleExportPackage>();
     public DbSet<AuthManager.Core.Lifecycle.LifecycleCoordinatorLease> LifecycleCoordinatorLeases => Set<AuthManager.Core.Lifecycle.LifecycleCoordinatorLease>();
+    public DbSet<AuthManager.Core.Lifecycle.AuthExportParticipantExecution> AuthExportParticipantExecutions => Set<AuthManager.Core.Lifecycle.AuthExportParticipantExecution>();
+    public DbSet<AuthManager.Core.Lifecycle.AuthExportParticipantInboxReceipt> AuthExportParticipantInboxReceipts => Set<AuthManager.Core.Lifecycle.AuthExportParticipantInboxReceipt>();
+    public DbSet<AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage> AuthExportParticipantOutboxMessages => Set<AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

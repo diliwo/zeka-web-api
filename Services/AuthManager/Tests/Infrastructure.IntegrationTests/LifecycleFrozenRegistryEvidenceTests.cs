@@ -12,6 +12,7 @@ using Testcontainers.PostgreSql;
 using Xunit;
 using Xunit.Abstractions;
 using Zeka.PersistenceSecurity;
+using Zeka.Lifecycle.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 
@@ -58,7 +59,8 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         var first = Registry(RevisionOne, "participant-original");
         var successor = Registry(RevisionTwo, "participant-successor");
         Assert.True(await Activate(first, 0));
-        var store = new LifecycleAdmissionStore(Options("zeka_auth_runtime"), TimeProvider.System);
+        var store = new LifecycleAdmissionStore(Options("zeka_auth_runtime"), TimeProvider.System,
+            new FixtureExportInventory());
         var admission = new LifecycleAdmission(new CurrentAccess(), store);
         var result = await admission.AdmitAsync(Guid.Parse("46000000-0000-0000-0000-000000000010"),
             Organisation, LifecycleOperationFamily.Export, Guid.Parse("46000000-0000-0000-0000-000000000020"));
@@ -256,7 +258,7 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         var firstKey = Guid.NewGuid();
         var secondKey = sameIdentity ? firstKey : Guid.NewGuid();
         Task<AdmissionResult> Admit(Guid key) => new LifecycleAdmission(new CurrentAccess(),
-            new LifecycleAdmissionStore(options, TimeProvider.System)).AdmitAsync(
+            new LifecycleAdmissionStore(options, TimeProvider.System, new FixtureExportInventory())).AdmitAsync(
                 Guid.Parse("46000000-0000-0000-0000-000000000010"), Organisation, LifecycleOperationFamily.Export, key);
         var results = await Task.WhenAll(Admit(firstKey), Admit(secondKey));
         Assert.Equal(2, barrier.InitialReads);
@@ -268,7 +270,8 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         var replay = await Admit(winner.IdempotencyId);
         Assert.Equal(AdmissionStatus.Replay, replay.Status);
         Assert.Equal(winner.Id, replay.Operation!.Id);
-        var conflict = await new LifecycleAdmission(new CurrentAccess(), new LifecycleAdmissionStore(options, TimeProvider.System))
+        var conflict = await new LifecycleAdmission(new CurrentAccess(),
+            new LifecycleAdmissionStore(options, TimeProvider.System, new FixtureExportInventory()))
             .AdmitAsync(Guid.NewGuid(), Organisation, LifecycleOperationFamily.Export, winner.IdempotencyId);
         Assert.Equal(AdmissionStatus.Conflict, conflict.Status);
         Assert.Equal(1L, await Runtime(Organisation, "SELECT count(*) FROM public.\"OrganisationLifecycleOperations\""));
@@ -414,7 +417,7 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
     [Fact]
     public async Task Admission_freezes_complete_inventory_across_families_and_registry_validation_is_fail_closed()
     {
-        var export = new LifecycleCapability(LifecycleOperationFamily.Export, "records", "fixture");
+        var export = new LifecycleCapability(LifecycleOperationFamily.Export, "fixture.export-fragment", "fixture");
         var close = new LifecycleCapability(LifecycleOperationFamily.Termination, "closure", "fixture");
         LifecycleBinding[] bindings = [new(export, "owner-export", 1, true), new(close, "owner-close", 1, true)];
         LifecycleCapability[] required = [export, close];
@@ -531,7 +534,8 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
     }
 
     private Task<AdmissionResult> Admit(Guid organisation, LifecycleOperationFamily family, Guid identity) =>
-        new LifecycleAdmission(new CurrentAccess(), new LifecycleAdmissionStore(Options("zeka_auth_runtime"), TimeProvider.System))
+        new LifecycleAdmission(new CurrentAccess(), new LifecycleAdmissionStore(Options("zeka_auth_runtime"),
+            TimeProvider.System, new FixtureExportInventory()))
             .AdmitAsync(Guid.Parse("46000000-0000-0000-0000-000000000010"), organisation, family, identity);
 
     private sealed class AdmissionReadBarrier : DbCommandInterceptor
@@ -556,7 +560,8 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
     {
         Assert.True(await Activate(Registry(RevisionOne, "participant-original"), 0));
         var result = await new LifecycleAdmission(new CurrentAccess(),
-            new LifecycleAdmissionStore(Options("zeka_auth_runtime"), TimeProvider.System))
+            new LifecycleAdmissionStore(Options("zeka_auth_runtime"), TimeProvider.System,
+                new FixtureExportInventory()))
             .AdmitAsync(Guid.Parse("46000000-0000-0000-0000-000000000010"), Organisation,
                 LifecycleOperationFamily.Export, Guid.NewGuid());
         Assert.Equal(AdmissionStatus.Admitted, result.Status);
@@ -591,7 +596,8 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
 
     private static LifecycleRegistry Registry(Guid revision, string participant)
     {
-        var capability = new LifecycleCapability(LifecycleOperationFamily.Export, "records", "fixture-owned-records");
+        var capability = new LifecycleCapability(LifecycleOperationFamily.Export,
+            "fixture.export-fragment", "fixture-owned-records");
         var validated = LifecycleRegistry.Validate(revision, "Issue46-LIFE-FND-01-fixture-v1",
             [capability], [new LifecycleBinding(capability, participant, 1, true)]);
         Assert.Null(validated.Error);
@@ -604,6 +610,20 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
             Task.FromResult(new CurrentTenantAccess(TenantAccessOutcome.Authorized, organisation,
                 Guid.Parse("46000000-0000-0000-0000-000000000030"), [LifecyclePermissions.Export, LifecyclePermissions.Close],
                 "synthetic-authorized-membership", DateTimeOffset.UtcNow));
+    }
+
+    private sealed class FixtureExportInventory : IReviewedExportCategoryInventory
+    {
+        private static readonly IReadOnlyList<ReviewedExportCategoryRequirement> Requirements =
+            [new("records", new HashSet<ExportCategoryDispositionV1>
+                { ExportCategoryDispositionV1.Included, ExportCategoryDispositionV1.Empty })];
+
+        public IReadOnlyList<ReviewedExportCategoryRequirement> RequirementsFor(string participantId) => Requirements;
+
+        public LifecycleExportInventory Freeze(LifecycleRegistry registry) => LifecycleExportInventory.Create(registry,
+            registry.Inventory.Where(x => x.Capability.Family == LifecycleOperationFamily.Export
+                    && x.Capability.Key.EndsWith(".export-fragment", StringComparison.Ordinal))
+                .Select(x => new LifecycleExportCategoryRequirement(x.ParticipantId, "records", ["empty", "included"])));
     }
 
     private string Connection(string role) => new NpgsqlConnectionStringBuilder(postgres.GetConnectionString())

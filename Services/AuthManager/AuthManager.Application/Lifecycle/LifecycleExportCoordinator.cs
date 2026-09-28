@@ -1,4 +1,5 @@
 using Zeka.Lifecycle.Contracts;
+using AuthManager.Core.Lifecycle;
 
 namespace AuthManager.Application.Lifecycle;
 
@@ -94,15 +95,21 @@ public sealed record ExportPackageCategory(
     string? SchemaVersion,
     string? ContentSha256,
     string? ArtifactReference,
-    string? ReasonCode);
+    string? ReasonCode,
+    string FragmentHash);
 
 public sealed record ExportPackageInput(
     Guid OperationId,
     Guid OrganisationId,
     Guid RegistryRevision,
     string InventoryHash,
+    string ExportInventoryHash,
     DateTimeOffset SnapshotAt,
     string FenceEvidenceHash,
+    Guid RequestedBySubjectId,
+    DateTimeOffset RequestedAt,
+    DateTimeOffset CompletedAt,
+    string CompletionStatus,
     IReadOnlyList<ExportPackageCategory> Categories,
     IReadOnlyDictionary<string, byte[]> Artifacts);
 
@@ -137,6 +144,7 @@ public interface IExportArtifactSink
 public interface IReviewedExportCategoryInventory
 {
     IReadOnlyList<ReviewedExportCategoryRequirement> RequirementsFor(string participantId);
+    LifecycleExportInventory Freeze(LifecycleRegistry registry);
 }
 
 public sealed record ReviewedExportCategoryRequirement(
@@ -172,6 +180,20 @@ public sealed class ReviewedExportCategoryInventoryV1 : IReviewedExportCategoryI
     public IReadOnlyList<ReviewedExportCategoryRequirement> RequirementsFor(string participantId) =>
         Inventory.TryGetValue(participantId, out var requirements) ? requirements
             : throw new InvalidOperationException("Participant is absent from the reviewed LIFE-01 category inventory.");
+
+    public LifecycleExportInventory Freeze(LifecycleRegistry registry) => LifecycleExportInventory.Create(registry,
+        registry.Inventory.Where(x => x.Capability.Family == LifecycleOperationFamily.Export
+                && x.Capability.Key.EndsWith(".export-fragment", StringComparison.Ordinal))
+            .SelectMany(binding => RequirementsFor(binding.ParticipantId).Select(requirement =>
+                new LifecycleExportCategoryRequirement(binding.ParticipantId, requirement.Category,
+                    requirement.AllowedDispositions.Select(x => x switch
+                    {
+                        ExportCategoryDispositionV1.Included => "included",
+                        ExportCategoryDispositionV1.Empty => "empty",
+                        ExportCategoryDispositionV1.NotImplemented => "not_implemented",
+                        ExportCategoryDispositionV1.Withheld => "withheld",
+                        _ => throw new InvalidOperationException("Unsupported reviewed disposition.")
+                    }).ToArray()))));
 
     private static ReviewedExportCategoryRequirement Required(string category,
         IReadOnlySet<ExportCategoryDispositionV1> allowed) => new(category, allowed);
