@@ -25,6 +25,8 @@ public sealed record ColumnPrivilegeState(ManagedObjectIdentity Object, string C
 public sealed record RelationTopologyState(string Kind, ManagedObjectIdentity Parent,
     ManagedObjectIdentity Child, int Sequence, bool DetachPending);
 
+public sealed record RuntimeFunctionDefinitionState(string FunctionIdentity, string DefinitionSha256);
+
 public sealed record RlsSecurityManifest(int SchemaVersion, string Service, string ModelContext,
     string MigrationId, string OwnerRole, string MigratorRole, string RuntimeRole,
     string[] ManagedSchemas, string[] ProhibitedRelationKinds,
@@ -32,12 +34,13 @@ public sealed record RlsSecurityManifest(int SchemaVersion, string Service, stri
     ManagedObjectIdentity[] ProtectedTables, ManagedObjectIdentity[] ExcludedTables,
     ManagedObjectIdentity MigrationHistoryTable, ManagedObjectIdentity[] Sequences,
     ObjectPrivilegeState[] TablePrivileges, ObjectPrivilegeState[] SequencePrivileges,
-    string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
+    string[] RuntimeFunctions, Dictionary<string, string>? RuntimeFunctionDefinitionSha256,
     DefaultPrivilegeState[] DefaultPrivileges, ParameterPrivilegeGrant[] ParameterPrivileges,
     string PolicyPrefix, string? PolicyUsingExpression, string? PolicyWithCheckExpression,
     string? ContextFunction, ManagedObjectIdentity[]? GlobalControlPlaneTables = null,
     ManagedObjectIdentity[]? OrganisationScopedSurvivingControlTables = null,
-    ColumnPrivilegeState[]? ColumnPrivileges = null);
+    ColumnPrivilegeState[]? ColumnPrivileges = null,
+    RuntimeFunctionDefinitionState[]? RuntimeFunctionDefinitions = null);
 
 /// <summary>Deployment-only bidirectional comparison of the versioned model and effective PostgreSQL state.</summary>
 public static class RlsSecurityManifestVerifier
@@ -54,7 +57,9 @@ public static class RlsSecurityManifestVerifier
     {
         var name = assembly.GetManifestResourceNames().Single(x =>
             x.EndsWith("rls-manifest.v10.json", StringComparison.Ordinal)
-            || x.EndsWith("rls-manifest.v11.json", StringComparison.Ordinal));
+            || x.EndsWith("rls-manifest.v11.json", StringComparison.Ordinal)
+            || x.EndsWith("rls-manifest.v12.json", StringComparison.Ordinal)
+            || x.EndsWith("rls-manifest.v13.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -73,9 +78,10 @@ public static class RlsSecurityManifestVerifier
     public static async Task VerifyAsync(DbContext database, RlsSecurityManifest manifest,
         CancellationToken cancellationToken = default)
     {
-        if (manifest.SchemaVersion is not (10 or 11) || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13) || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
-        Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
+        var functionDefinitions = FunctionDefinitions(manifest);
+        Equal(manifest.RuntimeFunctions, functionDefinitions.Keys,
             "function definition inventory");
         ValidateDefaultPrivilegeManifest(manifest);
         ValidateParameterPrivilegeManifest(manifest);
@@ -107,7 +113,7 @@ public static class RlsSecurityManifestVerifier
             await VerifyRelationTopology(connection, manifest, cancellationToken);
             await VerifyProhibitedRelationSurfaces(connection, manifest, cancellationToken);
             await VerifyTablesAndPolicies(connection, manifest, cancellationToken);
-            if (manifest.SchemaVersion == 11)
+            if (manifest.SchemaVersion >= 11)
             {
                 await VerifyLifecycleRelationships(connection, manifest, cancellationToken);
                 var table = StoreObjectIdentifier.Table("OrganisationLifecycleOperations", null);
@@ -388,10 +394,9 @@ public static class RlsSecurityManifestVerifier
               and a.attnum>0 and not a.attisdropped and a.attacl is not null
               and x.grantee<>c.relowner order by 1,2,3,4,5,6
             """, cancellationToken, ("schemas", manifest.ManagedSchemas));
-        var expected = manifest.SchemaVersion == 11
-            ? manifest.ColumnPrivileges!.SelectMany(state => state.Privileges.Select(privilege =>
-                $"{ObjectKey(state.Object)}|{state.Column}|{manifest.RuntimeRole}|{privilege}|{state.Grantable.ToString().ToLowerInvariant()}"))
-            : Enumerable.Empty<string>();
+        var expected = (manifest.ColumnPrivileges ?? [])
+            .SelectMany(state => state.Privileges.Select(privilege =>
+                $"{ObjectKey(state.Object)}|{state.Column}|{manifest.RuntimeRole}|{privilege}|{state.Grantable.ToString().ToLowerInvariant()}"));
         Equal(expected, rows.Select(row => string.Join('|', row)), "column ACLs");
     }
 
@@ -443,7 +448,7 @@ public static class RlsSecurityManifestVerifier
         foreach (var row in rows)
         {
             var actual = DefinitionSha256(row[7]);
-            var expectedDefinition = manifest.RuntimeFunctionDefinitionSha256[row[0]];
+            var expectedDefinition = FunctionDefinitions(manifest)[row[0]];
             if (!StringComparer.OrdinalIgnoreCase.Equals(expectedDefinition, actual))
                 throw new InvalidOperationException(
                     $"Function body drifted for {row[0]}. Expected {expectedDefinition}, actual {actual}.");
@@ -542,6 +547,36 @@ public static class RlsSecurityManifestVerifier
         }
     }
 
+    private static IReadOnlyDictionary<string, string> FunctionDefinitions(RlsSecurityManifest manifest)
+    {
+        if (manifest.SchemaVersion >= 13)
+        {
+            if (manifest.RuntimeFunctionDefinitionSha256 is not null
+                || manifest.RuntimeFunctionDefinitions is null
+                || manifest.RuntimeFunctionDefinitions.Length == 0)
+                throw new InvalidOperationException(
+                    "Version 13+ requires explicit function-definition records.");
+            var definitions = manifest.RuntimeFunctionDefinitions;
+            if (definitions.Any(definition => string.IsNullOrWhiteSpace(definition.FunctionIdentity)
+                    || definition.DefinitionSha256.Length != 64
+                    || definition.DefinitionSha256.Any(character =>
+                        character is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
+                || definitions.Select(definition => definition.FunctionIdentity)
+                    .Distinct(StringComparer.Ordinal).Count() != definitions.Length)
+                throw new InvalidOperationException("Function definition inventory is invalid.");
+            return definitions.ToDictionary(
+                definition => definition.FunctionIdentity,
+                definition => definition.DefinitionSha256,
+                StringComparer.Ordinal);
+        }
+
+        if (manifest.RuntimeFunctionDefinitions is not null
+            || manifest.RuntimeFunctionDefinitionSha256 is null)
+            throw new InvalidOperationException(
+                "Legacy manifests require the function-definition hash dictionary.");
+        return manifest.RuntimeFunctionDefinitionSha256;
+    }
+
     private static void ValidateParameterPrivilegeManifest(RlsSecurityManifest manifest)
     {
         var managed = new[] { "PUBLIC", manifest.OwnerRole, manifest.MigratorRole, manifest.RuntimeRole };
@@ -563,38 +598,91 @@ public static class RlsSecurityManifestVerifier
 
     private static void ValidateManagedObjectManifest(RlsSecurityManifest manifest)
     {
-        if (manifest.SchemaVersion == 11)
+        if (manifest.SchemaVersion >= 11)
         {
             if (manifest.Service != "AuthManagement"
                 || manifest.GlobalControlPlaneTables is null
                 || manifest.OrganisationScopedSurvivingControlTables is null
                 || manifest.ColumnPrivileges is null)
-                throw new InvalidOperationException("Lifecycle subclass inventories are required for AuthManagement v11.");
+                throw new InvalidOperationException("Lifecycle subclass inventories are required for AuthManagement v11+.");
             ValidateIdentities(manifest.GlobalControlPlaneTables, "global control-plane");
             ValidateIdentities(manifest.OrganisationScopedSurvivingControlTables, "surviving control");
             Equal(new[] { "LifecycleParticipantRegistryActivation", "LifecycleParticipantRegistryBindings",
                     "LifecycleParticipantRegistryRevisions" }.Select(name => ObjectKey("public", name)),
                 manifest.GlobalControlPlaneTables.Select(ObjectKey), "global control-plane classification");
-            Equal(new[] { "OrganisationLifecycleOperations", "OrganisationLifecycleParticipants" }
-                    .Select(name => ObjectKey("public", name)),
+            var surviving = manifest.SchemaVersion >= 13
+                ? new[] { "AuthExportParticipantExecutions", "AuthExportParticipantInbox", "AuthExportParticipantOutbox",
+                    "LifecycleCoordinatorLeases", "LifecycleExportFenceReceipts", "LifecycleExportFragments",
+                    "LifecycleExportPackages", "LifecycleInboxReceipts", "MembershipPermissionGrants",
+                    "OrganisationLifecycleOperations", "OrganisationLifecycleParticipants" }
+                : manifest.SchemaVersion >= 12
+                ? new[] { "MembershipPermissionGrants", "OrganisationLifecycleOperations", "OrganisationLifecycleParticipants" }
+                : new[] { "OrganisationLifecycleOperations", "OrganisationLifecycleParticipants" };
+            Equal(surviving.Select(name => ObjectKey("public", name)),
                 manifest.OrganisationScopedSurvivingControlTables.Select(ObjectKey), "surviving control classification");
             if (manifest.GlobalControlPlaneTables.Except(manifest.ExcludedTables).Any()
                 || manifest.OrganisationScopedSurvivingControlTables.Except(manifest.ProtectedTables).Any()
                 || manifest.GlobalControlPlaneTables.Intersect(manifest.OrganisationScopedSurvivingControlTables).Any())
                 throw new InvalidOperationException("Lifecycle subclass membership is invalid.");
             var operation = new ManagedObjectIdentity("public", "OrganisationLifecycleOperations");
-            var expectedColumns = new[] { "Revision", "State" };
-            if (!manifest.ColumnPrivileges.Select(state => state.Column).SequenceEqual(expectedColumns,
-                    StringComparer.Ordinal)
-                || manifest.ColumnPrivileges.Any(state => state.Object != operation || state.Grantable
+            var permissionGrants = new ManagedObjectIdentity("public", "MembershipPermissionGrants");
+            var expectedColumns = manifest.SchemaVersion >= 13
+                ? new[]
+                {
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|CategoriesJson",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|FenceEvidenceHash",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|FragmentHash",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|ReleasedAt",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|SnapshotAt",
+                    ObjectKey("public", "AuthExportParticipantExecutions") + "|State",
+                    ObjectKey("public", "LifecycleCoordinatorLeases") + "|ExpiresAt",
+                    ObjectKey("public", "LifecycleCoordinatorLeases") + "|LeaseId",
+                    ObjectKey("public", "LifecycleCoordinatorLeases") + "|Version",
+                    $"{ObjectKey(permissionGrants)}|ConcurrencyVersion",
+                    $"{ObjectKey(permissionGrants)}|RevokedAtUtc",
+                    $"{ObjectKey(permissionGrants)}|RevokedByMembershipId",
+                    $"{ObjectKey(permissionGrants)}|RevokedBySubjectId",
+                    $"{ObjectKey(operation)}|CompletedAt",
+                    $"{ObjectKey(operation)}|FailureCode",
+                    $"{ObjectKey(operation)}|FenceEvidenceHash",
+                    $"{ObjectKey(operation)}|IsActive",
+                    $"{ObjectKey(operation)}|PackageReference",
+                    $"{ObjectKey(operation)}|PackageSha256",
+                    $"{ObjectKey(operation)}|Revision",
+                    $"{ObjectKey(operation)}|SnapshotAt",
+                    $"{ObjectKey(operation)}|State",
+                    ObjectKey("public", "OrganisationLifecycleParticipants") + "|State"
+                }
+                : manifest.SchemaVersion >= 12
+                ? new[]
+                {
+                    $"{ObjectKey(permissionGrants)}|ConcurrencyVersion",
+                    $"{ObjectKey(permissionGrants)}|RevokedAtUtc",
+                    $"{ObjectKey(permissionGrants)}|RevokedByMembershipId",
+                    $"{ObjectKey(permissionGrants)}|RevokedBySubjectId",
+                    $"{ObjectKey(operation)}|Revision",
+                    $"{ObjectKey(operation)}|State"
+                }
+                : new[] { $"{ObjectKey(operation)}|Revision", $"{ObjectKey(operation)}|State" };
+            if (!manifest.ColumnPrivileges.Select(state => $"{ObjectKey(state.Object)}|{state.Column}")
+                    .SequenceEqual(expectedColumns, StringComparer.Ordinal)
+                || manifest.ColumnPrivileges.Any(state => state.Grantable
                     || !state.Privileges.SequenceEqual(new[] { "UPDATE" }, StringComparer.Ordinal)))
                 throw new InvalidOperationException("Lifecycle column privilege inventory is invalid.");
             var operationGrants = manifest.TablePrivileges.Where(state => state.Object == operation).ToArray();
             if (operationGrants.Length != 1 || !operationGrants[0].Privileges.SequenceEqual(new[] { "INSERT", "SELECT" }))
                 throw new InvalidOperationException("Lifecycle operation table privileges are invalid.");
+            if (manifest.SchemaVersion >= 12)
+            {
+                var explicitPermissionGrants = manifest.TablePrivileges
+                    .Where(state => state.Object == permissionGrants).ToArray();
+                if (explicitPermissionGrants.Length != 1
+                    || !explicitPermissionGrants[0].Privileges.SequenceEqual(new[] { "INSERT", "SELECT" }))
+                    throw new InvalidOperationException("Membership permission grant table privileges are invalid.");
+            }
         }
         else if (manifest.GlobalControlPlaneTables is not null
-            || manifest.OrganisationScopedSurvivingControlTables is not null || manifest.ColumnPrivileges is not null)
+            || manifest.OrganisationScopedSurvivingControlTables is not null)
             throw new InvalidOperationException("Lifecycle subclass inventories require manifest v11.");
         Equal(ProhibitedRelationKinds, manifest.ProhibitedRelationKinds,
             "prohibited relation kind inventory");
@@ -612,6 +700,7 @@ public static class RlsSecurityManifestVerifier
             manifest.ProtectedTables.Concat(manifest.ExcludedTables), Dml, "table");
         ValidatePrivileges(manifest.SequencePrivileges, manifest.Sequences,
             ["SELECT", "USAGE"], "sequence");
+        ValidateColumnPrivileges();
         var history = manifest.MigrationHistoryTable;
         if (string.IsNullOrWhiteSpace(history.Schema) || string.IsNullOrWhiteSpace(history.Name)
             || !manifest.ManagedSchemas.Contains(history.Schema, StringComparer.Ordinal))
@@ -646,6 +735,32 @@ public static class RlsSecurityManifestVerifier
                     throw new InvalidOperationException($"The {category} privilege inventory is invalid.");
             }
         }
+
+        void ValidateColumnPrivileges()
+        {
+            var states = manifest.ColumnPrivileges ?? [];
+            var objects = manifest.ProtectedTables.Concat(manifest.ExcludedTables)
+                .Select(ObjectKey).ToHashSet(StringComparer.Ordinal);
+            var identities = states.Select(state => $"{ObjectKey(state.Object)}|{state.Column}").ToArray();
+            if (!identities.SequenceEqual(identities.Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal), StringComparer.Ordinal))
+                throw new InvalidOperationException("The column privilege inventory is invalid.");
+            foreach (var state in states)
+            {
+                if (!objects.Contains(ObjectKey(state.Object)) || !ValidIdentifier(state.Column)
+                    || state.Grantable || !state.Privileges.SequenceEqual(["UPDATE"], StringComparer.Ordinal))
+                    throw new InvalidOperationException("The column privilege inventory is invalid.");
+                var table = manifest.TablePrivileges.Single(candidate => candidate.Object == state.Object);
+                if (table.Privileges.Contains("UPDATE", StringComparer.Ordinal)
+                    || table.Privileges.Contains("DELETE", StringComparer.Ordinal))
+                    throw new InvalidOperationException(
+                        "Column-scoped mutation cannot coexist with table-level UPDATE or DELETE.");
+            }
+        }
+
+        static bool ValidIdentifier(string value) => !string.IsNullOrWhiteSpace(value)
+            && (char.IsLetter(value[0]) || value[0] == '_')
+            && value.All(character => char.IsLetterOrDigit(character) || character == '_');
     }
 
     private static async Task VerifyLifecycleRelationships(DbConnection connection,
@@ -668,12 +783,35 @@ public static class RlsSecurityManifestVerifier
             join pg_catalog.pg_namespace target_schema on target_schema.oid=target.relnamespace
             where f.contype='f' and source_schema.nspname='public' and source.relname=any(@tables)
             """, cancellationToken, ("tables", tables));
-        Equal([
+        var expected = new List<string>
+        {
             "LifecycleParticipantRegistryActivation|RevisionId|public|LifecycleParticipantRegistryRevisions|Id|r|a|true|false",
             "LifecycleParticipantRegistryBindings|RevisionId|public|LifecycleParticipantRegistryRevisions|Id|r|a|true|false",
             "OrganisationLifecycleOperations|RegistryRevision|public|LifecycleParticipantRegistryRevisions|Id|r|a|true|false",
             "OrganisationLifecycleParticipants|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false"
-        ], rows.Select(row => string.Join('|', row)), "lifecycle foreign keys");
+        };
+        if (manifest.SchemaVersion >= 12)
+        {
+            expected.AddRange([
+                "MembershipPermissionGrants|GrantedByMembershipId,OrganisationId|public|OrganisationMemberships|Id,OrganisationId|r|a|true|false",
+                "MembershipPermissionGrants|OrganisationMembershipId,OrganisationId|public|OrganisationMemberships|Id,OrganisationId|r|a|true|false",
+                "MembershipPermissionGrants|RevokedByMembershipId,OrganisationId|public|OrganisationMemberships|Id,OrganisationId|r|a|true|false"
+            ]);
+        }
+        if (manifest.SchemaVersion >= 13)
+        {
+            expected.AddRange([
+                "AuthExportParticipantExecutions|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "AuthExportParticipantInbox|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "AuthExportParticipantOutbox|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "LifecycleCoordinatorLeases|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "LifecycleExportFenceReceipts|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "LifecycleExportFragments|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "LifecycleExportPackages|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "LifecycleInboxReceipts|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false"
+            ]);
+        }
+        Equal(expected, rows.Select(row => string.Join('|', row)), "lifecycle foreign keys");
         var globalOrganisationColumns = await RowsAsync(connection, """
             select c.relname from pg_catalog.pg_attribute a
             join pg_catalog.pg_class c on c.oid=a.attrelid

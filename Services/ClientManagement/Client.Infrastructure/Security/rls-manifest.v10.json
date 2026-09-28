@@ -2,7 +2,7 @@
   "schemaVersion": 10,
   "service": "ClientManagement",
   "modelContext": "ClientManagement.Infrastructure.Persistence.DeploymentDbContext",
-  "migrationId": "20260912180001_PostgreSqlRlsAndRuntimeRoles",
+  "migrationId": "20260928081952_OrganisationExportParticipantV1",
   "ownerRole": "zeka_client_owner",
   "migratorRole": "zeka_client_migrator",
   "runtimeRole": "zeka_client_runtime",
@@ -13,6 +13,10 @@
     { "schema": "public", "name": "Assessments" },
     { "schema": "public", "name": "Clients" },
     { "schema": "public", "name": "MonitoringReports" },
+    { "schema": "public", "name": "OrganisationExportFences" },
+    { "schema": "public", "name": "OrganisationExportFragments" },
+    { "schema": "public", "name": "OrganisationExportInbox" },
+    { "schema": "public", "name": "OrganisationExportOutbox" },
     { "schema": "public", "name": "ProfessionalAssessments" },
     { "schema": "public", "name": "ProfessionnalExperience" },
     { "schema": "public", "name": "SchoolRegistrations" },
@@ -37,6 +41,10 @@
     { "schema": "public", "name": "MonitoringActions_ActionId_seq" },
     { "schema": "public", "name": "MonitoringReports_Id_seq" },
     { "schema": "public", "name": "NatureOfContract_NatureOfContractId_seq" },
+    { "schema": "public", "name": "OrganisationExportFences_Id_seq" },
+    { "schema": "public", "name": "OrganisationExportFragments_Id_seq" },
+    { "schema": "public", "name": "OrganisationExportInbox_Id_seq" },
+    { "schema": "public", "name": "OrganisationExportOutbox_Id_seq" },
     { "schema": "public", "name": "Profession_Id_seq" },
     { "schema": "public", "name": "ProfessionalAssessments_Id_seq" },
     { "schema": "public", "name": "ProfessionnalExperience_ProfessionnalExperienceId_seq" },
@@ -55,6 +63,10 @@
     { "object": { "schema": "public", "name": "MonitoringActions" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
     { "object": { "schema": "public", "name": "MonitoringReports" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
     { "object": { "schema": "public", "name": "NatureOfContract" }, "privileges": ["SELECT"] },
+    { "object": { "schema": "public", "name": "OrganisationExportFences" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "OrganisationExportFragments" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "OrganisationExportInbox" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "OrganisationExportOutbox" }, "privileges": ["INSERT", "SELECT"] },
     { "object": { "schema": "public", "name": "Profession" }, "privileges": ["SELECT"] },
     { "object": { "schema": "public", "name": "ProfessionalAssessments" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
     { "object": { "schema": "public", "name": "ProfessionnalExperience" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
@@ -73,6 +85,10 @@
     { "object": { "schema": "public", "name": "MonitoringActions_ActionId_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "MonitoringReports_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "NatureOfContract_NatureOfContractId_seq" }, "privileges": [] },
+    { "object": { "schema": "public", "name": "OrganisationExportFences_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "OrganisationExportFragments_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "OrganisationExportInbox_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "OrganisationExportOutbox_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "Profession_Id_seq" }, "privileges": [] },
     { "object": { "schema": "public", "name": "ProfessionalAssessments_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "ProfessionnalExperience_ProfessionnalExperienceId_seq" }, "privileges": ["SELECT", "USAGE"] },
@@ -84,9 +100,10 @@
     { "object": { "schema": "public", "name": "TrainingType_Id_seq" }, "privileges": [] },
     { "object": { "schema": "public", "name": "Training_Id_seq" }, "privileges": [] }
   ],
-  "runtimeFunctions": ["zeka.current_organisation_id()"],
+  "runtimeFunctions": ["zeka.current_organisation_id()", "zeka.reject_writes_during_export_fence()"],
   "runtimeFunctionDefinitionSha256": {
-    "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b"
+    "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b",
+    "zeka.reject_writes_during_export_fence()": "feeed4b4ebdd58893964050a375614439736dde2e3429a676a867a147d1f4382"
   },
   "defaultPrivileges": [
     { "owner": "zeka_client_owner", "objectType": "FUNCTION", "scope": "GLOBAL", "grants": [] },
@@ -104,6 +121,9 @@
     { "owner": "zeka_client_owner", "objectType": "TYPE", "scope": "SCHEMA", "schema": "zeka", "grants": [] }
   ],
   "parameterPrivileges": [],
+  "columnPrivileges": [
+    { "object": { "schema": "public", "name": "OrganisationExportFences" }, "column": "ReleasedAt", "privileges": ["UPDATE"], "grantable": false }
+  ],
   "policyPrefix": "rls_",
   "policyUsingExpression": "(\"OrganisationId\" = zeka.current_organisation_id())",
   "policyWithCheckExpression": "(\"OrganisationId\" = zeka.current_organisation_id())",

@@ -698,6 +698,134 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.ToTable("StaffProjectionOutbox", (string)null);
                 });
 
+            modelBuilder.Entity("AdminAreaManagement.Infrastructure.Persistence.Exports.AdminAreaExportFence", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("EnteredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("FenceRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FenceToken")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<long>("OperationRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("ReleasedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("OperationId", "OrganisationId");
+
+                    b.HasIndex("OrganisationId")
+                        .IsUnique()
+                        .HasFilter("\"ReleasedAt\" IS NULL");
+
+                    b.HasIndex("OrganisationId", "FenceToken")
+                        .IsUnique();
+
+                    b.ToTable("AdminAreaExportFences", (string)null);
+                });
+
+            modelBuilder.Entity("AdminAreaManagement.Infrastructure.Persistence.Exports.AdminAreaExportFragment", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ParticipantId")
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<string>("FenceToken")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<string>("FragmentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset>("SnapshotAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("OperationId", "OrganisationId", "ParticipantId");
+
+                    b.ToTable("AdminAreaExportFragments", (string)null);
+                });
+
+            modelBuilder.Entity("AdminAreaManagement.Infrastructure.Persistence.Exports.AdminAreaExportInbox", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CommandType")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("MessageId", "OrganisationId");
+
+                    b.ToTable("AdminAreaExportInbox", (string)null);
+                });
+
+            modelBuilder.Entity("AdminAreaManagement.Infrastructure.Persistence.Exports.AdminAreaExportOutbox", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MessageType")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("MessageId", "OrganisationId");
+
+                    b.ToTable("AdminAreaExportOutbox", (string)null);
+                });
+
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.DocumentPartner", b =>
                 {
                     b.HasOne("AdminAreaManagement.Core.Entities.Partner", "Partner")

@@ -17,6 +17,8 @@ using AdminAreaManagement.Application.Common.Authorization;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Zeka.PersistenceSecurity;
+using AdminAreaManagement.Application.Exports;
+using AdminAreaManagement.Infrastructure.Exports;
 
 
 
@@ -24,6 +26,21 @@ namespace AdminAreaManagement.Infrastructure;
 
 public static class DependencyInjection
 {
+    /// <summary>
+    /// Enables the bounded LIFE-01 participant only for a named evidence fixture tenant.
+    /// Production registration remains deliberately absent.
+    /// </summary>
+    public static IServiceCollection AddAdminAreaFixtureExportParticipant(this IServiceCollection services,
+        Guid fixtureOrganisationId, string artifactRoot)
+    {
+        services.AddSingleton(new AdminAreaFixtureScope(fixtureOrganisationId));
+        services.AddSingleton<IAdminAreaExportArtifactStore>(
+            new DeterministicFixtureExportArtifactStore(artifactRoot));
+        services.AddSingleton(TimeProvider.System);
+        services.AddScoped<IAdminAreaExportParticipant, AdminAreaExportParticipant>();
+        return services;
+    }
+
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfigurationManager configuration)
     {
         services.RemoveAll<IFileService>();

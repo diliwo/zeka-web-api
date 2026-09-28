@@ -16,6 +16,8 @@ using AuthManager.Infrastructure.Persistence.Services;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Zeka.PersistenceSecurity;
+using AuthManager.Application.Lifecycle;
+using AuthManager.Infrastructure.Lifecycle;
 
 namespace AuthManager.Infrastructure;
 
@@ -48,6 +50,15 @@ public static class DependencyInjection
         services.AddScoped<AuthManager.Application.Lifecycle.ILifecycleAdmissionStore, Persistence.Lifecycle.LifecycleAdmissionStore>();
         services.AddScoped<AuthManager.Application.Lifecycle.ILifecycleRegistryReader, Persistence.Lifecycle.LifecycleRegistryReader>();
         services.AddScoped<AuthManager.Application.Authorization.IActiveOrganisationMembership, ActiveOrganisationMembership>();
+        services.AddScoped<AuthManager.Application.Authorization.IMembershipPermissionGrantStore, MembershipPermissionGrantStore>();
+        services.TryAddSingleton<IReviewedExportCategoryInventory, ReviewedExportCategoryInventoryV1>();
+        services.TryAddSingleton<IExportPackageAssembler, DeterministicExportPackageAssembler>();
+        services.TryAddSingleton<UnconfiguredExportStorage>();
+        services.TryAddSingleton<IExportArtifactSource>(provider => provider.GetRequiredService<UnconfiguredExportStorage>());
+        services.TryAddSingleton<IExportArtifactSink>(provider => provider.GetRequiredService<UnconfiguredExportStorage>());
+        services.TryAddSingleton<IExportPackageSink>(provider => provider.GetRequiredService<UnconfiguredExportStorage>());
+        services.AddScoped<ILifecycleExportStore, Persistence.Lifecycle.LifecycleExportStore>();
+        services.AddScoped<AuthExportParticipant>();
 
         if (configuration.GetValue<bool>($"{OutboxDispatcherOptions.SectionName}:Enabled"))
             services.AddHostedService<OutboxBackgroundService>();

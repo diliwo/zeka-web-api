@@ -11,6 +11,7 @@ public sealed class OrganisationMembershipConfiguration : IEntityTypeConfigurati
     {
         builder.ToTable("OrganisationMemberships");
         builder.HasKey(membership => membership.Id);
+        builder.HasAlternateKey(membership => new { membership.Id, membership.OrganisationId });
         builder.Property(membership => membership.OrganisationId).IsRequired();
         builder.Property(membership => membership.UserId).IsRequired();
         builder.Property(membership => membership.PermissionSetId).IsRequired();

@@ -1,5 +1,6 @@
 using ClientManagement.Core.Common;
 using ClientManagement.Core.Entities;
+using ClientManagement.Core.Lifecycle;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Zeka.Extensions.MultiTenancy.Abstractions;
@@ -117,6 +118,10 @@ public class ApplicationDbContext : TenantDbContext
     public DbSet<ProfessionalAssessment> ProfessionalAssessments => Set<ProfessionalAssessment>();
     public DbSet<Language> Languages => Set<Language>();
     public DbSet<SocialWorker> SocialWorkers => Set<SocialWorker>();
+    public DbSet<OrganisationExportFence> OrganisationExportFences => Set<OrganisationExportFence>();
+    public DbSet<OrganisationExportFragment> OrganisationExportFragments => Set<OrganisationExportFragment>();
+    public DbSet<OrganisationExportCommandReceipt> OrganisationExportInbox => Set<OrganisationExportCommandReceipt>();
+    public DbSet<OrganisationExportOutboxMessage> OrganisationExportOutbox => Set<OrganisationExportOutboxMessage>();
 
     protected override void ConfigureTenantModel(ModelBuilder builder) => ConfigurePersistenceModel(builder);
 
@@ -167,6 +172,10 @@ public sealed class DeploymentDbContext(DbContextOptions<DeploymentDbContext> op
     public DbSet<ProfessionalAssessment> ProfessionalAssessments => Set<ProfessionalAssessment>();
     public DbSet<Language> Languages => Set<Language>();
     public DbSet<SocialWorker> SocialWorkers => Set<SocialWorker>();
+    public DbSet<OrganisationExportFence> OrganisationExportFences => Set<OrganisationExportFence>();
+    public DbSet<OrganisationExportFragment> OrganisationExportFragments => Set<OrganisationExportFragment>();
+    public DbSet<OrganisationExportCommandReceipt> OrganisationExportInbox => Set<OrganisationExportCommandReceipt>();
+    public DbSet<OrganisationExportOutboxMessage> OrganisationExportOutbox => Set<OrganisationExportOutboxMessage>();
     protected override void OnModelCreating(ModelBuilder builder) => ApplicationDbContext.ConfigurePersistenceModel(builder);
 }
 

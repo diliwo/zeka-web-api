@@ -135,7 +135,9 @@ BEGIN
 END $existing_objects$;
 DO $lifecycle_objects$
 DECLARE object_name text;
+        lifecycle_object record;
         column_grant record;
+        update_list text;
 BEGIN
   FOREACH object_name IN ARRAY ARRAY[
     'LifecycleParticipantRegistryRevisions','LifecycleParticipantRegistryBindings',
@@ -145,32 +147,66 @@ BEGIN
       EXECUTE pg_catalog.format('GRANT SELECT ON TABLE public.%I TO zeka_auth_runtime', object_name);
     END IF;
   END LOOP;
-  IF pg_catalog.to_regclass('public."OrganisationLifecycleOperations"') IS NOT NULL THEN
-    -- Table REVOKE does not erase pg_attribute.attacl. Remove every non-owner
-    -- column grant, including stale grants on future columns, before the allowlist.
-    FOR column_grant IN
-      SELECT DISTINCT attribute.attname, acl.grantee,
-        pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
-      FROM pg_catalog.pg_attribute attribute
-      JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
-      CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
-      WHERE relation.oid='public."OrganisationLifecycleOperations"'::regclass
-        AND attribute.attnum>0 AND NOT attribute.attisdropped
-        AND acl.grantee<>relation.relowner
-    LOOP
+  -- Table REVOKE does not erase pg_attribute.attacl. Reconcile every lifecycle table from
+  -- one explicit data inventory so future columns cannot inherit stale grants.
+  FOR lifecycle_object IN
+    SELECT * FROM (VALUES
+      ('OrganisationLifecycleOperations', ARRAY['State','Revision','SnapshotAt','FenceEvidenceHash',
+        'PackageSha256','PackageReference','FailureCode','CompletedAt','IsActive']::text[], false),
+      ('OrganisationLifecycleParticipants', ARRAY['State']::text[], false),
+      ('LifecycleCoordinatorLeases', ARRAY['LeaseId','ExpiresAt','Version']::text[], false),
+      ('LifecycleExportFenceReceipts', ARRAY[]::text[], false),
+      ('LifecycleExportFragments', ARRAY[]::text[], false),
+      ('LifecycleExportPackages', ARRAY[]::text[], false),
+      ('LifecycleInboxReceipts', ARRAY[]::text[], false),
+      ('AuthExportParticipantExecutions', ARRAY['SnapshotAt','FenceEvidenceHash','FragmentHash',
+        'CategoriesJson','ReleasedAt','State']::text[], true),
+      ('AuthExportParticipantInbox', ARRAY[]::text[], true),
+      ('AuthExportParticipantOutbox', ARRAY[]::text[], true),
+      ('MembershipPermissionGrants', ARRAY['RevokedByMembershipId','RevokedBySubjectId',
+        'RevokedAtUtc','ConcurrencyVersion']::text[], false)
+    ) AS inventory(name, update_columns, reconcile_owner)
+  LOOP
+    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', lifecycle_object.name)) IS NOT NULL THEN
+      IF lifecycle_object.reconcile_owner THEN
+        EXECUTE pg_catalog.format('ALTER TABLE public.%I OWNER TO zeka_auth_owner', lifecycle_object.name);
+      END IF;
       EXECUTE pg_catalog.format(
-        'REVOKE ALL (%I) ON TABLE public."OrganisationLifecycleOperations" FROM %s CASCADE',
-        column_grant.attname,
-        CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
-          ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
-    END LOOP;
-    GRANT SELECT, INSERT ON TABLE public."OrganisationLifecycleOperations" TO zeka_auth_runtime;
-    GRANT UPDATE ("State", "Revision") ON TABLE public."OrganisationLifecycleOperations" TO zeka_auth_runtime;
-  END IF;
-  IF pg_catalog.to_regclass('public."OrganisationLifecycleParticipants"') IS NOT NULL THEN
-    GRANT SELECT, INSERT ON TABLE public."OrganisationLifecycleParticipants" TO zeka_auth_runtime;
-  END IF;
+        'REVOKE ALL ON TABLE public.%I FROM PUBLIC, zeka_auth_runtime', lifecycle_object.name);
+      FOR column_grant IN
+        SELECT DISTINCT attribute.attname, acl.grantee,
+          pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
+        FROM pg_catalog.pg_attribute attribute
+        JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+        CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+        WHERE relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', lifecycle_object.name))
+          AND attribute.attnum>0 AND NOT attribute.attisdropped
+          AND acl.grantee<>relation.relowner
+      LOOP
+        EXECUTE pg_catalog.format(
+          'REVOKE ALL (%I) ON TABLE public.%I FROM %s CASCADE',
+          column_grant.attname, lifecycle_object.name,
+          CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+            ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
+      END LOOP;
+      EXECUTE pg_catalog.format(
+        'GRANT SELECT, INSERT ON TABLE public.%I TO zeka_auth_runtime', lifecycle_object.name);
+      IF pg_catalog.cardinality(lifecycle_object.update_columns) > 0 THEN
+        SELECT pg_catalog.string_agg(pg_catalog.quote_ident(column_name), ', ')
+          INTO update_list FROM pg_catalog.unnest(lifecycle_object.update_columns) column_name;
+        EXECUTE pg_catalog.format(
+          'GRANT UPDATE (%s) ON TABLE public.%I TO zeka_auth_runtime',
+          update_list, lifecycle_object.name);
+      END IF;
+    END IF;
+  END LOOP;
   IF pg_catalog.to_regprocedure('zeka.current_organisation_id()') IS NOT NULL THEN
     GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_auth_runtime;
+  END IF;
+  IF pg_catalog.to_regprocedure('zeka.reject_auth_membership_write_during_export_fence()') IS NOT NULL THEN
+    ALTER FUNCTION zeka.reject_auth_membership_write_during_export_fence() OWNER TO zeka_auth_owner;
+    REVOKE ALL ON FUNCTION zeka.reject_auth_membership_write_during_export_fence()
+      FROM PUBLIC, zeka_auth_runtime;
+    GRANT EXECUTE ON FUNCTION zeka.reject_auth_membership_write_during_export_fence() TO zeka_auth_runtime;
   END IF;
 END $lifecycle_objects$;

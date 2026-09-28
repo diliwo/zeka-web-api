@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AdminAreaManagement.Core\AdminAreaManagement.Core.csproj" />
+    <ProjectReference Include="..\..\..\Shared\Zeka.Lifecycle.Contracts\Zeka.Lifecycle.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

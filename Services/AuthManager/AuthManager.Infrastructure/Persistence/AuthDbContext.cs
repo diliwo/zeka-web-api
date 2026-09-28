@@ -31,6 +31,16 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
             if (entry.Entity is Lifecycle.LifecycleRegistryRevisionRecord or Lifecycle.LifecycleRegistryBindingRecord
                 && entry.State != EntityState.Added)
                 throw new InvalidOperationException("Registry revisions and bindings are immutable.");
+            if (entry.Entity is MembershipPermissionGrant && entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Membership permission grant history is append-preserving.");
+            if (entry.Entity is MembershipPermissionGrant && entry.State == EntityState.Modified
+                && (entry.Property(nameof(MembershipPermissionGrant.OrganisationId)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.OrganisationMembershipId)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.PermissionKey)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.GrantedByMembershipId)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.GrantedBySubjectId)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.GrantedAtUtc)).IsModified))
+                throw new InvalidOperationException("Membership permission grant authority evidence is immutable.");
             if (entry.Entity is AuthManager.Core.Lifecycle.LifecycleOperation or AuthManager.Core.Lifecycle.LifecycleParticipant)
             {
                 var organisation = (Guid)entry.Property("OrganisationId").CurrentValue!;
@@ -38,6 +48,21 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
                     || organisation != LifecycleOrganisationId || entry.State == EntityState.Deleted
                     || entry.State == EntityState.Modified && (Guid)entry.Property("OrganisationId").OriginalValue! != organisation)
                     throw new InvalidOperationException("Lifecycle write is outside its immutable organisation attempt.");
+            }
+            if (entry.Entity is AuthManager.Core.Lifecycle.LifecycleInboxReceipt
+                or AuthManager.Core.Lifecycle.LifecycleExportFenceReceipt
+                or AuthManager.Core.Lifecycle.LifecycleExportFragment
+                or AuthManager.Core.Lifecycle.LifecycleExportPackage
+                or AuthManager.Core.Lifecycle.LifecycleCoordinatorLease
+                or AuthManager.Core.Lifecycle.AuthExportParticipantExecution
+                or AuthManager.Core.Lifecycle.AuthExportParticipantInboxReceipt
+                or AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage)
+            {
+                var organisation = (Guid)entry.Property("OrganisationId").CurrentValue!;
+                if (!LifecycleOnly || LifecycleTransaction is null || organisation == Guid.Empty
+                    || organisation != LifecycleOrganisationId || entry.State == EntityState.Deleted
+                    || entry.State == EntityState.Modified && (Guid)entry.Property("OrganisationId").OriginalValue! != organisation)
+                    throw new InvalidOperationException("Lifecycle evidence write is outside its immutable organisation attempt.");
             }
         }
     }
@@ -47,6 +72,15 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<Organisation> Organisations => Set<Organisation>();
     public DbSet<OrganisationMembership> OrganisationMemberships => Set<OrganisationMembership>();
     public DbSet<PermissionSet> PermissionSets => Set<PermissionSet>();
+    public DbSet<MembershipPermissionGrant> MembershipPermissionGrants => Set<MembershipPermissionGrant>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleInboxReceipt> LifecycleInboxReceipts => Set<AuthManager.Core.Lifecycle.LifecycleInboxReceipt>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleExportFenceReceipt> LifecycleExportFenceReceipts => Set<AuthManager.Core.Lifecycle.LifecycleExportFenceReceipt>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleExportFragment> LifecycleExportFragments => Set<AuthManager.Core.Lifecycle.LifecycleExportFragment>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleExportPackage> LifecycleExportPackages => Set<AuthManager.Core.Lifecycle.LifecycleExportPackage>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleCoordinatorLease> LifecycleCoordinatorLeases => Set<AuthManager.Core.Lifecycle.LifecycleCoordinatorLease>();
+    public DbSet<AuthManager.Core.Lifecycle.AuthExportParticipantExecution> AuthExportParticipantExecutions => Set<AuthManager.Core.Lifecycle.AuthExportParticipantExecution>();
+    public DbSet<AuthManager.Core.Lifecycle.AuthExportParticipantInboxReceipt> AuthExportParticipantInboxReceipts => Set<AuthManager.Core.Lifecycle.AuthExportParticipantInboxReceipt>();
+    public DbSet<AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage> AuthExportParticipantOutboxMessages => Set<AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -59,5 +93,6 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
         modelBuilder.ApplyConfiguration(new OrganisationConfiguration());
         modelBuilder.ApplyConfiguration(new OrganisationMembershipConfiguration());
         modelBuilder.ApplyConfiguration(new PermissionSetConfiguration());
+        modelBuilder.ApplyConfiguration(new MembershipPermissionGrantConfiguration());
     }
 }

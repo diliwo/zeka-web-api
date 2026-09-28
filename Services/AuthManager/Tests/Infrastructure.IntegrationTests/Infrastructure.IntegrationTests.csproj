@@ -35,6 +35,7 @@
     <ProjectReference Include="..\..\AuthManager.Core\AuthManager.Core.csproj" />
     <ProjectReference Include="..\..\AuthManager.Infrastructure\AuthManager.Infrastructure.csproj" />
     <ProjectReference Include="..\..\AuthManager.API\AuthManager.API.csproj" />
+    <ProjectReference Include="..\..\..\..\Shared\Zeka.Lifecycle.Contracts\Zeka.Lifecycle.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/AuthenticationFixture.cs" Link="AuthenticationFixture.cs" /></ItemGroup>

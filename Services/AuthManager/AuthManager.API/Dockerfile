@@ -14,6 +14,7 @@ COPY ["Services/AuthManager/AuthManager.Application/AuthManager.Application.cspr
 COPY ["Services/AuthManager/AuthManager.Core/AuthManager.Core.csproj", "Services/AuthManager/AuthManager.Core/"]
 COPY ["Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj", "Services/AuthManager/AuthManager.Infrastructure/"]
 COPY ["Shared/Zeka.Authentication/Zeka.Authentication.csproj", "Shared/Zeka.Authentication/"]
+COPY ["Shared/Zeka.Lifecycle.Contracts/Zeka.Lifecycle.Contracts.csproj", "Shared/Zeka.Lifecycle.Contracts/"]
 
 RUN --mount=type=secret,id=github_token,required=true \
     NuGetPackageSourceCredentials_github="Username=diliwo;Password=$(cat /run/secrets/github_token);ValidAuthenticationTypes=Basic" \
