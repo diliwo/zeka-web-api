@@ -211,7 +211,8 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
             var dbTransaction = transaction.GetDbTransaction();
             var connection = AssertNpgsql(database.Database.GetDbConnection());
             attempt.Begin(dbTransaction, organisation, transaction.TransactionId, connection.ProcessID);
-            await InitializeAsync(database.Database.GetDbConnection(), dbTransaction, organisation, cancellationToken);
+            await InitializeAsync(database.Database.GetDbConnection(), dbTransaction, organisation,
+                cancellationToken);
             attempt.CompleteInitialization(dbTransaction, organisation);
             var result = await work(cancellationToken);
             try { await transaction.CommitAsync(cancellationToken); }

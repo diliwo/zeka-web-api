@@ -59,7 +59,7 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
         if (!await new StaffMembershipClient(http, identity).VerifyAsync(message.OrganisationId,
             message.OrganisationMembershipId, requireActive: message.Active, CancellationToken.None))
             throw new TenantAccessException(AccessFailure.Denied);
-        await transactions.ExecuteAsync(async cancellationToken =>
+        await transactions.ExecuteOrdinaryAsync(async cancellationToken =>
         {
             var worker = await database.SocialWorkers.SingleOrDefaultAsync(
                 x => x.OrganisationMembershipId == message.OrganisationMembershipId, cancellationToken);

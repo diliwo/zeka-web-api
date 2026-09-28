@@ -5,7 +5,7 @@ using AdminAreaManagement.Application.Common.Authorization;
 namespace AdminAreaManagement.Application.Common.Behaviours;
 
 public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation operation,
-    ITenantTransactionExecutor transactions)
+    ITenantTransactionExecutor transactions, IAdminAreaClosureGate closureGate)
     : IPipelineBehavior<TRequest, TResponse> where TRequest : notnull
 {
     public async Task<TResponse> Handle(TRequest request, RequestHandlerDelegate<TResponse> next,
@@ -15,7 +15,15 @@ public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation 
             ?? throw new TenantAccessException(AccessFailure.Denied);
         await operation.AuthorizeAsync(policy, cancellationToken);
         return typeof(TRequest).IsDefined(typeof(NonRetryableTenantTransactionAttribute), false)
-            ? await transactions.ExecuteOnceAsync(_ => next(), cancellationToken)
-            : await transactions.ExecuteAsync(_ => next(), cancellationToken);
+            ? await transactions.ExecuteOnceAsync(async token =>
+            {
+                await closureGate.DemandOrdinaryAccessAsync(token);
+                return await next();
+            }, cancellationToken)
+            : await transactions.ExecuteAsync(async token =>
+            {
+                await closureGate.DemandOrdinaryAccessAsync(token);
+                return await next();
+            }, cancellationToken);
     }
 }

@@ -3,6 +3,7 @@ using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AdminAreaManagement.Application.Common.Authorization;
 using AdminAreaManagement.Infrastructure;
 using AdminAreaManagement.Infrastructure.Messaging;
 using AdminAreaManagement.Infrastructure.Persistence;
@@ -100,6 +101,28 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
     }
 
     [Fact]
+    public async Task Closure_gate_denial_keeps_the_projection_pending_without_publication()
+    {
+        var organisation = Guid.NewGuid();
+        await Seed(organisation, Guid.NewGuid(), true);
+        var publisher = new Publisher { Fail = false };
+        var config = Configuration(organisation);
+        var services = new ServiceCollection().AddLogging().AddSingleton<IEventBus>(publisher);
+        AddWorkerRuntime(services, config);
+        services.RemoveAll<IAdminAreaClosureGate>();
+        services.AddScoped<IAdminAreaClosureGate, DenyingClosureGate>();
+        services.AddSingleton<IHttpClientFactory>(new Factory(new Authority()));
+
+        await using var provider = services.BuildServiceProvider();
+        var worker = (StaffProjectionRetryWorker)Assert.Single(provider.GetServices<IHostedService>());
+
+        Assert.True(await worker.DispatchCycleAsync(default));
+        Assert.Empty(publisher.Messages);
+        await using var database = new ApplicationDbContext(Options, TenantEnforcementTests.Scope(organisation));
+        Assert.Null((await database.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
+    }
+
+    [Fact]
     public async Task Batch_is_bounded_and_bad_record_does_not_starve_later_records()
     {
         var organisation = Guid.NewGuid();
@@ -184,8 +207,28 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
     {
         services.AddSingleton<IConfiguration>(configuration);
         AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
+        // This fixture intentionally exercises the historical pre-LIFE-02 schema. Its explicit
+        // pre-boundary gate keeps the retry tests focused without weakening the production gate's
+        // fail-closed behavior when the closure schema is absent.
+        services.RemoveAll<IAdminAreaClosureGate>();
+        services.AddScoped<IAdminAreaClosureGate, AllowingClosureGate>();
         services.RemoveAll<IHostedService>();
         services.AddHostedService<StaffProjectionRetryWorker>();
+    }
+
+    private sealed class AllowingClosureGate : IAdminAreaClosureGate
+    {
+        public Task DemandOrdinaryAccessAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class DenyingClosureGate : IAdminAreaClosureGate
+    {
+        public Task DemandOrdinaryAccessAsync(CancellationToken cancellationToken) =>
+            Task.FromException(new InvalidOperationException("Synthetic durable closure boundary."));
     }
     private sealed class Publisher : IEventBus
     {

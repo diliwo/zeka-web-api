@@ -29,9 +29,15 @@ internal static partial class ContractGuard
 
     public static DateTimeOffset Utc(DateTimeOffset value, string name)
     {
-        if (value == default || value.Offset != TimeSpan.Zero)
-            throw new ArgumentException($"{name} must be a non-default UTC timestamp.", name);
-        return value;
+        try
+        {
+            return LifecycleContractTimeV1.Normalize(value);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new ArgumentException($"{name} must be a non-default UTC timestamp.", name,
+                exception);
+        }
     }
 
     public static string StableKey(string value, string name)

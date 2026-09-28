@@ -22,6 +22,119 @@ namespace AuthManager.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("AuthManager.Core.Lifecycle.AuthClosureParticipantExecution", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("BoundaryEstablishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("FenceRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FenceToken")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<long>("OperationRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReceiptHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("ReleasedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer");
+
+                    b.HasKey("OperationId");
+
+                    b.HasIndex("OperationId", "OrganisationId");
+
+                    b.ToTable("AuthClosureParticipantExecutions", (string)null);
+                });
+
+            modelBuilder.Entity("AuthManager.Core.Lifecycle.AuthClosureParticipantInboxReceipt", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MessageType")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PayloadSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("MessageId");
+
+                    b.HasIndex("OperationId", "MessageType");
+
+                    b.HasIndex("OperationId", "OrganisationId");
+
+                    b.ToTable("AuthClosureParticipantInbox", (string)null);
+                });
+
+            modelBuilder.Entity("AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MessageType")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("PayloadSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("MessageId");
+
+                    b.HasIndex("OperationId", "MessageType")
+                        .IsUnique();
+
+                    b.HasIndex("OperationId", "OrganisationId");
+
+                    b.ToTable("AuthClosureParticipantOutbox", (string)null);
+                });
+
             modelBuilder.Entity("AuthManager.Core.Lifecycle.AuthExportParticipantExecution", b =>
                 {
                     b.Property<Guid>("OperationId")
@@ -147,6 +260,56 @@ namespace AuthManager.Infrastructure.Migrations
                     b.HasIndex("OperationId", "OrganisationId");
 
                     b.ToTable("AuthExportParticipantOutbox", (string)null);
+                });
+
+            modelBuilder.Entity("AuthManager.Core.Lifecycle.LifecycleClosureFenceReceipt", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ParticipantId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset>("BoundaryEstablishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CausationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ContractVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("FenceRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FenceToken")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("OperationRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReceiptHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("OperationId", "ParticipantId");
+
+                    b.HasIndex("OperationId", "OrganisationId");
+
+                    b.ToTable("LifecycleClosureFenceReceipts", (string)null);
                 });
 
             modelBuilder.Entity("AuthManager.Core.Lifecycle.LifecycleCoordinatorLease", b =>
@@ -342,6 +505,16 @@ namespace AuthManager.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("ArchivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ClosingAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ClosureFenceEvidenceHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -436,6 +609,18 @@ namespace AuthManager.Infrastructure.Migrations
 
                     b.Property<int>("ContractVersion")
                         .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("FailedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("FailureBoundaryDisposition")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FailureCode")
+                        .HasColumnType("text");
+
+                    b.Property<bool?>("FailureRetryable")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("Mandatory")
                         .HasColumnType("boolean");
@@ -1136,6 +1321,36 @@ namespace AuthManager.Infrastructure.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("AuthManager.Core.Lifecycle.AuthClosureParticipantExecution", b =>
+                {
+                    b.HasOne("AuthManager.Core.Lifecycle.LifecycleOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AuthManager.Core.Lifecycle.AuthClosureParticipantInboxReceipt", b =>
+                {
+                    b.HasOne("AuthManager.Core.Lifecycle.LifecycleOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage", b =>
+                {
+                    b.HasOne("AuthManager.Core.Lifecycle.LifecycleOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("AuthManager.Core.Lifecycle.AuthExportParticipantExecution", b =>
                 {
                     b.HasOne("AuthManager.Core.Lifecycle.LifecycleOperation", null)
@@ -1157,6 +1372,16 @@ namespace AuthManager.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage", b =>
+                {
+                    b.HasOne("AuthManager.Core.Lifecycle.LifecycleOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AuthManager.Core.Lifecycle.LifecycleClosureFenceReceipt", b =>
                 {
                     b.HasOne("AuthManager.Core.Lifecycle.LifecycleOperation", null)
                         .WithMany()

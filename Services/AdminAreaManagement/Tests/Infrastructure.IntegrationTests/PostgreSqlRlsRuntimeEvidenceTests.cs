@@ -116,7 +116,8 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
         var pending = (await deployment.Database.GetPendingMigrationsAsync()).ToArray();
         if (!pending.SequenceEqual([
                 "20260917212648_DurableDocumentFileOperations",
-                "20260928074338_Life01AdminAreaExportParticipant"
+                "20260928074338_Life01AdminAreaExportParticipant",
+                "20260928150135_Life02AdminAreaClosureParticipant"
             ], StringComparer.Ordinal))
             throw new InvalidOperationException(
                 $"Supported upgrade checkpoint drifted: [{string.Join(", ", pending)}].");
@@ -179,6 +180,9 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
 {
     private static readonly string[] ProtectedTables =
     [
+        "AdminAreaClosureFences",
+        "AdminAreaClosureInbox",
+        "AdminAreaClosureOutbox",
         "AdminAreaExportFences",
         "AdminAreaExportFragments",
         "AdminAreaExportInbox",
@@ -204,7 +208,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         var applied = new List<string>();
         while (await reader.ReadAsync()) applied.Add(reader.GetString(0));
         Assert.Contains("20260912180000_PostgreSqlRlsAndRuntimeRoles", applied);
-        Assert.Equal("20260928074338_Life01AdminAreaExportParticipant", applied[^1]);
+        Assert.Equal("20260928150135_Life02AdminAreaClosureParticipant", applied[^1]);
     }
 
     [Fact]
@@ -414,6 +418,22 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         await using var deployment = new DeploymentDbContext(
             new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(database.MigratorConnectionString).Options);
         await RlsSecurityManifestVerifier.VerifyAsync(deployment, typeof(ApplicationDbContext).Assembly);
+
+        Assert.Equal(1L, await ExecuteAdministratorScalarAsync<long>("""
+            SELECT count(*)
+            FROM pg_catalog.pg_trigger trigger
+            JOIN pg_catalog.pg_class relation ON relation.oid=trigger.tgrelid
+            JOIN pg_catalog.pg_namespace relation_schema ON relation_schema.oid=relation.relnamespace
+            JOIN pg_catalog.pg_proc function ON function.oid=trigger.tgfoid
+            JOIN pg_catalog.pg_namespace function_schema ON function_schema.oid=function.pronamespace
+            WHERE relation_schema.nspname='public'
+              AND relation.relname='StaffProjectionOutbox'
+              AND trigger.tgname='trg_closure_fence_staffprojectionoutbox'
+              AND trigger.tgenabled='O'
+              AND NOT trigger.tgisinternal
+              AND function_schema.nspname='zeka'
+              AND function.proname='reject_adminarea_write_during_closure'
+            """));
     }
 
     [Fact]

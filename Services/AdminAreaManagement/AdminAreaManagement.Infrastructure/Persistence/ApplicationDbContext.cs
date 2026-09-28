@@ -1,6 +1,7 @@
 using AdminAreaManagement.Core.Common;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Infrastructure.Persistence.Exports;
+using AdminAreaManagement.Infrastructure.Persistence.Closures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Zeka.Extensions.MultiTenancy.Abstractions;
@@ -45,6 +46,9 @@ public class ApplicationDbContext : TenantDbContext
     public DbSet<AdminAreaExportInbox> AdminAreaExportInbox => Set<AdminAreaExportInbox>();
     public DbSet<AdminAreaExportOutbox> AdminAreaExportOutbox => Set<AdminAreaExportOutbox>();
     public DbSet<AdminAreaExportFragment> AdminAreaExportFragments => Set<AdminAreaExportFragment>();
+    public DbSet<AdminAreaClosureFence> AdminAreaClosureFences => Set<AdminAreaClosureFence>();
+    public DbSet<AdminAreaClosureInbox> AdminAreaClosureInbox => Set<AdminAreaClosureInbox>();
+    public DbSet<AdminAreaClosureOutbox> AdminAreaClosureOutbox => Set<AdminAreaClosureOutbox>();
 
     protected override void ConfigureTenantModel(ModelBuilder builder) => ConfigurePersistenceModel(builder);
 
@@ -86,11 +90,22 @@ public sealed class DeploymentDbContext(DbContextOptions<DeploymentDbContext> op
     public DbSet<AdminAreaExportInbox> AdminAreaExportInbox => Set<AdminAreaExportInbox>();
     public DbSet<AdminAreaExportOutbox> AdminAreaExportOutbox => Set<AdminAreaExportOutbox>();
     public DbSet<AdminAreaExportFragment> AdminAreaExportFragments => Set<AdminAreaExportFragment>();
+    public DbSet<AdminAreaClosureFence> AdminAreaClosureFences => Set<AdminAreaClosureFence>();
+    public DbSet<AdminAreaClosureInbox> AdminAreaClosureInbox => Set<AdminAreaClosureInbox>();
+    public DbSet<AdminAreaClosureOutbox> AdminAreaClosureOutbox => Set<AdminAreaClosureOutbox>();
     protected override void OnModelCreating(ModelBuilder builder) => ApplicationDbContext.ConfigurePersistenceModel(builder);
 }
 
 internal sealed class EntityAuditInterceptor : SaveChangesInterceptor
 {
+    private static readonly HashSet<string> DocumentRecoveryProperties =
+    [
+        nameof(DocumentPartner.FileWriteState), nameof(DocumentPartner.FileWriteAttempts),
+        nameof(DocumentPartner.FileWriteFailureCode), nameof(DocumentPartner.PendingFileContent),
+        nameof(DocumentPartner.FileDeleteState), nameof(DocumentPartner.FileDeleteAttempts),
+        nameof(DocumentPartner.FileDeleteFailureCode)
+    ];
+
     private static void Stamp(DbContext? context)
     {
         if (context is null) return;
@@ -103,6 +118,10 @@ internal sealed class EntityAuditInterceptor : SaveChangesInterceptor
             }
             if (entry.State == EntityState.Modified)
             {
+                if (entry.Entity is DocumentPartner
+                    && entry.Properties.Where(property => property.IsModified)
+                        .All(property => DocumentRecoveryProperties.Contains(property.Metadata.Name)))
+                    continue;
                 entry.Entity.LastModifiedBy = "ZeKa";
                 entry.Entity.LastModified = DateTime.Now;
             }

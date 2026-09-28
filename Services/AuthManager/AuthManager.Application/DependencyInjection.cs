@@ -15,6 +15,7 @@ namespace AuthManager.Application
             services.AddScoped<IServiceManager, ServiceManager>();
             services.AddScoped<MembershipPermissionGrants>();
             services.AddScoped<LifecycleExportCoordinator>();
+            services.AddScoped<LifecycleClosureCoordinator>();
             services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
         }
     }

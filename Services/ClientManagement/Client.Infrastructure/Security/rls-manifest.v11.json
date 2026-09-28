@@ -1,11 +1,18 @@
 {
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "service": "ClientManagement",
   "modelContext": "ClientManagement.Infrastructure.Persistence.DeploymentDbContext",
-  "migrationId": "20260928081952_OrganisationExportParticipantV1",
+  "migrationId": "20260928150226_OrganisationClosureParticipantV1",
   "ownerRole": "zeka_client_owner",
   "migratorRole": "zeka_client_migrator",
   "runtimeRole": "zeka_client_runtime",
+  "additionalPolicyRoles": [
+    { "object": { "schema": "public", "name": "OrganisationClosureFences" }, "roles": ["zeka_client_owner"] },
+    { "object": { "schema": "public", "name": "OrganisationClosureInbox" }, "roles": ["zeka_client_owner"] }
+  ],
+  "securityDefinerFunctions": [
+    { "functionIdentity": "zeka.release_organisation_closure_fence(p_organisation_id uuid, p_operation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_release_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)" }
+  ],
   "managedSchemas": ["public", "zeka"],
   "prohibitedRelationKinds": ["FOREIGN_TABLE", "MATERIALIZED_VIEW", "VIEW"],
   "relationTopology": [],
@@ -13,6 +20,9 @@
     { "schema": "public", "name": "Assessments" },
     { "schema": "public", "name": "Clients" },
     { "schema": "public", "name": "MonitoringReports" },
+    { "schema": "public", "name": "OrganisationClosureFences" },
+    { "schema": "public", "name": "OrganisationClosureInbox" },
+    { "schema": "public", "name": "OrganisationClosureOutbox" },
     { "schema": "public", "name": "OrganisationExportFences" },
     { "schema": "public", "name": "OrganisationExportFragments" },
     { "schema": "public", "name": "OrganisationExportInbox" },
@@ -41,6 +51,9 @@
     { "schema": "public", "name": "MonitoringActions_ActionId_seq" },
     { "schema": "public", "name": "MonitoringReports_Id_seq" },
     { "schema": "public", "name": "NatureOfContract_NatureOfContractId_seq" },
+    { "schema": "public", "name": "OrganisationClosureFences_Id_seq" },
+    { "schema": "public", "name": "OrganisationClosureInbox_Id_seq" },
+    { "schema": "public", "name": "OrganisationClosureOutbox_Id_seq" },
     { "schema": "public", "name": "OrganisationExportFences_Id_seq" },
     { "schema": "public", "name": "OrganisationExportFragments_Id_seq" },
     { "schema": "public", "name": "OrganisationExportInbox_Id_seq" },
@@ -63,6 +76,9 @@
     { "object": { "schema": "public", "name": "MonitoringActions" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
     { "object": { "schema": "public", "name": "MonitoringReports" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
     { "object": { "schema": "public", "name": "NatureOfContract" }, "privileges": ["SELECT"] },
+    { "object": { "schema": "public", "name": "OrganisationClosureFences" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "OrganisationClosureInbox" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "OrganisationClosureOutbox" }, "privileges": ["INSERT", "SELECT"] },
     { "object": { "schema": "public", "name": "OrganisationExportFences" }, "privileges": ["INSERT", "SELECT"] },
     { "object": { "schema": "public", "name": "OrganisationExportFragments" }, "privileges": ["INSERT", "SELECT"] },
     { "object": { "schema": "public", "name": "OrganisationExportInbox" }, "privileges": ["INSERT", "SELECT"] },
@@ -85,6 +101,9 @@
     { "object": { "schema": "public", "name": "MonitoringActions_ActionId_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "MonitoringReports_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "NatureOfContract_NatureOfContractId_seq" }, "privileges": [] },
+    { "object": { "schema": "public", "name": "OrganisationClosureFences_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "OrganisationClosureInbox_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
+    { "object": { "schema": "public", "name": "OrganisationClosureOutbox_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "OrganisationExportFences_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "OrganisationExportFragments_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "OrganisationExportInbox_Id_seq" }, "privileges": ["SELECT", "USAGE"] },
@@ -100,10 +119,12 @@
     { "object": { "schema": "public", "name": "TrainingType_Id_seq" }, "privileges": [] },
     { "object": { "schema": "public", "name": "Training_Id_seq" }, "privileges": [] }
   ],
-  "runtimeFunctions": ["zeka.current_organisation_id()", "zeka.reject_writes_during_export_fence()"],
+  "runtimeFunctions": ["zeka.current_organisation_id()", "zeka.reject_writes_during_closure_fence()", "zeka.reject_writes_during_export_fence()", "zeka.release_organisation_closure_fence(p_organisation_id uuid, p_operation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_release_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)"],
   "runtimeFunctionDefinitionSha256": {
     "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b",
-    "zeka.reject_writes_during_export_fence()": "feeed4b4ebdd58893964050a375614439736dde2e3429a676a867a147d1f4382"
+    "zeka.reject_writes_during_closure_fence()": "a858d599981247d205fef484ff854cafe8c44d72c8fa29646a2c4084fdf2037a",
+    "zeka.reject_writes_during_export_fence()": "feeed4b4ebdd58893964050a375614439736dde2e3429a676a867a147d1f4382",
+    "zeka.release_organisation_closure_fence(p_organisation_id uuid, p_operation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_release_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)": "bf5cb049c970c73eb562ed0ff9083a481cf0a9443d8d3e1088e63ca592645e00"
   },
   "defaultPrivileges": [
     { "owner": "zeka_client_owner", "objectType": "FUNCTION", "scope": "GLOBAL", "grants": [] },

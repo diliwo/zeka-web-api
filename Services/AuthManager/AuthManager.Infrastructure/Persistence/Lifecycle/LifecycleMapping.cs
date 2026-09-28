@@ -36,6 +36,7 @@ internal static class LifecycleMapping
         operation.Property(x => x.ExportInventoryJson).HasColumnType("text");
         operation.Property(x => x.ExportInventoryHash).HasMaxLength(64);
         operation.Property(x => x.FenceEvidenceHash).HasMaxLength(64);
+        operation.Property(x => x.ClosureFenceEvidenceHash).HasMaxLength(64);
         operation.Property(x => x.PackageSha256).HasMaxLength(64);
         operation.Property(x => x.PackageReference).HasMaxLength(500);
         operation.Property(x => x.FailureCode).HasMaxLength(200);
@@ -59,11 +60,19 @@ internal static class LifecycleMapping
             nameof(LifecycleOperation.State), nameof(LifecycleOperation.Revision), nameof(LifecycleOperation.SnapshotAt),
             nameof(LifecycleOperation.FenceEvidenceHash), nameof(LifecycleOperation.PackageSha256),
             nameof(LifecycleOperation.PackageReference), nameof(LifecycleOperation.FailureCode),
-            nameof(LifecycleOperation.CompletedAt), nameof(LifecycleOperation.IsActive)
+            nameof(LifecycleOperation.CompletedAt), nameof(LifecycleOperation.IsActive),
+            nameof(LifecycleOperation.ClosingAt), nameof(LifecycleOperation.ArchivedAt),
+            nameof(LifecycleOperation.ClosureFenceEvidenceHash)
         };
         foreach (var property in operation.Metadata.GetProperties().Where(p => !mutableOperationProperties.Contains(p.Name)))
             property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
-        foreach (var property in participant.Metadata.GetProperties().Where(p => p.Name != nameof(LifecycleParticipant.State)))
+        var mutableParticipantProperties = new HashSet<string>(StringComparer.Ordinal)
+        {
+            nameof(LifecycleParticipant.State), nameof(LifecycleParticipant.FailureCode),
+            nameof(LifecycleParticipant.FailureRetryable), nameof(LifecycleParticipant.FailedAt),
+            nameof(LifecycleParticipant.FailureBoundaryDisposition)
+        };
+        foreach (var property in participant.Metadata.GetProperties().Where(p => !mutableParticipantProperties.Contains(p.Name)))
             property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
 
         var inbox = model.Entity<LifecycleInboxReceipt>();
@@ -148,8 +157,53 @@ internal static class LifecycleMapping
             .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
         authOutbox.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
 
+        var closureReceipt = model.Entity<LifecycleClosureFenceReceipt>();
+        closureReceipt.ToTable("LifecycleClosureFenceReceipts");
+        closureReceipt.HasKey(x => new { x.OperationId, x.ParticipantId });
+        closureReceipt.Property(x => x.ParticipantId).HasMaxLength(200);
+        closureReceipt.Property(x => x.FenceToken).HasMaxLength(200);
+        closureReceipt.Property(x => x.ReceiptHash).HasMaxLength(64);
+        closureReceipt.HasOne<LifecycleOperation>().WithMany()
+            .HasForeignKey(x => new { x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
+        closureReceipt.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+
+        var closureExecution = model.Entity<AuthClosureParticipantExecution>();
+        closureExecution.ToTable("AuthClosureParticipantExecutions");
+        closureExecution.HasKey(x => x.OperationId);
+        closureExecution.Property(x => x.FenceToken).HasMaxLength(200);
+        closureExecution.Property(x => x.ReceiptHash).HasMaxLength(64);
+        closureExecution.HasOne<LifecycleOperation>().WithMany()
+            .HasForeignKey(x => new { x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
+        closureExecution.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+
+        var closureInbox = model.Entity<AuthClosureParticipantInboxReceipt>();
+        closureInbox.ToTable("AuthClosureParticipantInbox");
+        closureInbox.HasKey(x => x.MessageId);
+        closureInbox.Property(x => x.MessageType).HasMaxLength(300);
+        closureInbox.Property(x => x.PayloadSha256).HasMaxLength(64);
+        closureInbox.HasIndex(x => new { x.OperationId, x.MessageType });
+        closureInbox.HasOne<LifecycleOperation>().WithMany()
+            .HasForeignKey(x => new { x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
+        closureInbox.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+
+        var closureOutbox = model.Entity<AuthClosureParticipantOutboxMessage>();
+        closureOutbox.ToTable("AuthClosureParticipantOutbox");
+        closureOutbox.HasKey(x => x.MessageId);
+        closureOutbox.Property(x => x.MessageType).HasMaxLength(300);
+        closureOutbox.Property(x => x.PayloadJson).HasColumnType("jsonb");
+        closureOutbox.Property(x => x.PayloadSha256).HasMaxLength(64);
+        closureOutbox.HasIndex(x => new { x.OperationId, x.MessageType }).IsUnique();
+        closureOutbox.HasOne<LifecycleOperation>().WithMany()
+            .HasForeignKey(x => new { x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
+        closureOutbox.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+
         foreach (var entity in new[] { inbox.Metadata, receipt.Metadata, fragment.Metadata, package.Metadata,
-                     authInbox.Metadata, authOutbox.Metadata })
+                     authInbox.Metadata, authOutbox.Metadata, closureReceipt.Metadata,
+                     closureInbox.Metadata, closureOutbox.Metadata })
             foreach (var property in entity.GetProperties()) property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
         foreach (var property in authExecution.Metadata.GetProperties().Where(p =>
                      p.Name is not nameof(AuthExportParticipantExecution.SnapshotAt)
@@ -158,6 +212,10 @@ internal static class LifecycleMapping
                          and not nameof(AuthExportParticipantExecution.CategoriesJson)
                          and not nameof(AuthExportParticipantExecution.ReleasedAt)
                          and not nameof(AuthExportParticipantExecution.State)))
+            property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+        foreach (var property in closureExecution.Metadata.GetProperties().Where(p =>
+                     p.Name is not nameof(AuthClosureParticipantExecution.ReleasedAt)
+                         and not nameof(AuthClosureParticipantExecution.State)))
             property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
         foreach (var property in lease.Metadata.GetProperties().Where(p =>
                      p.Name is not nameof(LifecycleCoordinatorLease.LeaseId)

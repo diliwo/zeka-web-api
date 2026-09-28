@@ -2,14 +2,24 @@
   "schemaVersion": 10,
   "service": "AdminAreaManagement",
   "modelContext": "AdminAreaManagement.Infrastructure.Persistence.DeploymentDbContext",
-  "migrationId": "20260928074338_Life01AdminAreaExportParticipant",
+  "migrationId": "20260928150135_Life02AdminAreaClosureParticipant",
   "ownerRole": "zeka_adminarea_owner",
   "migratorRole": "zeka_adminarea_migrator",
   "runtimeRole": "zeka_adminarea_runtime",
+  "additionalPolicyRoles": [
+    { "object": { "schema": "public", "name": "AdminAreaClosureFences" }, "roles": ["zeka_adminarea_owner"] },
+    { "object": { "schema": "public", "name": "AdminAreaClosureOutbox" }, "roles": ["zeka_adminarea_owner"] }
+  ],
+  "securityDefinerFunctions": [
+    { "functionIdentity": "zeka.release_adminarea_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)" }
+  ],
   "managedSchemas": ["public", "zeka"],
   "prohibitedRelationKinds": ["FOREIGN_TABLE", "MATERIALIZED_VIEW", "VIEW"],
   "relationTopology": [],
   "protectedTables": [
+    { "schema": "public", "name": "AdminAreaClosureFences" },
+    { "schema": "public", "name": "AdminAreaClosureInbox" },
+    { "schema": "public", "name": "AdminAreaClosureOutbox" },
     { "schema": "public", "name": "AdminAreaExportFences" },
     { "schema": "public", "name": "AdminAreaExportFragments" },
     { "schema": "public", "name": "AdminAreaExportInbox" },
@@ -48,6 +58,9 @@
     { "schema": "public", "name": "Trainings_Id_seq" }
   ],
   "tablePrivileges": [
+    { "object": { "schema": "public", "name": "AdminAreaClosureFences" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "AdminAreaClosureInbox" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "AdminAreaClosureOutbox" }, "privileges": ["INSERT", "SELECT"] },
     { "object": { "schema": "public", "name": "AdminAreaExportFences" }, "privileges": ["INSERT", "SELECT"] },
     { "object": { "schema": "public", "name": "AdminAreaExportFragments" }, "privileges": ["INSERT", "SELECT"] },
     { "object": { "schema": "public", "name": "AdminAreaExportInbox" }, "privileges": ["INSERT", "SELECT"] },
@@ -82,12 +95,14 @@
     { "object": { "schema": "public", "name": "TrainingTypes_TrainingTypeId_seq" }, "privileges": ["SELECT", "USAGE"] },
     { "object": { "schema": "public", "name": "Trainings_Id_seq" }, "privileges": ["SELECT", "USAGE"] }
   ],
-  "runtimeFunctions": ["public.zeka_city_key(value text)", "public.zeka_city_text(value text)", "zeka.current_organisation_id()", "zeka.reject_adminarea_write_during_export()"],
+  "runtimeFunctions": ["public.zeka_city_key(value text)", "public.zeka_city_text(value text)", "zeka.current_organisation_id()", "zeka.reject_adminarea_write_during_closure()", "zeka.reject_adminarea_write_during_export()", "zeka.release_adminarea_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)"],
   "runtimeFunctionDefinitionSha256": {
     "public.zeka_city_key(value text)": "1e61247f9533c12565d1cff73f8370e9f1a926b9e2e91ab0fe6de2e30ecbbe6e",
     "public.zeka_city_text(value text)": "e2a91e0f316169d0269524318d0215fe23029b9cbb04eb7037c162eabe814cd4",
     "zeka.current_organisation_id()": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b",
-    "zeka.reject_adminarea_write_during_export()": "9d750b0df8e6bbde2b52cf03fab715bcddc5810c1de8ea0ee60dd904b788bf90"
+    "zeka.reject_adminarea_write_during_closure()": "3a06a46837fc57993dcc421d23873905444619d2c4cebc833504414606cf8ec9",
+    "zeka.reject_adminarea_write_during_export()": "9d750b0df8e6bbde2b52cf03fab715bcddc5810c1de8ea0ee60dd904b788bf90",
+    "zeka.release_adminarea_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_participant_id text, p_operation_revision bigint, p_fence_token text, p_contract_version integer, p_message_id uuid, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)": "55264036e5d72c9f934e46af1aef281a82759ee3b730e6e93cde4f97996eb30d"
   },
   "defaultPrivileges": [
     { "owner": "zeka_adminarea_owner", "objectType": "FUNCTION", "scope": "GLOBAL", "grants": [] },

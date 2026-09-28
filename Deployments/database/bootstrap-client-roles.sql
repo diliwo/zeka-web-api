@@ -106,7 +106,10 @@ BEGIN
       ('OrganisationExportFences', ARRAY['ReleasedAt']::text[]),
       ('OrganisationExportFragments', ARRAY[]::text[]),
       ('OrganisationExportInbox', ARRAY[]::text[]),
-      ('OrganisationExportOutbox', ARRAY[]::text[])
+      ('OrganisationExportOutbox', ARRAY[]::text[]),
+      ('OrganisationClosureFences', ARRAY[]::text[]),
+      ('OrganisationClosureInbox', ARRAY[]::text[]),
+      ('OrganisationClosureOutbox', ARRAY[]::text[])
     ) AS inventory(name, update_columns)
   LOOP
     IF pg_catalog.to_regclass(pg_catalog.format('public.%I', lifecycle_object.name)) IS NOT NULL THEN
@@ -152,7 +155,9 @@ BEGIN
     'ProfessionnalExperience_ProfessionnalExperienceId_seq','SchoolRegistrations_SchoolRegistrationId_seq',
     'SocialCases_SchoolRegistrationId_seq','SocialWorkers_SocialWorkerId_seq',
     'OrganisationExportFences_Id_seq','OrganisationExportFragments_Id_seq',
-    'OrganisationExportInbox_Id_seq','OrganisationExportOutbox_Id_seq'
+    'OrganisationExportInbox_Id_seq','OrganisationExportOutbox_Id_seq',
+    'OrganisationClosureFences_Id_seq','OrganisationClosureInbox_Id_seq',
+    'OrganisationClosureOutbox_Id_seq'
   ] LOOP
     IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
       EXECUTE pg_catalog.format('GRANT SELECT, USAGE ON SEQUENCE public.%I TO zeka_client_runtime', object_name);
@@ -164,5 +169,24 @@ BEGIN
   IF pg_catalog.to_regprocedure('zeka.reject_writes_during_export_fence()') IS NOT NULL THEN
     REVOKE ALL ON FUNCTION zeka.reject_writes_during_export_fence() FROM PUBLIC, zeka_client_runtime;
     GRANT EXECUTE ON FUNCTION zeka.reject_writes_during_export_fence() TO zeka_client_runtime;
+  END IF;
+  IF pg_catalog.to_regprocedure('zeka.reject_writes_during_closure_fence()') IS NOT NULL THEN
+    ALTER FUNCTION zeka.reject_writes_during_closure_fence() OWNER TO zeka_client_owner;
+    REVOKE ALL ON FUNCTION zeka.reject_writes_during_closure_fence() FROM PUBLIC;
+    REVOKE EXECUTE ON FUNCTION zeka.reject_writes_during_closure_fence() FROM PUBLIC, zeka_client_runtime;
+    GRANT EXECUTE ON FUNCTION zeka.reject_writes_during_closure_fence() TO zeka_client_runtime;
+  END IF;
+  IF pg_catalog.to_regprocedure(
+    'zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)')
+    IS NOT NULL THEN
+    ALTER FUNCTION zeka.release_organisation_closure_fence(
+      uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)
+      OWNER TO zeka_client_owner;
+    REVOKE ALL ON FUNCTION zeka.release_organisation_closure_fence(
+      uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)
+      FROM PUBLIC, zeka_client_runtime;
+    GRANT EXECUTE ON FUNCTION zeka.release_organisation_closure_fence(
+      uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)
+      TO zeka_client_runtime;
   END IF;
 END $existing_objects$;

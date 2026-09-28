@@ -1,6 +1,9 @@
 using AuthManager.Application.Common.Outbox;
+using AuthManager.Core.Lifecycle;
+using AuthManager.Core.Organisations;
 using AuthManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -9,6 +12,7 @@ namespace AuthManager.Infrastructure.Outbox;
 internal sealed class OutboxDispatcher(
     AuthDbContext dbContext,
     IOutboxMessagePublisher publisher,
+    IOutboxPublicationActivityClassifier activityClassifier,
     TimeProvider timeProvider,
     IOptions<OutboxDispatcherOptions> options,
     ILogger<OutboxDispatcher> logger) : IOutboxDispatcher
@@ -48,10 +52,11 @@ internal sealed class OutboxDispatcher(
 
         try
         {
-            await publisher.PublishAsync(envelope, cancellationToken);
-            message.MarkProcessed(timeProvider.GetUtcNow());
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return true;
+            if (envelope.OrganisationId is null || IsSqlite())
+                return await PublishAsync(message, envelope, cancellationToken);
+
+            return await PublishOrdinaryOrganisationMessageAsync(message, envelope,
+                cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -73,6 +78,89 @@ internal sealed class OutboxDispatcher(
 
             return false;
         }
+    }
+
+    private async Task<bool> PublishAsync(Persistence.Entities.OutboxMessage message,
+        OutboxMessageEnvelope envelope, CancellationToken cancellationToken)
+    {
+        await publisher.PublishAsync(envelope, cancellationToken);
+        message.MarkProcessed(timeProvider.GetUtcNow());
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private async Task<bool> PublishOrdinaryOrganisationMessageAsync(
+        Persistence.Entities.OutboxMessage message,
+        OutboxMessageEnvelope envelope,
+        CancellationToken cancellationToken)
+    {
+        var organisationId = envelope.OrganisationId!.Value;
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            "SELECT pg_catalog.set_config('zeka.organisation_id', {0}, true)",
+            organisationId.ToString("D"));
+        await dbContext.Database.ExecuteSqlRawAsync(
+            "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended({0}, 0))",
+            organisationId.ToString("D"));
+
+        if (await activityClassifier.IsTrustedLifecycleControlAsync(envelope, cancellationToken))
+        {
+            await publisher.PublishAsync(envelope, cancellationToken);
+            message.MarkProcessed(timeProvider.GetUtcNow());
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return true;
+        }
+
+        if (await IsPublicationBoundaryEstablished(organisationId, cancellationToken))
+        {
+            message.Defer(timeProvider.GetUtcNow().Add(_options.InitialRetryDelay),
+                "OrganisationLifecycleBoundary");
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            logger.LogInformation(
+                "Outbox message {MessageId} ({MessageType}) was deferred at the organisation lifecycle boundary.",
+                message.Id, message.MessageType);
+            return false;
+        }
+
+        await publisher.PublishAsync(envelope, cancellationToken);
+        message.MarkProcessed(timeProvider.GetUtcNow());
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    private async Task<bool> IsPublicationBoundaryEstablished(Guid organisationId,
+        CancellationToken cancellationToken)
+    {
+        var transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction()
+            ?? throw new InvalidOperationException("Outbox publication transaction is required.");
+        await using var command = transaction.Connection!.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT EXISTS (
+              SELECT 1 FROM public."Organisations" o
+              WHERE o."Id"=@organisation_id
+                AND (o."Status"=@archived
+                  OR (o."Status"=@closing AND EXISTS (
+                    SELECT 1 FROM public."AuthClosureParticipantExecutions" e
+                    WHERE e."OrganisationId"=o."Id")))
+            )
+            """;
+        var organisation = command.CreateParameter();
+        organisation.ParameterName = "organisation_id";
+        organisation.Value = organisationId;
+        command.Parameters.Add(organisation);
+        var closing = command.CreateParameter();
+        closing.ParameterName = "closing";
+        closing.Value = (int)OrganisationStatus.Closing;
+        command.Parameters.Add(closing);
+        var archived = command.CreateParameter();
+        archived.ParameterName = "archived";
+        archived.Value = (int)OrganisationStatus.Archived;
+        command.Parameters.Add(archived);
+        return Equals(await command.ExecuteScalarAsync(cancellationToken), true);
     }
 
     private async Task<List<Guid>> CandidateIdsAsync(DateTimeOffset now, CancellationToken cancellationToken)

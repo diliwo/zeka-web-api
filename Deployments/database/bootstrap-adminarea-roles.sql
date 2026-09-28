@@ -73,6 +73,8 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
     WHERE n.nspname='public'
        OR p.oid=pg_catalog.to_regprocedure('zeka.reject_adminarea_write_during_export()')
+       OR p.oid=pg_catalog.to_regprocedure('zeka.reject_adminarea_write_during_closure()')
+       OR p.oid=pg_catalog.to_regprocedure('zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)')
   LOOP EXECUTE format('ALTER FUNCTION %I.%I(%s) OWNER TO zeka_adminarea_owner', object.nspname, object.proname, object.arguments); END LOOP;
 END $functions$;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC, zeka_adminarea_runtime;
@@ -103,7 +105,10 @@ BEGIN
       ('AdminAreaExportFences', ARRAY['ReleasedAt']::text[]),
       ('AdminAreaExportFragments', ARRAY[]::text[]),
       ('AdminAreaExportInbox', ARRAY[]::text[]),
-      ('AdminAreaExportOutbox', ARRAY[]::text[])
+      ('AdminAreaExportOutbox', ARRAY[]::text[]),
+      ('AdminAreaClosureFences', ARRAY[]::text[]),
+      ('AdminAreaClosureInbox', ARRAY[]::text[]),
+      ('AdminAreaClosureOutbox', ARRAY[]::text[])
     ) AS inventory(name, update_columns)
   LOOP
     IF pg_catalog.to_regclass(pg_catalog.format('public.%I', lifecycle_object.name)) IS NOT NULL THEN
@@ -160,6 +165,14 @@ BEGIN
   IF pg_catalog.to_regprocedure('zeka.reject_adminarea_write_during_export()') IS NOT NULL THEN
     REVOKE ALL ON FUNCTION zeka.reject_adminarea_write_during_export() FROM PUBLIC, zeka_adminarea_runtime;
     GRANT EXECUTE ON FUNCTION zeka.reject_adminarea_write_during_export() TO zeka_adminarea_runtime;
+  END IF;
+  IF pg_catalog.to_regprocedure('zeka.reject_adminarea_write_during_closure()') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION zeka.reject_adminarea_write_during_closure() FROM PUBLIC, zeka_adminarea_runtime;
+    GRANT EXECUTE ON FUNCTION zeka.reject_adminarea_write_during_closure() TO zeka_adminarea_runtime;
+  END IF;
+  IF pg_catalog.to_regprocedure('zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone) FROM PUBLIC, zeka_adminarea_runtime;
+    GRANT EXECUTE ON FUNCTION zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone) TO zeka_adminarea_runtime;
   END IF;
   IF pg_catalog.to_regprocedure('public.zeka_city_key(text)') IS NOT NULL THEN
     GRANT EXECUTE ON FUNCTION public.zeka_city_key(text) TO zeka_adminarea_runtime;

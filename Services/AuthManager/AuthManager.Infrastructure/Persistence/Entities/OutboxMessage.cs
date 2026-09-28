@@ -62,4 +62,12 @@ public sealed class OutboxMessage
         else
             NextAttemptAtUtc = nextAttemptAtUtc;
     }
+
+    public void Defer(DateTimeOffset nextAttemptAtUtc, string reason)
+    {
+        NextAttemptAtUtc = nextAttemptAtUtc;
+        LastError = reason;
+        LeaseId = null;
+        LeaseExpiresAtUtc = null;
+    }
 }
