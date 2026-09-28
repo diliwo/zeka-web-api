@@ -137,9 +137,10 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                       USING ("OrganisationId" = zeka.current_organisation_id())
                       WITH CHECK ("OrganisationId" = zeka.current_organisation_id());
                     REVOKE ALL ON TABLE "{{table}}" FROM PUBLIC;
-                    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "{{table}}" TO zeka_adminarea_runtime;
+                    GRANT SELECT, INSERT ON TABLE "{{table}}" TO zeka_adminarea_runtime;
                     """);
             }
+            migrationBuilder.Sql("GRANT UPDATE (\"ReleasedAt\") ON TABLE \"AdminAreaExportFences\" TO zeka_adminarea_runtime;");
             migrationBuilder.Sql("RESET ROLE;");
         }
 

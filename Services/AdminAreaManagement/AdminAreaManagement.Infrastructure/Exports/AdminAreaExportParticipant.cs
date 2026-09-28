@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -80,6 +82,8 @@ internal sealed class AdminAreaExportParticipant(
         if (command.Header.ParticipantId is not (AdminAreaExportContractV1.ParticipantId
             or AdminAreaExportContractV1.DocumentParticipantId))
             throw new InvalidOperationException("The stage command targets an unknown AdminArea participant.");
+        if (command.FenceOwnerParticipantId != AdminAreaExportContractV1.ParticipantId)
+            throw new InvalidOperationException("AdminArea export fragments must use the AdminArea fence owner.");
         DemandHeader(command.Header, command.Header.ParticipantId);
         fixture.Demand(command.Header.OrganisationId);
         return transactions.ExecuteAsync(async token =>
@@ -305,15 +309,51 @@ internal sealed class AdminAreaExportParticipant(
     }
 
     private static string DeterministicToken(LifecycleMessageHeaderV1 header, long revision) =>
-        "admin-area-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"{header.OperationId:D}\n{header.OrganisationId:D}\n{header.OperationRevision}\n{revision}")))
-            .ToLowerInvariant()[..32];
+        "admin-area-" + CanonicalHash("admin-area-fence-token-v1", header.OperationId,
+            header.OrganisationId, header.OperationRevision, revision)[..32];
 
-    private static string RequestHash(string command, LifecycleMessageHeaderV1 header, params object[] values) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n',
-            new object[] { command, header.OperationId, header.OrganisationId, header.OperationRevision,
-                header.ParticipantId, header.ContractVersion, header.MessageId, header.CausationId,
-                header.CorrelationId }.Concat(values))))).ToLowerInvariant();
+    private static string RequestHash(string command, LifecycleMessageHeaderV1 header, params object[] values)
+    {
+        return CanonicalHash(new object?[]
+        {
+            command, header.OperationId, header.OrganisationId, header.OperationRevision,
+            header.ParticipantId, header.ContractVersion, header.MessageId, header.CausationId,
+            header.CorrelationId
+        }.Concat(values).ToArray());
+    }
+
+    private static string CanonicalHash(params object?[] values)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var value in values) AppendCanonical(hash, value);
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static void AppendCanonical(IncrementalHash hash, object? value)
+    {
+        var canonical = value switch
+        {
+            null => null,
+            Guid guid => guid.ToString("D", CultureInfo.InvariantCulture),
+            DateTimeOffset timestamp => timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            DateTime timestamp => timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+            _ => value.ToString()
+        };
+        if (canonical is null)
+        {
+            Span<byte> missing = stackalloc byte[sizeof(int)];
+            BinaryPrimitives.WriteInt32BigEndian(missing, -1);
+            hash.AppendData(missing);
+            return;
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(canonical);
+        Span<byte> length = stackalloc byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
+        hash.AppendData(length);
+        hash.AppendData(bytes);
+    }
 
     private static Guid DeterministicMessageId(Guid messageId, string responseType)
     {

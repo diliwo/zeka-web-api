@@ -48,10 +48,10 @@
     { "schema": "public", "name": "Trainings_Id_seq" }
   ],
   "tablePrivileges": [
-    { "object": { "schema": "public", "name": "AdminAreaExportFences" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
-    { "object": { "schema": "public", "name": "AdminAreaExportFragments" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
-    { "object": { "schema": "public", "name": "AdminAreaExportInbox" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
-    { "object": { "schema": "public", "name": "AdminAreaExportOutbox" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
+    { "object": { "schema": "public", "name": "AdminAreaExportFences" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "AdminAreaExportFragments" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "AdminAreaExportInbox" }, "privileges": ["INSERT", "SELECT"] },
+    { "object": { "schema": "public", "name": "AdminAreaExportOutbox" }, "privileges": ["INSERT", "SELECT"] },
     { "object": { "schema": "public", "name": "Cities" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
     { "object": { "schema": "public", "name": "ContactPersons" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
     { "object": { "schema": "public", "name": "DocumentPartners" }, "privileges": ["DELETE", "INSERT", "SELECT", "UPDATE"] },
@@ -105,6 +105,9 @@
     { "owner": "zeka_adminarea_owner", "objectType": "TYPE", "scope": "SCHEMA", "schema": "zeka", "grants": [] }
   ],
   "parameterPrivileges": [],
+  "columnPrivileges": [
+    { "object": { "schema": "public", "name": "AdminAreaExportFences" }, "column": "ReleasedAt", "privileges": ["UPDATE"], "grantable": false }
+  ],
   "policyPrefix": "rls_",
   "policyUsingExpression": "(\"OrganisationId\" = zeka.current_organisation_id())",
   "policyWithCheckExpression": "(\"OrganisationId\" = zeka.current_organisation_id())",

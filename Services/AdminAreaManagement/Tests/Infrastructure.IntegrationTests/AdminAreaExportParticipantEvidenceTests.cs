@@ -1,3 +1,4 @@
+using System.Globalization;
 using AdminAreaManagement.Application.Common.Authorization;
 using AdminAreaManagement.Application.Exports;
 using AdminAreaManagement.Core.Entities;
@@ -144,6 +145,151 @@ public sealed class AdminAreaExportParticipantEvidenceTests(PostgreSqlRlsRuntime
             """);
     }
 
+    [Fact]
+    public async Task Fence_survives_restart_request_identity_is_culture_invariant_and_owner_is_fixed()
+    {
+        var operation = Guid.NewGuid();
+        var main = Header(operation, database.SeedOrganisation, AdminAreaExportContractV1.ParticipantId);
+        OrganisationExportFenceEnteredV1 entered;
+        await using (var firstProvider = Provider(database.SeedOrganisation))
+        await using (var firstScope = firstProvider.CreateAsyncScope())
+        {
+            Establish(firstScope, database.SeedOrganisation);
+            entered = await firstScope.ServiceProvider.GetRequiredService<IAdminAreaExportParticipant>()
+                .EnterFenceAsync(new EnterOrganisationExportFenceV1(main));
+        }
+
+        var evidence = new CompleteExportFenceEvidenceV1(Guid.NewGuid(), new string('c', 64),
+            [new ExportFenceParticipantRequirementV1(AdminAreaExportContractV1.ParticipantId, 1)],
+            [new ExportFenceReceiptV1(entered)]);
+        var stage = new StageOrganisationExportV1(NewMessage(main), entered.EnteredAt.AddSeconds(1), evidence);
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            await using var restartedProvider = Provider(database.SeedOrganisation);
+            await using var restartedScope = restartedProvider.CreateAsyncScope();
+            Establish(restartedScope, database.SeedOrganisation);
+            var restarted = restartedScope.ServiceProvider.GetRequiredService<IAdminAreaExportParticipant>();
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("ar-EG");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("ar-EG");
+            var first = await restarted.StageFragmentAsync(stage);
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
+            var replay = await restarted.StageFragmentAsync(stage);
+            Assert.Equal(first.FragmentHash, replay.FragmentHash);
+
+            var documentHeader = Header(operation, database.SeedOrganisation,
+                AdminAreaExportContractV1.DocumentParticipantId);
+            var forgedEntered = new OrganisationExportFenceEnteredV1(documentHeader,
+                "forged-document-fence", 1, entered.EnteredAt);
+            var forgedEvidence = new CompleteExportFenceEvidenceV1(Guid.NewGuid(), new string('d', 64),
+                [
+                    new ExportFenceParticipantRequirementV1(AdminAreaExportContractV1.ParticipantId, 1),
+                    new ExportFenceParticipantRequirementV1(AdminAreaExportContractV1.DocumentParticipantId, 1)
+                ],
+                [new ExportFenceReceiptV1(entered), new ExportFenceReceiptV1(forgedEntered)]);
+            var forged = new StageOrganisationExportV1(documentHeader, entered.EnteredAt.AddSeconds(1),
+                forgedEvidence, AdminAreaExportContractV1.DocumentParticipantId);
+            var rejected = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                restarted.StageFragmentAsync(forged));
+            Assert.Contains("fence owner", rejected.Message, StringComparison.Ordinal);
+            await restarted.ReleaseFenceAsync(new ReleaseOrganisationExportFenceV1(
+                NewMessage(main), entered.FenceToken));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+            CultureInfo.CurrentUICulture = previousUiCulture;
+        }
+    }
+
+    [Fact]
+    public async Task Runtime_cannot_mutate_immutable_export_evidence_or_non_release_fence_columns()
+    {
+        var operation = Guid.NewGuid();
+        await using var provider = Provider(database.SeedOrganisation);
+        await using var scope = provider.CreateAsyncScope();
+        Establish(scope, database.SeedOrganisation);
+        var participant = scope.ServiceProvider.GetRequiredService<IAdminAreaExportParticipant>();
+        var header = Header(operation, database.SeedOrganisation, AdminAreaExportContractV1.ParticipantId);
+        var entered = await participant.EnterFenceAsync(new EnterOrganisationExportFenceV1(header));
+        var evidence = new CompleteExportFenceEvidenceV1(Guid.NewGuid(), new string('e', 64),
+            [new ExportFenceParticipantRequirementV1(AdminAreaExportContractV1.ParticipantId, 1)],
+            [new ExportFenceReceiptV1(entered)]);
+        await participant.StageFragmentAsync(new StageOrganisationExportV1(
+            NewMessage(header), entered.EnteredAt.AddSeconds(1), evidence));
+
+        string[] forbidden =
+        [
+            "UPDATE public.\"AdminAreaExportFences\" SET \"FenceToken\"=\"FenceToken\" WHERE \"OperationId\"=@operation",
+            "DELETE FROM public.\"AdminAreaExportFences\" WHERE \"OperationId\"=@operation",
+            "UPDATE public.\"AdminAreaExportFragments\" SET \"PayloadJson\"=\"PayloadJson\" WHERE \"OperationId\"=@operation",
+            "DELETE FROM public.\"AdminAreaExportFragments\" WHERE \"OperationId\"=@operation",
+            "UPDATE public.\"AdminAreaExportInbox\" SET \"RequestHash\"=\"RequestHash\" WHERE \"OperationId\"=@operation",
+            "DELETE FROM public.\"AdminAreaExportInbox\" WHERE \"OperationId\"=@operation",
+            "UPDATE public.\"AdminAreaExportOutbox\" SET \"PayloadJson\"=\"PayloadJson\" WHERE \"OperationId\"=@operation",
+            "DELETE FROM public.\"AdminAreaExportOutbox\" WHERE \"OperationId\"=@operation"
+        ];
+        foreach (var sql in forbidden)
+        {
+            var denied = await Assert.ThrowsAsync<PostgresException>(() =>
+                ExecuteRuntimeAsync(sql, database.SeedOrganisation, operation));
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, denied.SqlState);
+        }
+
+        await participant.ReleaseFenceAsync(new ReleaseOrganisationExportFenceV1(
+            NewMessage(header), entered.FenceToken));
+    }
+
+    [Fact]
+    public async Task Database_fence_blocks_background_writes_to_every_exported_product_table()
+    {
+        var partner = await database.SeedPartnerAsAdministratorAsync(
+            database.SeedOrganisation, $"Fence coverage {Guid.NewGuid():N}");
+        var documentOperation = Guid.NewGuid();
+        await database.ExecuteAdministratorAsync($"""
+            INSERT INTO public."ContactPersons"
+              ("ContactDetails", "Gender", "ToDelete", "PartnerId", "ContactName", "OrganisationId")
+            VALUES ('coverage', 0, false, {partner}, 'Coverage', '{database.SeedOrganisation:D}');
+            INSERT INTO public."Emails" ("PartnerId", "EmailAddress", "OrganisationId")
+            VALUES ({partner}, 'coverage@example.invalid', '{database.SeedOrganisation:D}');
+            INSERT INTO public."DocumentPartners"
+              ("PartnerId", "CreatedBy", "Created", "LastModifiedBy", "Softdelete", "OrganisationId",
+               "Name", "ContentType", "Description", "CreateOperationId", "CreateRequestHash",
+               "FileWriteState", "FileWriteAttempts", "FileDeleteAttempts")
+            VALUES ({partner}, 'test', now(), 'test', false, '{database.SeedOrganisation:D}',
+              'coverage.bin', 'application/octet-stream', 'coverage', '{documentOperation:D}',
+              '{new string('f', 64)}', 1, 1, 0);
+            """);
+
+        await using var provider = Provider(database.SeedOrganisation);
+        await using var scope = provider.CreateAsyncScope();
+        Establish(scope, database.SeedOrganisation);
+        var participant = scope.ServiceProvider.GetRequiredService<IAdminAreaExportParticipant>();
+        var header = Header(Guid.NewGuid(), database.SeedOrganisation, AdminAreaExportContractV1.ParticipantId);
+        var entered = await participant.EnterFenceAsync(new EnterOrganisationExportFenceV1(header));
+
+        string[] fencedWrites =
+        [
+            "UPDATE public.\"Teams\" SET \"Name\"=\"Name\" WHERE \"OrganisationId\"=@organisation",
+            "UPDATE public.\"StaffMembers\" SET \"UserName\"=\"UserName\" WHERE \"OrganisationId\"=@organisation",
+            "UPDATE public.\"Partners\" SET \"Name\"=\"Name\" WHERE \"OrganisationId\"=@organisation",
+            "UPDATE public.\"ContactPersons\" SET \"ContactName\"=\"ContactName\" WHERE \"OrganisationId\"=@organisation",
+            "UPDATE public.\"Emails\" SET \"EmailAddress\"=\"EmailAddress\" WHERE \"OrganisationId\"=@organisation",
+            "UPDATE public.\"DocumentPartners\" SET \"Name\"=\"Name\" WHERE \"OrganisationId\"=@organisation"
+        ];
+        foreach (var sql in fencedWrites)
+        {
+            var blocked = await Assert.ThrowsAsync<PostgresException>(() =>
+                ExecuteRuntimeAsync(sql, database.SeedOrganisation));
+            Assert.Equal(PostgresErrorCodes.ObjectNotInPrerequisiteState, blocked.SqlState);
+        }
+
+        await participant.ReleaseFenceAsync(new ReleaseOrganisationExportFenceV1(
+            NewMessage(header), entered.FenceToken));
+    }
+
     private ServiceProvider Provider(Guid fixtureOrganisation)
     {
         Directory.CreateDirectory(root);
@@ -170,6 +316,23 @@ public sealed class AdminAreaExportParticipantEvidenceTests(PostgreSqlRlsRuntime
     private static LifecycleMessageHeaderV1 NewMessage(LifecycleMessageHeaderV1 header) =>
         new(header.OperationId, header.OrganisationId, header.OperationRevision, header.ParticipantId,
             header.ContractVersion, Guid.NewGuid(), header.MessageId, header.CorrelationId);
+
+    private async Task ExecuteRuntimeAsync(string sql, Guid organisation, Guid? operation = null)
+    {
+        await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var tenant = new NpgsqlCommand(
+            "select pg_catalog.set_config('zeka.organisation_id', @organisation, true)", connection, transaction))
+        {
+            tenant.Parameters.AddWithValue("organisation", organisation.ToString("D"));
+            await tenant.ExecuteScalarAsync();
+        }
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue("organisation", organisation);
+        if (operation is not null) command.Parameters.AddWithValue("operation", operation.Value);
+        await command.ExecuteNonQueryAsync();
+    }
 
     public void Dispose()
     {
