@@ -180,8 +180,8 @@ public sealed class AuthExportParticipant(
     {
         PostgresException { SqlState: PostgresErrorCodes.UniqueViolation
             or PostgresErrorCodes.SerializationFailure } => true,
-        DbUpdateException { InnerException: not null } update => IsRetryable(update.InnerException),
-        InvalidOperationException { InnerException: not null } wrapper => IsRetryable(wrapper.InnerException),
+        DbUpdateException { InnerException: not null } update => IsRetryable(update.InnerException!),
+        InvalidOperationException { InnerException: not null } wrapper => IsRetryable(wrapper.InnerException!),
         _ => false
     };
 
