@@ -12,6 +12,7 @@
   
   <ItemGroup>
     <ProjectReference Include="..\AuthManager.Core\AuthManager.Core.csproj" />
+    <ProjectReference Include="..\..\..\Shared\Zeka.Lifecycle.Contracts\Zeka.Lifecycle.Contracts.csproj" />
   </ItemGroup>
 
 </Project>
