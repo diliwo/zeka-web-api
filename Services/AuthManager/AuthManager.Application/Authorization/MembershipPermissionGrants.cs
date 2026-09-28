@@ -71,7 +71,8 @@ public sealed class MembershipPermissionGrants(IMembershipPermissionGrantStore s
         }
 
         if (string.IsNullOrWhiteSpace(request.PermissionKey)
-            || !TenantPermissions.IsKnown(request.PermissionKey.Trim()))
+            || !StringComparer.Ordinal.Equals(
+                request.PermissionKey.Trim(), TenantPermissions.OrganisationExport))
         {
             return Task.FromResult(new MembershipPermissionGrantResult(
                 MembershipPermissionGrantStatus.InvalidPermission));

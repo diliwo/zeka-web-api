@@ -62,6 +62,20 @@ public sealed class PostgreSqlMembershipPermissionGrantTests(PostgreSqlFixture f
             environment.OwnerUserId, environment.OwnerMembershipId,
             environment.OtherAdminMembershipId, "cross-organisation"));
         Assert.Equal(MembershipPermissionGrantStatus.Denied, crossOrganisation.Status);
+        var viewerGrant = await application.GrantAsync(environment.Request(
+            environment.OwnerUserId, environment.OwnerMembershipId,
+            environment.ViewerMembershipId, "viewer-grant"));
+        Assert.Equal(MembershipPermissionGrantStatus.Denied, viewerGrant.Status);
+        var unsupportedPermission = request with
+        {
+            PermissionKey = "Organisations.Close",
+            CorrelationId = "unsupported-permission"
+        };
+        Assert.Equal(MembershipPermissionGrantStatus.InvalidPermission,
+            (await application.GrantAsync(unsupportedPermission)).Status);
+        Assert.Equal(MembershipPermissionGrantStatus.Denied,
+            (await new MembershipPermissionGrantStore(Options(environment.RuntimeConnection), clock)
+                .GrantAsync(unsupportedPermission, default)).Status);
 
         clock.UtcNow = Now.AddMinutes(2);
         var revoked = await application.RevokeAsync(request with { CorrelationId = "revoke-correlation" });
@@ -81,6 +95,14 @@ public sealed class PostgreSqlMembershipPermissionGrantTests(PostgreSqlFixture f
         Assert.Equal(2, await verification.AuditEntries.CountAsync(entry =>
             entry.SubjectType == nameof(MembershipPermissionGrant)
             && entry.SubjectId == grantRecord.Id.ToString("D")));
+
+        verification.MembershipPermissionGrants.Add(MembershipPermissionGrant.Create(
+            Guid.NewGuid(), environment.OrganisationId, environment.AdminMembershipId,
+            "Organisations.Close", environment.OwnerMembershipId, environment.OwnerUserId,
+            Now.AddMinutes(3)));
+        await verification.SaveChangesAsync();
+        Assert.Equal(TenantAccessOutcome.Denied,
+            (await resolver.ResolveAsync(environment.AdminUserId, environment.OrganisationId)).Outcome);
     }
 
     [Fact]
@@ -229,9 +251,10 @@ public sealed class PostgreSqlMembershipPermissionGrantTests(PostgreSqlFixture f
 
         var owner = User.Create("owner@example.invalid", "owner", "Synthetic", "Owner", Now);
         var admin = User.Create("admin@example.invalid", "admin", "Synthetic", "Admin", Now);
+        var viewer = User.Create("viewer@example.invalid", "viewer", "Synthetic", "Viewer", Now);
         var otherOwner = User.Create("other-owner@example.invalid", "other-owner", "Other", "Owner", Now);
         var otherAdmin = User.Create("other-admin@example.invalid", "other-admin", "Other", "Admin", Now);
-        foreach (var user in new[] { owner, admin, otherOwner, otherAdmin })
+        foreach (var user in new[] { owner, admin, viewer, otherOwner, otherAdmin })
         {
             user.EmailConfirmed = true;
         }
@@ -242,6 +265,8 @@ public sealed class PostgreSqlMembershipPermissionGrantTests(PostgreSqlFixture f
         var ownerMembership = OrganisationMembership.CreateOwner(Guid.NewGuid(), organisation.Id, owner.Id, Now);
         var adminMembership = OrganisationMembership.Create(Guid.NewGuid(), organisation.Id, admin.Id,
             PermissionSet.OrganisationAdministratorId, Now);
+        var viewerMembership = OrganisationMembership.Create(Guid.NewGuid(), organisation.Id, viewer.Id,
+            PermissionSet.ViewerId, Now);
         var otherOwnerMembership = OrganisationMembership.CreateOwner(
             Guid.NewGuid(), otherOrganisation.Id, otherOwner.Id, Now);
         var otherAdminMembership = OrganisationMembership.Create(Guid.NewGuid(), otherOrganisation.Id, otherAdmin.Id,
@@ -249,9 +274,9 @@ public sealed class PostgreSqlMembershipPermissionGrantTests(PostgreSqlFixture f
 
         await using (var database = new AuthDbContext(Options(runtimeConnection)))
         {
-            database.AddRange(owner, admin, otherOwner, otherAdmin, organisation, otherOrganisation,
-                ownerMembership, adminMembership, otherOwnerMembership, otherAdminMembership);
-            foreach (var user in new[] { owner, admin, otherOwner, otherAdmin })
+            database.AddRange(owner, admin, viewer, otherOwner, otherAdmin, organisation, otherOrganisation,
+                ownerMembership, adminMembership, viewerMembership, otherOwnerMembership, otherAdminMembership);
+            foreach (var user in new[] { owner, admin, viewer, otherOwner, otherAdmin })
             {
                 database.Entry(user).Property(value => value.Status).CurrentValue = UserStatus.Active;
             }
@@ -266,6 +291,7 @@ public sealed class PostgreSqlMembershipPermissionGrantTests(PostgreSqlFixture f
             ownerMembership.Id,
             admin.Id,
             adminMembership.Id,
+            viewerMembership.Id,
             otherOrganisation.Id,
             otherOwner.Id,
             otherOwnerMembership.Id,
@@ -315,6 +341,7 @@ public sealed class PostgreSqlMembershipPermissionGrantTests(PostgreSqlFixture f
         Guid OwnerMembershipId,
         Guid AdminUserId,
         Guid AdminMembershipId,
+        Guid ViewerMembershipId,
         Guid OtherOrganisationId,
         Guid OtherOwnerUserId,
         Guid OtherOwnerMembershipId,

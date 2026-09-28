@@ -552,6 +552,18 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
             baseline with { ColumnPrivileges = [baseline.ColumnPrivileges![0], baseline.ColumnPrivileges[0]] },
             baseline with { ColumnPrivileges = [baseline.ColumnPrivileges![0] with { Column = "*" }, baseline.ColumnPrivileges[1]] },
             baseline with { ColumnPrivileges = [baseline.ColumnPrivileges![0] with { Grantable = true }, baseline.ColumnPrivileges[1]] },
+            baseline with { RuntimeFunctionDefinitions = null },
+            baseline with
+            {
+                RuntimeFunctionDefinitions =
+                [baseline.RuntimeFunctionDefinitions![0], baseline.RuntimeFunctionDefinitions[0]]
+            },
+            baseline with
+            {
+                RuntimeFunctionDefinitions =
+                [baseline.RuntimeFunctionDefinitions![0] with { DefinitionSha256 = "invalid" },
+                    baseline.RuntimeFunctionDefinitions[1]]
+            },
             v10ColumnScoped with { ColumnPrivileges = [new(operation, "*", ["UPDATE"], false)] },
             v10ColumnScoped with { ColumnPrivileges = [new(operation, "State", ["DELETE"], false)] },
             v10ColumnScoped with { ColumnPrivileges = [new(operation, "State", ["UPDATE"], true)] },

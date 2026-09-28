@@ -5,6 +5,8 @@ namespace AuthManager.Core.Organisations;
 /// <summary>Version 1 of the accepted, centrally owned tenant permission catalogue.</summary>
 public static class TenantPermissions
 {
+    public const string OrganisationExport = "Organisations.Export";
+
     private static readonly string[] View = ["Clients.ViewAssigned", "Clients.ViewAll"];
     private static readonly string[] AdministrationView =
         ["TeamConfiguration.View", "Partners.View", "PartnerDocuments.View"];
@@ -30,7 +32,7 @@ public static class TenantPermissions
                 ["Clients.Create", "Clients.EditAssigned", "Clients.EditAll", "Clients.ImportExport"]),
             ["Owner"] = Permissions(View, AdministrationView, Contribution, Administration,
                 ["Clients.Create", "Clients.EditAssigned", "Clients.EditAll", "Clients.ImportExport",
-                 "Organisations.Export", "Organisations.Close"])
+                 OrganisationExport, "Organisations.Close"])
         }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public static IReadOnlySet<string>? Resolve(string roleCode) =>
@@ -38,4 +40,12 @@ public static class TenantPermissions
 
     public static bool IsKnown(string permission) =>
         Grants.Values.Any(permissions => permissions.Contains(permission));
+
+    /// <summary>
+    /// Bounded v1 delegation contract. The persistence model is generic, but only the
+    /// organisation export permission may currently be delegated to an Admin membership.
+    /// </summary>
+    public static bool IsExplicitGrantAllowed(string roleCode, string permission) =>
+        StringComparer.Ordinal.Equals(roleCode, "Admin")
+        && StringComparer.Ordinal.Equals(permission, OrganisationExport);
 }

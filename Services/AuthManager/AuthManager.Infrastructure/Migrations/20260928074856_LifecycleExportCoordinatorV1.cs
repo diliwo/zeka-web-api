@@ -171,25 +171,15 @@ namespace AuthManager.Infrastructure.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
-            migrationBuilder.CreateIndex(
-                name: "IX_LifecycleCoordinatorLeases_OperationId_OrganisationId",
-                table: "LifecycleCoordinatorLeases",
-                columns: new[] { "OperationId", "OrganisationId" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_LifecycleExportFenceReceipts_OperationId_OrganisationId",
-                table: "LifecycleExportFenceReceipts",
-                columns: new[] { "OperationId", "OrganisationId" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_LifecycleExportFragments_OperationId_OrganisationId",
-                table: "LifecycleExportFragments",
-                columns: new[] { "OperationId", "OrganisationId" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_LifecycleExportPackages_OperationId_OrganisationId",
-                table: "LifecycleExportPackages",
-                columns: new[] { "OperationId", "OrganisationId" });
+            foreach (var table in new[]
+                     {
+                         "LifecycleCoordinatorLeases", "LifecycleExportFenceReceipts",
+                         "LifecycleExportFragments", "LifecycleExportPackages"
+                     })
+                migrationBuilder.CreateIndex(
+                    name: $"IX_{table}_OperationId_OrganisationId",
+                    table: table,
+                    columns: new[] { "OperationId", "OrganisationId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_LifecycleInboxReceipts_OperationId_MessageType",
@@ -264,44 +254,19 @@ namespace AuthManager.Infrastructure.Migrations
                 DROP TRIGGER IF EXISTS trg_auth_membership_export_fence ON public."OrganisationMemberships";
                 DROP FUNCTION IF EXISTS zeka.reject_auth_membership_write_during_export_fence();
                 """);
-            migrationBuilder.DropTable(
-                name: "LifecycleCoordinatorLeases");
+            foreach (var table in new[]
+                     {
+                         "LifecycleCoordinatorLeases", "LifecycleExportFenceReceipts",
+                         "LifecycleExportFragments", "LifecycleExportPackages", "LifecycleInboxReceipts"
+                     })
+                migrationBuilder.DropTable(name: table);
 
-            migrationBuilder.DropTable(
-                name: "LifecycleExportFenceReceipts");
-
-            migrationBuilder.DropTable(
-                name: "LifecycleExportFragments");
-
-            migrationBuilder.DropTable(
-                name: "LifecycleExportPackages");
-
-            migrationBuilder.DropTable(
-                name: "LifecycleInboxReceipts");
-
-            migrationBuilder.DropColumn(
-                name: "CompletedAt",
-                table: "OrganisationLifecycleOperations");
-
-            migrationBuilder.DropColumn(
-                name: "FailureCode",
-                table: "OrganisationLifecycleOperations");
-
-            migrationBuilder.DropColumn(
-                name: "FenceEvidenceHash",
-                table: "OrganisationLifecycleOperations");
-
-            migrationBuilder.DropColumn(
-                name: "PackageReference",
-                table: "OrganisationLifecycleOperations");
-
-            migrationBuilder.DropColumn(
-                name: "PackageSha256",
-                table: "OrganisationLifecycleOperations");
-
-            migrationBuilder.DropColumn(
-                name: "SnapshotAt",
-                table: "OrganisationLifecycleOperations");
+            foreach (var column in new[]
+                     {
+                         "CompletedAt", "FailureCode", "FenceEvidenceHash",
+                         "PackageReference", "PackageSha256", "SnapshotAt"
+                     })
+                migrationBuilder.DropColumn(name: column, table: "OrganisationLifecycleOperations");
         }
     }
 }

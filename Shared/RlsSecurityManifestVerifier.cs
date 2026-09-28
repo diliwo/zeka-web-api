@@ -25,6 +25,8 @@ public sealed record ColumnPrivilegeState(ManagedObjectIdentity Object, string C
 public sealed record RelationTopologyState(string Kind, ManagedObjectIdentity Parent,
     ManagedObjectIdentity Child, int Sequence, bool DetachPending);
 
+public sealed record RuntimeFunctionDefinitionState(string FunctionIdentity, string DefinitionSha256);
+
 public sealed record RlsSecurityManifest(int SchemaVersion, string Service, string ModelContext,
     string MigrationId, string OwnerRole, string MigratorRole, string RuntimeRole,
     string[] ManagedSchemas, string[] ProhibitedRelationKinds,
@@ -32,12 +34,13 @@ public sealed record RlsSecurityManifest(int SchemaVersion, string Service, stri
     ManagedObjectIdentity[] ProtectedTables, ManagedObjectIdentity[] ExcludedTables,
     ManagedObjectIdentity MigrationHistoryTable, ManagedObjectIdentity[] Sequences,
     ObjectPrivilegeState[] TablePrivileges, ObjectPrivilegeState[] SequencePrivileges,
-    string[] RuntimeFunctions, Dictionary<string, string> RuntimeFunctionDefinitionSha256,
+    string[] RuntimeFunctions, Dictionary<string, string>? RuntimeFunctionDefinitionSha256,
     DefaultPrivilegeState[] DefaultPrivileges, ParameterPrivilegeGrant[] ParameterPrivileges,
     string PolicyPrefix, string? PolicyUsingExpression, string? PolicyWithCheckExpression,
     string? ContextFunction, ManagedObjectIdentity[]? GlobalControlPlaneTables = null,
     ManagedObjectIdentity[]? OrganisationScopedSurvivingControlTables = null,
-    ColumnPrivilegeState[]? ColumnPrivileges = null);
+    ColumnPrivilegeState[]? ColumnPrivileges = null,
+    RuntimeFunctionDefinitionState[]? RuntimeFunctionDefinitions = null);
 
 /// <summary>Deployment-only bidirectional comparison of the versioned model and effective PostgreSQL state.</summary>
 public static class RlsSecurityManifestVerifier
@@ -77,7 +80,8 @@ public static class RlsSecurityManifestVerifier
     {
         if (manifest.SchemaVersion is not (10 or 11 or 12 or 13) || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
-        Equal(manifest.RuntimeFunctions, manifest.RuntimeFunctionDefinitionSha256.Keys,
+        var functionDefinitions = FunctionDefinitions(manifest);
+        Equal(manifest.RuntimeFunctions, functionDefinitions.Keys,
             "function definition inventory");
         ValidateDefaultPrivilegeManifest(manifest);
         ValidateParameterPrivilegeManifest(manifest);
@@ -444,7 +448,7 @@ public static class RlsSecurityManifestVerifier
         foreach (var row in rows)
         {
             var actual = DefinitionSha256(row[7]);
-            var expectedDefinition = manifest.RuntimeFunctionDefinitionSha256[row[0]];
+            var expectedDefinition = FunctionDefinitions(manifest)[row[0]];
             if (!StringComparer.OrdinalIgnoreCase.Equals(expectedDefinition, actual))
                 throw new InvalidOperationException(
                     $"Function body drifted for {row[0]}. Expected {expectedDefinition}, actual {actual}.");
@@ -541,6 +545,36 @@ public static class RlsSecurityManifestVerifier
                     $"{grant.Grantee}|{grant.Privilege}|{grant.Grantable}"),
                 "default privilege grants");
         }
+    }
+
+    private static IReadOnlyDictionary<string, string> FunctionDefinitions(RlsSecurityManifest manifest)
+    {
+        if (manifest.SchemaVersion >= 13)
+        {
+            if (manifest.RuntimeFunctionDefinitionSha256 is not null
+                || manifest.RuntimeFunctionDefinitions is null
+                || manifest.RuntimeFunctionDefinitions.Length == 0)
+                throw new InvalidOperationException(
+                    "Version 13+ requires explicit function-definition records.");
+            var definitions = manifest.RuntimeFunctionDefinitions;
+            if (definitions.Any(definition => string.IsNullOrWhiteSpace(definition.FunctionIdentity)
+                    || definition.DefinitionSha256.Length != 64
+                    || definition.DefinitionSha256.Any(character =>
+                        character is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
+                || definitions.Select(definition => definition.FunctionIdentity)
+                    .Distinct(StringComparer.Ordinal).Count() != definitions.Length)
+                throw new InvalidOperationException("Function definition inventory is invalid.");
+            return definitions.ToDictionary(
+                definition => definition.FunctionIdentity,
+                definition => definition.DefinitionSha256,
+                StringComparer.Ordinal);
+        }
+
+        if (manifest.RuntimeFunctionDefinitions is not null
+            || manifest.RuntimeFunctionDefinitionSha256 is null)
+            throw new InvalidOperationException(
+                "Legacy manifests require the function-definition hash dictionary.");
+        return manifest.RuntimeFunctionDefinitionSha256;
     }
 
     private static void ValidateParameterPrivilegeManifest(RlsSecurityManifest manifest)

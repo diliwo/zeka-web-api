@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using AuthManager.Application.Lifecycle;
 using AuthManager.Core.Lifecycle;
+using AuthManager.Core.Organisations;
 using AuthManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -66,12 +67,37 @@ public sealed class AuthExportParticipant(
                     x.SuspendedAtUtc, x.EndedAtUtc })
                 .ToListAsync(cancellationToken);
 
-            var csv = new StringBuilder("membership_id,user_id,permission_set_id,status,joined_at_utc,suspended_at_utc,ended_at_utc\n");
+            var effectiveGrantTargets = memberships
+                .Where(x => x.Status == MembershipStatus.Active
+                    && x.PermissionSetId == PermissionSet.OrganisationAdministratorId)
+                .Select(x => x.Id)
+                .ToHashSet();
+            var activeGrants = await database.MembershipPermissionGrants.AsNoTracking()
+                .Where(x => x.OrganisationId == command.Header.OrganisationId
+                    && x.GrantedAtUtc <= command.SnapshotAt
+                    && (x.RevokedAtUtc == null || x.RevokedAtUtc > command.SnapshotAt))
+                .OrderBy(x => x.OrganisationMembershipId)
+                .ThenBy(x => x.PermissionKey)
+                .ThenBy(x => x.Id)
+                .Select(x => new { x.OrganisationMembershipId, x.PermissionKey })
+                .ToListAsync(cancellationToken);
+            var effectiveGrants = activeGrants
+                .Where(x => effectiveGrantTargets.Contains(x.OrganisationMembershipId)
+                    && StringComparer.Ordinal.Equals(
+                        x.PermissionKey, TenantPermissions.OrganisationExport))
+                .GroupBy(x => x.OrganisationMembershipId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => string.Join('|', group.Select(x => x.PermissionKey)
+                        .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)));
+
+            var csv = new StringBuilder("membership_id,user_id,permission_set_id,status,joined_at_utc,suspended_at_utc,ended_at_utc,active_explicit_permission_grants\n");
             foreach (var row in memberships)
                 csv.Append(row.Id.ToString("D")).Append(',').Append(row.UserId.ToString("D")).Append(',')
                     .Append(row.PermissionSetId.ToString("D")).Append(',').Append(row.Status).Append(',')
                     .Append(Format(row.JoinedAtUtc)).Append(',').Append(Format(row.SuspendedAtUtc)).Append(',')
-                    .Append(Format(row.EndedAtUtc)).Append('\n');
+                    .Append(Format(row.EndedAtUtc)).Append(',')
+                    .Append(effectiveGrants.GetValueOrDefault(row.Id, string.Empty)).Append('\n');
             var content = Encoding.UTF8.GetBytes(csv.ToString());
             var contentHash = Hash(content);
             var reference = $"fragments/{command.Header.ParticipantId}/{AuthExportInventoryV1.Memberships}.csv";

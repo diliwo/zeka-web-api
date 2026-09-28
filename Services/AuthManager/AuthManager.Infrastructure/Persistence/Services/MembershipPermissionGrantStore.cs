@@ -42,10 +42,13 @@ public sealed class MembershipPermissionGrantStore(
                 {
                     await using var transaction = await database.Database.BeginTransactionAsync(
                         IsolationLevel.Serializable, cancellationToken);
-                    await InitializeTenantContextAsync(database, transaction, request.OrganisationId, cancellationToken);
+                    await TenantContextInitializer.InitializeAsync(
+                        database, transaction, request.OrganisationId, cancellationToken);
 
-                    if (!await IsAuthorizedOwnerAsync(database, request, clock.GetUtcNow(), cancellationToken)
-                        || !await TargetBelongsToOrganisationAsync(database, request, grant, cancellationToken))
+                    if (!StringComparer.Ordinal.Equals(
+                            request.PermissionKey, TenantPermissions.OrganisationExport)
+                        || !await IsAuthorizedOwnerAsync(database, request, clock.GetUtcNow(), cancellationToken)
+                        || !await TargetIsEligibleAdminAsync(database, request, grant, cancellationToken))
                     {
                         return new MembershipPermissionGrantResult(MembershipPermissionGrantStatus.Denied);
                     }
@@ -144,7 +147,7 @@ public sealed class MembershipPermissionGrantStore(
             select membership.Id).AnyAsync(cancellationToken);
     }
 
-    private static Task<bool> TargetBelongsToOrganisationAsync(
+    private static Task<bool> TargetIsEligibleAdminAsync(
         AuthDbContext database,
         MembershipPermissionGrantRequest request,
         bool requireActive,
@@ -152,6 +155,7 @@ public sealed class MembershipPermissionGrantStore(
         database.OrganisationMemberships.AsNoTracking().AnyAsync(
             membership => membership.Id == request.TargetMembershipId
                 && membership.OrganisationId == request.OrganisationId
+                && membership.PermissionSetId == PermissionSet.OrganisationAdministratorId
                 && (!requireActive || membership.Status == MembershipStatus.Active),
             cancellationToken);
 
@@ -193,27 +197,4 @@ public sealed class MembershipPermissionGrantStore(
         return false;
     }
 
-    private static async Task InitializeTenantContextAsync(
-        AuthDbContext database,
-        IDbContextTransaction transaction,
-        Guid organisationId,
-        CancellationToken cancellationToken)
-    {
-        if (!database.Database.IsNpgsql())
-        {
-            return;
-        }
-
-        await using var command = database.Database.GetDbConnection().CreateCommand();
-        command.Transaction = transaction.GetDbTransaction();
-        command.CommandText = "select pg_catalog.set_config('zeka.organisation_id', @organisation_id, true)";
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = "organisation_id";
-        parameter.Value = organisationId.ToString("D");
-        command.Parameters.Add(parameter);
-        if (!Equals(await command.ExecuteScalarAsync(cancellationToken), parameter.Value))
-        {
-            throw new InvalidOperationException("Membership permission tenant context initialization failed.");
-        }
-    }
 }

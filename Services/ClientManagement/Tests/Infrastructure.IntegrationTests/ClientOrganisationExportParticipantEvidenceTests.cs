@@ -52,6 +52,8 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
         using var artifacts = new TemporaryArtifacts();
         await using var provider = Provider(organisation, artifacts.Root);
         await SeedSyntheticClient(provider, organisation, 21, softDeleted: true);
+        await SeedSyntheticClient(provider, organisation, 25, softDeleted: false);
+        await SeedSyntheticAssessment(provider, organisation, 25);
 
         var operation = Guid.NewGuid();
         var correlation = Guid.NewGuid();
@@ -76,7 +78,8 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
         Assert.Equal(ready.FragmentHash, replay.FragmentHash);
         Assert.Equal(ready.Header.MessageId, replay.Header.MessageId);
         Assert.Equal(ClientExportContract.Categories, ready.Categories.Select(x => x.Category));
-        Assert.Equal(1, ready.Categories.Single(x => x.Category == "beneficiaries").RecordCount);
+        Assert.Equal(2, ready.Categories.Single(x => x.Category == "beneficiaries").RecordCount);
+        Assert.Equal(1, ready.Categories.Single(x => x.Category == "structured-assessments").RecordCount);
         Assert.Equal(ExportCategoryDispositionV1.Withheld,
             ready.Categories.Single(x => x.Category == "notes").Disposition);
         foreach (var category in new[] { "generated-report-artifacts", "audit-events", "integration-events" })
@@ -99,6 +102,16 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
         Assert.Equal(beneficiary.ContentSha256, ClientExportCanonical.Sha256(content));
         Assert.Contains("synthetic-reference", Encoding.UTF8.GetString(content), StringComparison.Ordinal);
         Assert.DoesNotContain(otherOrganisation.ToString("D"), Encoding.UTF8.GetString(content), StringComparison.OrdinalIgnoreCase);
+
+        var assessmentFile = Assert.Single(Directory.GetFiles(
+            artifacts.Root, "structured-assessments.csv.*.artifact", SearchOption.AllDirectories));
+        var assessmentContent = await File.ReadAllTextAsync(assessmentFile);
+        Assert.Contains("personal_situation_family", assessmentContent, StringComparison.Ordinal);
+        Assert.Contains("professional_assessment_id", assessmentContent, StringComparison.Ordinal);
+        Assert.Contains("synthetic-family-context", assessmentContent, StringComparison.Ordinal);
+        Assert.Contains("synthetic-acquired-knowledge", assessmentContent, StringComparison.Ordinal);
+        Assert.Contains("synthetic-knowledge-to-develop", assessmentContent, StringComparison.Ordinal);
+        Assert.DoesNotContain(otherOrganisation.ToString("D"), assessmentContent, StringComparison.OrdinalIgnoreCase);
 
         await Invoke(provider, organisation, participant => participant.ReleaseFenceAsync(
             new ReleaseOrganisationExportFenceV1(Header(operation, organisation, Guid.NewGuid(), correlation), entered.FenceToken)));
@@ -284,6 +297,54 @@ public sealed class ClientOrganisationExportParticipantEvidenceTests(PostgreSqlC
                 client.Softdelete = softDeleted;
                 services.GetRequiredService<ApplicationDbContext>().Clients.Add(client);
                 await services.GetRequiredService<ApplicationDbContext>().SaveChangesAsync(token);
+            }, default));
+    }
+
+    private static async Task SeedSyntheticAssessment(
+        IServiceProvider provider,
+        Guid organisation,
+        int clientSequence)
+    {
+        await InTenant(provider, organisation, services =>
+            services.GetRequiredService<ITenantTransactionExecutor>().ExecuteAsync(async token =>
+            {
+                var database = services.GetRequiredService<ApplicationDbContext>();
+                var client = await database.Clients.SingleAsync(
+                    value => value.ReferenceNumber == $"synthetic-reference-{clientSequence:D2}", token);
+                var score = ClientManagement.Core.Enums.PersonalExpectationLanguageknowledgeScore.Autonomous;
+                var assessment = new ClientManagement.Core.Entities.Assessment(
+                    true, client, "synthetic-assessor",
+                    "synthetic-family-context", "synthetic-housing-context", "synthetic-health-context",
+                    "synthetic-financial-context", "synthetic-administrative-context",
+                    "synthetic-language-note", "synthetic-training-difficulty", "synthetic-training-opinion",
+                    "synthetic-training-strengths", "synthetic-training-improvements",
+                    "synthetic-consultant-note", "synthetic-consultant-language-note",
+                    "synthetic-problem", "synthetic-reward", "synthetic-experience-knowledge",
+                    "synthetic-point-to-improve", "synthetic-experience-note",
+                    "synthetic-working-condition", "synthetic-unwanted-condition", "synthetic-motivation",
+                    "synthetic-working-consultant-note", "synthetic-short-a", "synthetic-short-b",
+                    "synthetic-medium", "synthetic-long", score, score, score, score, true, true, true)
+                {
+                    TrainingDifficulty = "synthetic-training-difficulty",
+                    TrainingOpinion = "synthetic-training-opinion",
+                    TrainingFacilitiesAndStrengths = "synthetic-training-strengths",
+                    TrainingPersonalImprovments = "synthetic-training-improvements",
+                    TrainingConsultantNote = "synthetic-consultant-note",
+                    TrainingConsultantLanguageLearningNote = "synthetic-consultant-language-note"
+                };
+                var profession = new ClientManagement.Core.Entities.ProfessionalAssessment
+                {
+                    Assessment = assessment,
+                    AcquiredKnowledge = "synthetic-acquired-knowledge",
+                    AcquiredBehaviouralKnowledge = "synthetic-acquired-behaviour",
+                    AcquiredKnowHow = "synthetic-acquired-know-how",
+                    KnowledgeToDevelop = "synthetic-knowledge-to-develop",
+                    BehaviouralKnowledgeToDevelop = "synthetic-behaviour-to-develop",
+                    KnowHowToDevelop = "synthetic-know-how-to-develop"
+                };
+                assessment.BilanProfessions.Add(profession);
+                database.Assessments.Add(assessment);
+                await database.SaveChangesAsync(token);
             }, default));
     }
 

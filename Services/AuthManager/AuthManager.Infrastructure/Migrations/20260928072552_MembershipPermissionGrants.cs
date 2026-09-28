@@ -57,20 +57,18 @@ namespace AuthManager.Infrastructure.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
-            migrationBuilder.CreateIndex(
-                name: "IX_MembershipPermissionGrants_GrantedByMembershipId_Organisati~",
-                table: "MembershipPermissionGrants",
-                columns: new[] { "GrantedByMembershipId", "OrganisationId" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MembershipPermissionGrants_OrganisationId_GrantedAtUtc",
-                table: "MembershipPermissionGrants",
-                columns: new[] { "OrganisationId", "GrantedAtUtc" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MembershipPermissionGrants_OrganisationMembershipId_Organis~",
-                table: "MembershipPermissionGrants",
-                columns: new[] { "OrganisationMembershipId", "OrganisationId" });
+            foreach (var (name, columns) in new[]
+                     {
+                         ("IX_MembershipPermissionGrants_GrantedByMembershipId_Organisati~",
+                             new[] { "GrantedByMembershipId", "OrganisationId" }),
+                         ("IX_MembershipPermissionGrants_OrganisationId_GrantedAtUtc",
+                             new[] { "OrganisationId", "GrantedAtUtc" }),
+                         ("IX_MembershipPermissionGrants_OrganisationMembershipId_Organis~",
+                             new[] { "OrganisationMembershipId", "OrganisationId" }),
+                         ("IX_MembershipPermissionGrants_RevokedByMembershipId_Organisati~",
+                             new[] { "RevokedByMembershipId", "OrganisationId" })
+                     })
+                migrationBuilder.CreateIndex(name: name, table: "MembershipPermissionGrants", columns: columns);
 
             migrationBuilder.CreateIndex(
                 name: "IX_MembershipPermissionGrants_OrganisationMembershipId_Permiss~",
@@ -78,11 +76,6 @@ namespace AuthManager.Infrastructure.Migrations
                 columns: new[] { "OrganisationMembershipId", "PermissionKey" },
                 unique: true,
                 filter: "\"RevokedAtUtc\" IS NULL");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_MembershipPermissionGrants_RevokedByMembershipId_Organisati~",
-                table: "MembershipPermissionGrants",
-                columns: new[] { "RevokedByMembershipId", "OrganisationId" });
 
             migrationBuilder.Sql("""
                 ALTER TABLE public."MembershipPermissionGrants" ENABLE ROW LEVEL SECURITY;

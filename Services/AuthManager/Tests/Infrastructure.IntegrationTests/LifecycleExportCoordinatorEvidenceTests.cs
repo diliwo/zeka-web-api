@@ -11,6 +11,7 @@ using AuthManager.Infrastructure.Identity.Models;
 using AuthManager.Infrastructure.Lifecycle;
 using AuthManager.Infrastructure.Persistence;
 using AuthManager.Infrastructure.Persistence.Lifecycle;
+using AuthManager.Infrastructure.Persistence.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -300,6 +301,20 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
     public async Task Membership_write_started_before_auth_fence_commits_before_snapshot_and_is_exported()
     {
         var environment = await CreateEnvironmentAsync();
+        var grantClock = new ManualTimeProvider(Now.AddSeconds(5));
+        var grants = new MembershipPermissionGrants(
+            new MembershipPermissionGrantStore(Options(environment.RuntimeConnection), grantClock));
+        var grantRequest = new MembershipPermissionGrantRequest(
+            environment.OwnerUserId, environment.OwnerMembershipId, OrganisationId,
+            environment.AdminMembershipId, TenantPermissions.OrganisationExport, "life01-export-grant");
+        Assert.Equal(MembershipPermissionGrantStatus.Granted,
+            (await grants.GrantAsync(grantRequest)).Status);
+        grantClock.UtcNow = Now.AddSeconds(10);
+        Assert.Equal(MembershipPermissionGrantStatus.Revoked,
+            (await grants.RevokeAsync(grantRequest with { CorrelationId = "life01-export-revoke" })).Status);
+        grantClock.UtcNow = Now.AddSeconds(15);
+        Assert.Equal(MembershipPermissionGrantStatus.Granted,
+            (await grants.GrantAsync(grantRequest with { CorrelationId = "life01-export-regrant" })).Status);
         var registry = Registry();
         await using (var activation = new AuthDbContext(Options(environment.MigratorConnection)))
         {
@@ -379,6 +394,10 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
         var membership = fragment.Categories.Single(x => x.Category == AuthExportInventoryV1.Memberships);
         var csv = Encoding.UTF8.GetString((await artifactStore.ReadAsync(membership.ArtifactReference!, default)).Span);
         Assert.Contains(PermissionSet.OrganisationAdministratorId.ToString("D"), csv, StringComparison.Ordinal);
+        var adminRow = Assert.Single(csv.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.StartsWith(environment.AdminMembershipId.ToString("D"), StringComparison.Ordinal)));
+        Assert.EndsWith(",Organisations.Export", adminRow, StringComparison.Ordinal);
+        Assert.Equal(1, adminRow.Split("Organisations.Export", StringSplitOptions.None).Length - 1);
     }
 
     private static async Task<OrganisationExportFragmentReadyV1> Fragment(Guid operationId,
@@ -432,17 +451,22 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
         await Execute(administrator, Bootstrap());
 
         var owner = User.Create("life01-owner@example.invalid", "life01-owner", "Synthetic", "Owner", Now);
+        var admin = User.Create("life01-admin@example.invalid", "life01-admin", "Synthetic", "Admin", Now);
         owner.EmailConfirmed = true;
+        admin.EmailConfirmed = true;
         var organisation = Organisation.Create(OrganisationId, "Synthetic LIFE-01", owner.Id, Now);
         Assert.True(organisation.Activate(Now));
         var membership = OrganisationMembership.CreateOwner(Guid.NewGuid(), OrganisationId, owner.Id, Now);
+        var adminMembership = OrganisationMembership.Create(Guid.NewGuid(), OrganisationId, admin.Id,
+            PermissionSet.OrganisationAdministratorId, Now);
         await using (var database = new AuthDbContext(Options(runtime)))
         {
-            database.AddRange(owner, organisation, membership);
+            database.AddRange(owner, admin, organisation, membership, adminMembership);
             database.Entry(owner).Property(x => x.Status).CurrentValue = UserStatus.Active;
+            database.Entry(admin).Property(x => x.Status).CurrentValue = UserStatus.Active;
             await database.SaveChangesAsync();
         }
-        return new(migrator, runtime, owner.Id, membership.Id);
+        return new(migrator, runtime, owner.Id, membership.Id, adminMembership.Id);
     }
 
     private static LifecycleRegistry Registry()
@@ -592,5 +616,5 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
     }
 
     private sealed record TestEnvironment(string MigratorConnection, string RuntimeConnection,
-        Guid OwnerUserId, Guid OwnerMembershipId);
+        Guid OwnerUserId, Guid OwnerMembershipId, Guid AdminMembershipId);
 }

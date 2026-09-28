@@ -89,7 +89,9 @@ ALTER DEFAULT PRIVILEGES FOR ROLE zeka_client_owner IN SCHEMA zeka REVOKE ALL ON
 ALTER DEFAULT PRIVILEGES FOR ROLE zeka_client_owner IN SCHEMA zeka REVOKE ALL ON TYPES FROM PUBLIC, zeka_client_migrator, zeka_client_runtime;
 DO $existing_objects$
 DECLARE object_name text;
+        lifecycle_object record;
         column_grant record;
+        update_list text;
 BEGIN
   FOREACH object_name IN ARRAY ARRAY[
     'Clients','SocialWorkers','SocialCases','Assessments','ProfessionalAssessments',
@@ -99,34 +101,44 @@ BEGIN
       EXECUTE pg_catalog.format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO zeka_client_runtime', object_name);
     END IF;
   END LOOP;
-  FOREACH object_name IN ARRAY ARRAY[
-    'OrganisationExportFences','OrganisationExportFragments','OrganisationExportInbox','OrganisationExportOutbox'
-  ] LOOP
-    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
-      EXECUTE pg_catalog.format('REVOKE ALL ON TABLE public.%I FROM PUBLIC, zeka_client_runtime', object_name);
+  FOR lifecycle_object IN
+    SELECT * FROM (VALUES
+      ('OrganisationExportFences', ARRAY['ReleasedAt']::text[]),
+      ('OrganisationExportFragments', ARRAY[]::text[]),
+      ('OrganisationExportInbox', ARRAY[]::text[]),
+      ('OrganisationExportOutbox', ARRAY[]::text[])
+    ) AS inventory(name, update_columns)
+  LOOP
+    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', lifecycle_object.name)) IS NOT NULL THEN
+      EXECUTE pg_catalog.format(
+        'REVOKE ALL ON TABLE public.%I FROM PUBLIC, zeka_client_runtime', lifecycle_object.name);
       FOR column_grant IN
         SELECT DISTINCT attribute.attname, acl.grantee,
           pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
         FROM pg_catalog.pg_attribute attribute
         JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
         CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
-        WHERE relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
+        WHERE relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', lifecycle_object.name))
           AND attribute.attnum>0 AND NOT attribute.attisdropped
           AND acl.grantee<>relation.relowner
       LOOP
         EXECUTE pg_catalog.format(
           'REVOKE ALL (%I) ON TABLE public.%I FROM %s CASCADE',
-          column_grant.attname, object_name,
+          column_grant.attname, lifecycle_object.name,
           CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
             ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
       END LOOP;
       EXECUTE pg_catalog.format(
-        'GRANT SELECT, INSERT ON TABLE public.%I TO zeka_client_runtime', object_name);
+        'GRANT SELECT, INSERT ON TABLE public.%I TO zeka_client_runtime', lifecycle_object.name);
+      IF pg_catalog.cardinality(lifecycle_object.update_columns) > 0 THEN
+        SELECT pg_catalog.string_agg(pg_catalog.quote_ident(column_name), ', ')
+          INTO update_list FROM pg_catalog.unnest(lifecycle_object.update_columns) column_name;
+        EXECUTE pg_catalog.format(
+          'GRANT UPDATE (%s) ON TABLE public.%I TO zeka_client_runtime',
+          update_list, lifecycle_object.name);
+      END IF;
     END IF;
   END LOOP;
-  IF pg_catalog.to_regclass('public."OrganisationExportFences"') IS NOT NULL THEN
-    GRANT UPDATE ("ReleasedAt") ON TABLE public."OrganisationExportFences" TO zeka_client_runtime;
-  END IF;
   FOREACH object_name IN ARRAY ARRAY[
     'Languages','NatureOfContract','Profession','School','Training','TrainingField','TrainingType'
   ] LOOP

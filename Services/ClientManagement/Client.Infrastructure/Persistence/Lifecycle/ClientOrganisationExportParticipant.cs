@@ -169,8 +169,8 @@ public sealed class ClientOrganisationExportParticipant(
     {
         PostgresException { SqlState: PostgresErrorCodes.UniqueViolation
             or PostgresErrorCodes.SerializationFailure } => true,
-        DbUpdateException { InnerException: not null } update => IsRetryable(update.InnerException),
-        InvalidOperationException { InnerException: not null } wrapper => IsRetryable(wrapper.InnerException),
+        DbUpdateException { InnerException: not null } update => IsRetryable(update.InnerException!),
+        InvalidOperationException { InnerException: not null } wrapper => IsRetryable(wrapper.InnerException!),
         _ => false
     };
 
@@ -206,8 +206,63 @@ public sealed class ClientOrganisationExportParticipant(
             organisation, token);
 
     private async Task<MaterializedCategory> Assessments(Guid organisation, CancellationToken token)
-        => await QueryCsv("structured-assessments", ["id", "beneficiary_id", "is_finalized", "soft_deleted"],
-            """SELECT "AssessmentId"::text, "ClientId"::text, CASE WHEN "IsFinalized" THEN 'true' ELSE 'false' END, CASE WHEN "Softdelete" THEN 'true' ELSE 'false' END FROM public."Assessments" WHERE "OrganisationId" = @organisation_id ORDER BY "AssessmentId";""",
+        => await QueryCsv("structured-assessments",
+            [
+                "assessment_id", "beneficiary_id", "is_finalized", "recorded_by",
+                "personal_situation_family", "personal_situation_housing", "personal_situation_health",
+                "personal_situation_financial", "personal_situation_administrative_status",
+                "language_training_note", "training_difficulty", "training_opinion",
+                "training_facilities_and_strengths", "training_personal_improvements",
+                "training_consultant_note", "training_consultant_language_learning_note",
+                "professional_experience_problem_encountered", "professional_experience_rewarding",
+                "professional_experience_knowledge", "professional_experience_point_to_improve",
+                "professional_experience_note", "working_conditions_wanted", "working_conditions_unwanted",
+                "working_conditions_motivations", "working_conditions_consultant_note",
+                "short_term_expectation_a", "short_term_expectation_b", "medium_term_expectation",
+                "long_term_expectation", "nl_oral_score", "nl_written_score", "fr_oral_score",
+                "fr_written_score", "it_email", "it_internet", "it_word",
+                "professional_assessment_id", "profession_id", "acquired_knowledge",
+                "acquired_behavioural_knowledge", "acquired_know_how", "knowledge_to_develop",
+                "behavioural_knowledge_to_develop", "know_how_to_develop", "soft_deleted"
+            ],
+            """
+            SELECT assessment."AssessmentId"::text, assessment."ClientId"::text,
+              CASE WHEN assessment."IsFinalized" THEN 'true' ELSE 'false' END,
+              assessment."UserName", assessment."PersonalSituationFamily", assessment."PersonalSituationHousing",
+              assessment."PersonalSituationHealth", assessment."PersonalSituationFinancialSituation",
+              assessment."PersonalSituationAdministrativeStatus", assessment."LanguageTrainingNote",
+              assessment."TrainingDifficulty", assessment."TrainingOpinion",
+              assessment."TrainingFacilitiesAndStrengths", assessment."TrainingPersonalImprovments",
+              assessment."TrainingConsultantNote", assessment."TrainingConsultantLanguageLearningNote",
+              assessment."ProfessionalExperienceProblemEncountered",
+              assessment."ProfessionalExperienceWhatsRewarding", assessment."ProfessionalExperienceKnowledge",
+              assessment."ProfessionalExperiencePointToImprove", assessment."ProfessionalExperienceNote",
+              assessment."ProfessionalExpectationWorkingConditionWhatIWant",
+              assessment."ProfessionalExpectationWorkingConditionWhatIDontWant",
+              assessment."ProfessionalExpectationWorkingConditionWhatMotivatesMe",
+              assessment."ProfessionalExpectationWorkingConditionConsultantNote",
+              assessment."ProfessionalExpectationShortTermA", assessment."ProfessionalExpectationShortTermB",
+              assessment."ProfessionalExpectationMediumTerm", assessment."ProfessionalExpectationLongTerm",
+              assessment."ProfessionalExpectationNlOralLanguageScore"::text,
+              assessment."ProfessionalExpectationNlWrittentLanguageScore"::text,
+              assessment."ProfessionalExpectationFrOralLanguageScore"::text,
+              assessment."ProfessionalExpectationFrWrittenLanguageScore"::text,
+              CASE WHEN assessment."ProfessionalExpectationItKnowledgeEmail" THEN 'true' ELSE 'false' END,
+              CASE WHEN assessment."ProfessionalExpectationItKnowledgeInternet" THEN 'true' ELSE 'false' END,
+              CASE WHEN assessment."ProfessionalExpectationItKnowledgeWord" THEN 'true' ELSE 'false' END,
+              profession."Id"::text, profession."ProfessionId"::text,
+              profession."AcquiredKnowledge", profession."AcquiredBehaviouralKnowledge",
+              profession."AcquiredKnowHow", profession."KnowledgeToDevelop",
+              profession."BehaviouralKnowledgeToDevelop", profession."KnowHowToDevelop",
+              CASE WHEN assessment."Softdelete" OR COALESCE(profession."Softdelete", false)
+                   THEN 'true' ELSE 'false' END
+            FROM public."Assessments" assessment
+            LEFT JOIN public."ProfessionalAssessments" profession
+              ON profession."AssessmentId" = assessment."AssessmentId"
+             AND profession."OrganisationId" = assessment."OrganisationId"
+            WHERE assessment."OrganisationId" = @organisation_id
+            ORDER BY assessment."AssessmentId", profession."Id";
+            """,
             organisation, token);
 
     private async Task<MaterializedCategory> Reports(Guid organisation, CancellationToken token)

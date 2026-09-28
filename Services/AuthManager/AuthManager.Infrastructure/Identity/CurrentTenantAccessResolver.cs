@@ -21,7 +21,8 @@ public sealed class CurrentTenantAccessResolver(AuthDbContext database, TimeProv
 
         await using var transaction = await database.Database.BeginTransactionAsync(
             IsolationLevel.RepeatableRead, cancellationToken);
-        await InitializeTenantContextAsync(database, transaction, selectedOrganisationId, cancellationToken);
+        await TenantContextInitializer.InitializeAsync(
+            database, transaction, selectedOrganisationId, cancellationToken);
 
         // A repeatable-read database observation avoids assembling an authorization decision from stale claims
         // or independently cached organisation, membership, role, and explicit-grant records.
@@ -54,7 +55,8 @@ public sealed class CurrentTenantAccessResolver(AuthDbContext database, TimeProv
             .ThenBy(grant => grant.Id)
             .Select(grant => new { grant.Id, grant.PermissionKey, grant.ConcurrencyVersion })
             .ToListAsync(cancellationToken);
-        if (explicitGrants.Any(grant => !TenantPermissions.IsKnown(grant.PermissionKey)))
+        if (explicitGrants.Any(grant =>
+                !TenantPermissions.IsExplicitGrantAllowed(match.Role, grant.PermissionKey)))
             return CurrentTenantAccess.Denied(now);
         var effectivePermissions = permissions.Concat(explicitGrants.Select(grant => grant.PermissionKey))
             .Distinct(StringComparer.Ordinal)
@@ -68,27 +70,4 @@ public sealed class CurrentTenantAccessResolver(AuthDbContext database, TimeProv
             $"v2:{match.OrganisationVersion}:{match.MembershipVersion}:{match.Role}:{grantVersion}", now);
     }
 
-    private static async Task InitializeTenantContextAsync(
-        AuthDbContext database,
-        IDbContextTransaction transaction,
-        Guid organisationId,
-        CancellationToken cancellationToken)
-    {
-        if (!database.Database.IsNpgsql())
-        {
-            return;
-        }
-
-        await using var command = database.Database.GetDbConnection().CreateCommand();
-        command.Transaction = transaction.GetDbTransaction();
-        command.CommandText = "select pg_catalog.set_config('zeka.organisation_id', @organisation_id, true)";
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = "organisation_id";
-        parameter.Value = organisationId.ToString("D");
-        command.Parameters.Add(parameter);
-        if (!Equals(await command.ExecuteScalarAsync(cancellationToken), parameter.Value))
-        {
-            throw new InvalidOperationException("Authorization tenant context initialization failed.");
-        }
-    }
 }

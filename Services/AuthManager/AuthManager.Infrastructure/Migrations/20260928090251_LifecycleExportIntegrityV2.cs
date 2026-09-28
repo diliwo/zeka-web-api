@@ -100,31 +100,24 @@ namespace AuthManager.Infrastructure.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
-            migrationBuilder.CreateIndex(
-                name: "IX_AuthExportParticipantExecutions_OperationId_OrganisationId",
-                table: "AuthExportParticipantExecutions",
-                columns: new[] { "OperationId", "OrganisationId" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_AuthExportParticipantInbox_OperationId_MessageType",
-                table: "AuthExportParticipantInbox",
-                columns: new[] { "OperationId", "MessageType" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_AuthExportParticipantInbox_OperationId_OrganisationId",
-                table: "AuthExportParticipantInbox",
-                columns: new[] { "OperationId", "OrganisationId" });
+            foreach (var (name, table, columns) in new[]
+                     {
+                         ("IX_AuthExportParticipantExecutions_OperationId_OrganisationId",
+                             "AuthExportParticipantExecutions", new[] { "OperationId", "OrganisationId" }),
+                         ("IX_AuthExportParticipantInbox_OperationId_MessageType",
+                             "AuthExportParticipantInbox", new[] { "OperationId", "MessageType" }),
+                         ("IX_AuthExportParticipantInbox_OperationId_OrganisationId",
+                             "AuthExportParticipantInbox", new[] { "OperationId", "OrganisationId" }),
+                         ("IX_AuthExportParticipantOutbox_OperationId_OrganisationId",
+                             "AuthExportParticipantOutbox", new[] { "OperationId", "OrganisationId" })
+                     })
+                migrationBuilder.CreateIndex(name: name, table: table, columns: columns);
 
             migrationBuilder.CreateIndex(
                 name: "IX_AuthExportParticipantOutbox_OperationId_MessageType",
                 table: "AuthExportParticipantOutbox",
                 columns: new[] { "OperationId", "MessageType" },
                 unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_AuthExportParticipantOutbox_OperationId_OrganisationId",
-                table: "AuthExportParticipantOutbox",
-                columns: new[] { "OperationId", "OrganisationId" });
 
             foreach (var table in new[]
                      { "AuthExportParticipantExecutions", "AuthExportParticipantInbox", "AuthExportParticipantOutbox" })
@@ -222,22 +215,15 @@ namespace AuthManager.Infrastructure.Migrations
                   ON public."MembershipPermissionGrants";
                 """);
 
-            migrationBuilder.DropTable(
-                name: "AuthExportParticipantExecutions");
+            foreach (var table in new[]
+                     {
+                         "AuthExportParticipantExecutions", "AuthExportParticipantInbox",
+                         "AuthExportParticipantOutbox"
+                     })
+                migrationBuilder.DropTable(name: table);
 
-            migrationBuilder.DropTable(
-                name: "AuthExportParticipantInbox");
-
-            migrationBuilder.DropTable(
-                name: "AuthExportParticipantOutbox");
-
-            migrationBuilder.DropColumn(
-                name: "ExportInventoryHash",
-                table: "OrganisationLifecycleOperations");
-
-            migrationBuilder.DropColumn(
-                name: "ExportInventoryJson",
-                table: "OrganisationLifecycleOperations");
+            foreach (var column in new[] { "ExportInventoryHash", "ExportInventoryJson" })
+                migrationBuilder.DropColumn(name: column, table: "OrganisationLifecycleOperations");
 
             migrationBuilder.Sql("RESET ROLE;");
         }
