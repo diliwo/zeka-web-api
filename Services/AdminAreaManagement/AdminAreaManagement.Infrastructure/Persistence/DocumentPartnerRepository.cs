@@ -104,7 +104,9 @@ namespace AdminAreaManagement.Infrastructure.Persistence
                 ?? throw new InvalidOperationException("Pending document content is missing.");
             _postCommit.Enqueue(
                 () => _fileService.SaveFile(document.OrganisationId, document.Id, document.PartnerId, content),
-                () => _context.Update(document),
+                () => PrepareFileRecovery(document,
+                    nameof(DocumentPartner.FileWriteState), nameof(DocumentPartner.FileWriteAttempts),
+                    nameof(DocumentPartner.FileWriteFailureCode), nameof(DocumentPartner.PendingFileContent)),
                 document.CompleteFileWrite, document.FailFileWrite, document.PendFileWrite);
         }
 
@@ -114,8 +116,25 @@ namespace AdminAreaManagement.Infrastructure.Persistence
                 throw new InvalidOperationException("Durable document delivery requires the tenant post-commit executor.");
             _postCommit.Enqueue(
                 () => _fileService.DeleteFile(document.OrganisationId, document.Id, document.PartnerId),
-                () => _context.Update(document),
+                () => PrepareFileRecovery(document,
+                    nameof(DocumentPartner.FileDeleteState), nameof(DocumentPartner.FileDeleteAttempts),
+                    nameof(DocumentPartner.FileDeleteFailureCode)),
                 document.CompleteFileDelete, document.FailFileDelete, document.PendFileDelete);
+        }
+
+        private void PrepareFileRecovery(DocumentPartner document, params string[] properties)
+        {
+            var entry = _context.Entry(document);
+            var recoveryValues = properties.ToDictionary(property => property,
+                property => entry.Property(property).CurrentValue);
+            if (entry.State == Microsoft.EntityFrameworkCore.EntityState.Detached)
+                _context.Attach(document);
+            entry.State = Microsoft.EntityFrameworkCore.EntityState.Unchanged;
+            foreach (var property in properties)
+            {
+                entry.Property(property).CurrentValue = recoveryValues[property];
+                entry.Property(property).IsModified = true;
+            }
         }
 
     }

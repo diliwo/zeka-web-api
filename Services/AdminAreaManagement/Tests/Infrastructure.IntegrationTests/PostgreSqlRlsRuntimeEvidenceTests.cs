@@ -23,6 +23,7 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
 {
     private const string MigratorPassword = "test-migrator-password";
     private const string RuntimePassword = "test-runtime-password";
+    private const string RecoveryPassword = "test-recovery-password";
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
     private int nextPartnerNumber = 9000;
 
@@ -46,6 +47,12 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
         Password = MigratorPassword
     }.ConnectionString;
 
+    public string RecoveryConnectionString => new NpgsqlConnectionStringBuilder(postgres.GetConnectionString())
+    {
+        Username = "zeka_adminarea_closure_recovery_test",
+        Password = RecoveryPassword
+    }.ConnectionString;
+
     public string DatabaseName => new NpgsqlConnectionStringBuilder(postgres.GetConnectionString()).Database!;
 
     public string AdministratorConnectionString => postgres.GetConnectionString();
@@ -57,6 +64,7 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
         await ExecuteAdministratorAsync(ReadBootstrapScript());
         await ExecuteAdministratorAsync($"ALTER ROLE zeka_adminarea_migrator PASSWORD '{MigratorPassword}'; ALTER ROLE zeka_adminarea_runtime PASSWORD '{RuntimePassword}';");
         await ApplyAllMigrationsAsMigratorAsync();
+        await ReapplyBootstrapAsync();
     }
 
     public Task DisposeAsync() => postgres.DisposeAsync().AsTask();
@@ -116,7 +124,8 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
         var pending = (await deployment.Database.GetPendingMigrationsAsync()).ToArray();
         if (!pending.SequenceEqual([
                 "20260917212648_DurableDocumentFileOperations",
-                "20260928074338_Life01AdminAreaExportParticipant"
+                "20260928074338_Life01AdminAreaExportParticipant",
+                "20260928150135_Life02AdminAreaClosureParticipant"
             ], StringComparer.Ordinal))
             throw new InvalidOperationException(
                 $"Supported upgrade checkpoint drifted: [{string.Join(", ", pending)}].");
@@ -136,6 +145,24 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
     }
 
     public Task ReapplyBootstrapAsync() => ExecuteAdministratorAsync(ReadBootstrapScript());
+
+    public Task ProvisionNonProductionRecoveryIdentityAsync() => ExecuteAdministratorAsync($"""
+        DO $test_identity$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT FROM pg_catalog.pg_roles
+            WHERE rolname='zeka_adminarea_closure_recovery_test') THEN
+            CREATE ROLE zeka_adminarea_closure_recovery_test
+              LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+          END IF;
+        END $test_identity$;
+        ALTER ROLE zeka_adminarea_closure_recovery_test
+          LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION
+          PASSWORD '{RecoveryPassword}';
+        ALTER ROLE zeka_adminarea_closure_recovery_test RESET ALL;
+        GRANT zeka_adminarea_closure_recovery TO zeka_adminarea_closure_recovery_test
+          WITH INHERIT TRUE, SET TRUE, ADMIN FALSE;
+        """);
 
     public async Task<string> RequireBackupToolAsync(string executable)
     {
@@ -179,6 +206,9 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
 {
     private static readonly string[] ProtectedTables =
     [
+        "AdminAreaClosureFences",
+        "AdminAreaClosureInbox",
+        "AdminAreaClosureOutbox",
         "AdminAreaExportFences",
         "AdminAreaExportFragments",
         "AdminAreaExportInbox",
@@ -204,7 +234,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         var applied = new List<string>();
         while (await reader.ReadAsync()) applied.Add(reader.GetString(0));
         Assert.Contains("20260912180000_PostgreSqlRlsAndRuntimeRoles", applied);
-        Assert.Equal("20260928074338_Life01AdminAreaExportParticipant", applied[^1]);
+        Assert.Equal("20260928150135_Life02AdminAreaClosureParticipant", applied[^1]);
     }
 
     [Fact]
@@ -414,6 +444,22 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         await using var deployment = new DeploymentDbContext(
             new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(database.MigratorConnectionString).Options);
         await RlsSecurityManifestVerifier.VerifyAsync(deployment, typeof(ApplicationDbContext).Assembly);
+
+        Assert.Equal(1L, await ExecuteAdministratorScalarAsync<long>("""
+            SELECT count(*)
+            FROM pg_catalog.pg_trigger trigger
+            JOIN pg_catalog.pg_class relation ON relation.oid=trigger.tgrelid
+            JOIN pg_catalog.pg_namespace relation_schema ON relation_schema.oid=relation.relnamespace
+            JOIN pg_catalog.pg_proc function ON function.oid=trigger.tgfoid
+            JOIN pg_catalog.pg_namespace function_schema ON function_schema.oid=function.pronamespace
+            WHERE relation_schema.nspname='public'
+              AND relation.relname='StaffProjectionOutbox'
+              AND trigger.tgname='trg_closure_fence_staffprojectionoutbox'
+              AND trigger.tgenabled='O'
+              AND NOT trigger.tgisinternal
+              AND function_schema.nspname='zeka'
+              AND function.proname='reject_adminarea_write_during_closure'
+            """));
     }
 
     [Fact]
@@ -484,6 +530,13 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
             ALTER ROLE zeka_adminarea_owner IN DATABASE {databaseIdentifier} SET application_name='unexpected';
             ALTER ROLE zeka_adminarea_migrator IN DATABASE {databaseIdentifier} SET application_name='unexpected';
             ALTER ROLE zeka_adminarea_runtime IN DATABASE {databaseIdentifier} SET application_name='unexpected';
+            ALTER ROLE zeka_adminarea_closure_recovery IN DATABASE {databaseIdentifier} SET application_name='unexpected';
+            ALTER ROLE zeka_adminarea_closure_recovery LOGIN BYPASSRLS CREATEDB CREATEROLE INHERIT REPLICATION;
+            GRANT CREATE, TEMPORARY ON DATABASE {databaseIdentifier} TO zeka_adminarea_closure_recovery;
+            GRANT CREATE, USAGE ON SCHEMA public, zeka TO zeka_adminarea_closure_recovery;
+            GRANT zeka_adminarea_closure_recovery TO zeka_adminarea_runtime WITH ADMIN OPTION;
+            GRANT ALL ON TABLE public."Teams" TO zeka_adminarea_closure_recovery;
+            GRANT ALL ON SEQUENCE public."Teams_Id_seq" TO zeka_adminarea_closure_recovery;
             """);
 
         await database.ReapplyBootstrapAsync();
@@ -494,7 +547,9 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
                JOIN pg_catalog.pg_roles r ON r.oid=s.setrole
                JOIN pg_catalog.pg_database d ON d.oid=s.setdatabase
                WHERE d.datname=pg_catalog.current_database()
-                 AND r.rolname=ANY(ARRAY['zeka_adminarea_owner','zeka_adminarea_migrator','zeka_adminarea_runtime']))
+                 AND r.rolname=ANY(ARRAY[
+                   'zeka_adminarea_owner','zeka_adminarea_migrator','zeka_adminarea_runtime',
+                   'zeka_adminarea_closure_recovery']))
               AND pg_catalog.has_table_privilege('zeka_adminarea_runtime','public."Teams"','SELECT')
               AND pg_catalog.has_table_privilege('zeka_adminarea_runtime','public."Teams"','INSERT')
               AND pg_catalog.has_table_privilege('zeka_adminarea_runtime','public."Teams"','UPDATE')
@@ -502,9 +557,35 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
               AND NOT pg_catalog.has_table_privilege('zeka_adminarea_runtime','public."__EFMigrationsHistory"','SELECT')
               AND NOT pg_catalog.has_table_privilege('zeka_adminarea_runtime','public.issue45_unknown_admin','SELECT')
               AND NOT pg_catalog.has_sequence_privilege('zeka_adminarea_runtime','public.issue45_unknown_admin_id_seq','USAGE')
+              AND NOT pg_catalog.has_table_privilege(
+                'zeka_adminarea_closure_recovery','public."Teams"','SELECT')
+              AND NOT pg_catalog.has_sequence_privilege(
+                'zeka_adminarea_closure_recovery','public."Teams_Id_seq"','USAGE')
+              AND NOT pg_catalog.pg_has_role(
+                'zeka_adminarea_runtime','zeka_adminarea_closure_recovery','MEMBER')
+              AND NOT pg_catalog.has_function_privilege(
+                'zeka_adminarea_runtime',
+                'zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)',
+                'EXECUTE')
+              AND pg_catalog.has_function_privilege(
+                'zeka_adminarea_closure_recovery',
+                'zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)',
+                'EXECUTE')
+              AND NOT pg_catalog.has_function_privilege(
+                'zeka_adminarea_closure_recovery',
+                'zeka.reject_adminarea_write_during_closure()', 'EXECUTE')
             """));
         await database.ExecuteAdministratorAsync("DROP TABLE public.issue45_unknown_admin");
         await VerifyCatalogAsync();
+        var exception = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand(
+                "GRANT zeka_adminarea_closure_recovery TO zeka_adminarea_runtime", connection);
+            await command.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, exception.SqlState);
     }
 
     [Fact]

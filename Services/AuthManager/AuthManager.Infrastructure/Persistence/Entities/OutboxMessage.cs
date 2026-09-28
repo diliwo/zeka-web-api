@@ -62,4 +62,20 @@ public sealed class OutboxMessage
         else
             NextAttemptAtUtc = nextAttemptAtUtc;
     }
+
+    public void Defer(DateTimeOffset nextAttemptAtUtc, string reason)
+    {
+        NextAttemptAtUtc = nextAttemptAtUtc;
+        LastError = reason;
+        LeaseId = null;
+        LeaseExpiresAtUtc = null;
+    }
+
+    public void MarkTerminallyRetained(DateTimeOffset now, string reason)
+    {
+        DeadLetteredAtUtc = now;
+        LastError = reason;
+        LeaseId = null;
+        LeaseExpiresAtUtc = null;
+    }
 }

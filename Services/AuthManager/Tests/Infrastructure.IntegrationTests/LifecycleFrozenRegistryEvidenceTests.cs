@@ -119,16 +119,18 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         output.WriteLine("Exact EF/live operation columns: " + live);
         var before = await Row(operation.Id);
         var workflowMutable = new[] { "State", "Revision", "SnapshotAt", "FenceEvidenceHash",
-            "PackageSha256", "PackageReference", "FailureCode", "CompletedAt", "IsActive" };
+            "PackageSha256", "PackageReference", "FailureCode", "CompletedAt", "IsActive",
+            "ClosingAt", "ArchivedAt", "ClosureFenceEvidenceHash" };
         foreach (var column in ef.Except(workflowMutable))
         {
             var property = model.Model.FindEntityType(typeof(LifecycleOperation))!.GetProperties()
                 .Single(p => p.GetColumnName(table) == column);
             var quoted = new NpgsqlCommandBuilder().QuoteIdentifier(column);
-            var change = property.ClrType == typeof(Guid) ? "'46000000-0000-0000-0000-000000009999'::uuid"
-                : property.ClrType == typeof(string) ? quoted + " || '-changed'"
-                : property.ClrType == typeof(bool) ? "NOT " + quoted
-                : property.ClrType == typeof(DateTimeOffset) ? quoted + " + interval '1 second'"
+            var valueType = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
+            var change = valueType == typeof(Guid) ? "'46000000-0000-0000-0000-000000009999'::uuid"
+                : valueType == typeof(string) ? quoted + " || '-changed'"
+                : valueType == typeof(bool) ? "NOT " + quoted
+                : valueType == typeof(DateTimeOffset) ? quoted + " + interval '1 second'"
                 : quoted + " + 1";
             var exception = await Assert.ThrowsAsync<PostgresException>(() => Runtime(Organisation,
                 $"UPDATE public.\"OrganisationLifecycleOperations\" SET {quoted}={change} WHERE \"Id\"='{operation.Id:D}'"));
@@ -191,7 +193,8 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         await using var model = Context("zeka_auth_migrator");
         var table = StoreObjectIdentifier.Table("OrganisationLifecycleOperations", null);
         var mutable = new[] { "State", "Revision", "SnapshotAt", "FenceEvidenceHash", "PackageSha256",
-            "PackageReference", "FailureCode", "CompletedAt", "IsActive" };
+            "PackageReference", "FailureCode", "CompletedAt", "IsActive", "ClosingAt", "ArchivedAt",
+            "ClosureFenceEvidenceHash" };
         var frozen = model.Model.FindEntityType(typeof(LifecycleOperation))!.GetProperties()
             .Select(p => p.GetColumnName(table)!).Except(mutable).Order(StringComparer.Ordinal);
         var mutations = frozen.Select(column =>
@@ -341,16 +344,18 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
     [Fact]
     public async Task Families_are_unique_and_export_is_denied_during_active_termination()
     {
-        Assert.True(await Activate(Registry(RevisionOne, "participant-original"), 0));
+        await EnsureActiveOrganisation(Organisation);
+        Assert.True(await Activate(ReviewedClosureRegistryV1.Create(), 0));
         var close = await Admit(Organisation, LifecycleOperationFamily.Termination, Guid.NewGuid());
         Assert.Equal(AdmissionStatus.Admitted, close.Status);
         Assert.Equal(AdmissionStatus.Conflict, (await Admit(Organisation, LifecycleOperationFamily.Termination, Guid.NewGuid())).Status);
         Assert.Equal(AdmissionStatus.Conflict, (await Admit(Organisation, LifecycleOperationFamily.Export, Guid.NewGuid())).Status);
         Assert.Equal(1L, await Runtime(Organisation, "SELECT count(*) FROM public.\"OrganisationLifecycleOperations\""));
         var other = Guid.NewGuid();
+        await EnsureActiveOrganisation(other);
         Assert.Equal(AdmissionStatus.Admitted, (await Admit(other, LifecycleOperationFamily.Export, Guid.NewGuid())).Status);
-        Assert.Equal(AdmissionStatus.Admitted, (await Admit(other, LifecycleOperationFamily.Termination, Guid.NewGuid())).Status);
-        Assert.Equal(2L, await Runtime(other, "SELECT count(*) FROM public.\"OrganisationLifecycleOperations\""));
+        Assert.Equal(AdmissionStatus.Conflict, (await Admit(other, LifecycleOperationFamily.Termination, Guid.NewGuid())).Status);
+        Assert.Equal(1L, await Runtime(other, "SELECT count(*) FROM public.\"OrganisationLifecycleOperations\""));
     }
 
     [Fact]
@@ -583,6 +588,23 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         new LifecycleAdmission(new CurrentAccess(), new LifecycleAdmissionStore(Options("zeka_auth_runtime"),
             TimeProvider.System, new FixtureExportInventory()))
             .AdmitAsync(Guid.Parse("46000000-0000-0000-0000-000000000010"), organisation, family, identity);
+
+    private async Task EnsureActiveOrganisation(Guid organisationId)
+    {
+        await using var owner = Context("zeka_auth_migrator");
+        await owner.Database.OpenConnectionAsync();
+        await owner.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+        var user = AuthManager.Infrastructure.Identity.Models.User.Create(
+            $"closure-{organisationId:N}@example.invalid", $"closure-{organisationId:N}",
+            "Closure", "Fixture", DateTimeOffset.UtcNow);
+        owner.Users.Add(user);
+        var now = DateTimeOffset.UtcNow;
+        var organisation = AuthManager.Core.Organisations.Organisation.Create(
+            organisationId, "Closure fixture", user.Id, now);
+        Assert.True(organisation.Activate(now));
+        owner.Organisations.Add(organisation);
+        await owner.SaveChangesAsync();
+    }
 
     private sealed class AdmissionReadBarrier : DbCommandInterceptor
     {

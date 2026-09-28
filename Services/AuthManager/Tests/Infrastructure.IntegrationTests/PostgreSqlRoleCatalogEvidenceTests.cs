@@ -111,6 +111,13 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
             ALTER ROLE zeka_auth_owner IN DATABASE {new NpgsqlCommandBuilder().QuoteIdentifier(new NpgsqlConnectionStringBuilder(postgres.GetConnectionString()).Database!)} SET application_name='unexpected';
             ALTER ROLE zeka_auth_migrator IN DATABASE {new NpgsqlCommandBuilder().QuoteIdentifier(new NpgsqlConnectionStringBuilder(postgres.GetConnectionString()).Database!)} SET application_name='unexpected';
             ALTER ROLE zeka_auth_runtime IN DATABASE {new NpgsqlCommandBuilder().QuoteIdentifier(new NpgsqlConnectionStringBuilder(postgres.GetConnectionString()).Database!)} SET application_name='unexpected';
+            ALTER ROLE zeka_auth_closure_recovery IN DATABASE {new NpgsqlCommandBuilder().QuoteIdentifier(new NpgsqlConnectionStringBuilder(postgres.GetConnectionString()).Database!)} SET application_name='unexpected';
+            ALTER ROLE zeka_auth_closure_recovery LOGIN BYPASSRLS CREATEDB CREATEROLE INHERIT REPLICATION;
+            GRANT CREATE, TEMPORARY ON DATABASE {new NpgsqlCommandBuilder().QuoteIdentifier(new NpgsqlConnectionStringBuilder(postgres.GetConnectionString()).Database!)} TO zeka_auth_closure_recovery;
+            GRANT CREATE, USAGE ON SCHEMA public, zeka TO zeka_auth_closure_recovery;
+            GRANT zeka_auth_closure_recovery TO zeka_auth_runtime WITH ADMIN OPTION;
+            GRANT ALL ON TABLE public."AspNetUsers" TO zeka_auth_closure_recovery;
+            GRANT ALL ON SEQUENCE public."AspNetUserClaims_Id_seq" TO zeka_auth_closure_recovery;
             """);
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
         Assert.True(await ExecuteAdministratorScalarAsync<bool>("""
@@ -119,7 +126,9 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
                JOIN pg_catalog.pg_roles r ON r.oid=s.setrole
                JOIN pg_catalog.pg_database d ON d.oid=s.setdatabase
                WHERE d.datname=pg_catalog.current_database()
-                 AND r.rolname=ANY(ARRAY['zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime']))
+                 AND r.rolname=ANY(ARRAY[
+                   'zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime',
+                   'zeka_auth_closure_recovery']))
               AND pg_catalog.has_table_privilege('zeka_auth_runtime','public."AspNetUsers"','SELECT')
               AND pg_catalog.has_table_privilege('zeka_auth_runtime','public."AspNetUsers"','INSERT')
               AND pg_catalog.has_table_privilege('zeka_auth_runtime','public."AspNetUsers"','UPDATE')
@@ -127,9 +136,17 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
               AND NOT pg_catalog.has_table_privilege('zeka_auth_runtime','public."__EFMigrationsHistory"','SELECT')
               AND NOT pg_catalog.has_table_privilege('zeka_auth_runtime','public.issue45_unknown_auth','SELECT')
               AND NOT pg_catalog.has_sequence_privilege('zeka_auth_runtime','public.issue45_unknown_auth_id_seq','USAGE')
+              AND NOT pg_catalog.has_table_privilege(
+                'zeka_auth_closure_recovery','public."AspNetUsers"','SELECT')
+              AND NOT pg_catalog.has_sequence_privilege(
+                'zeka_auth_closure_recovery','public."AspNetUserClaims_Id_seq"','USAGE')
+              AND NOT pg_catalog.pg_has_role(
+                'zeka_auth_runtime','zeka_auth_closure_recovery','MEMBER')
             """));
         await ExecuteAdministratorAsync("DROP TABLE public.issue45_unknown_auth");
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(AuthDbContext).Assembly);
+        await AssertInsufficientPrivilegeAsync(runtimeConnection,
+            "GRANT zeka_auth_closure_recovery TO zeka_auth_runtime");
 
         await ExecuteAdministratorAsync("""
             CREATE FUNCTION zeka.issue46_unknown_function() RETURNS integer
@@ -141,12 +158,17 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
             GRANT CREATE, USAGE ON SCHEMA zeka TO zeka_auth_runtime;
             GRANT ALL ON ALL TABLES IN SCHEMA public, zeka TO zeka_auth_runtime;
             GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public, zeka TO zeka_auth_runtime;
+            GRANT SELECT ON TABLE public."AuthClosureParticipantInbox" TO zeka_auth_migrator;
+            GRANT UPDATE ("PayloadSha256") ON TABLE public."AuthClosureParticipantInbox" TO zeka_auth_migrator;
+            GRANT EXECUTE ON FUNCTION zeka.reject_auth_owned_write_during_closure_fence()
+              TO zeka_auth_migrator;
             """);
 
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
 
         Assert.True(await ExecuteAdministratorScalarAsync<bool>(ExactLifecycleTablePrivilegesSql));
+        Assert.True(await ExecuteAdministratorScalarAsync<bool>(ExactLifecycleColumnPrivilegesSql));
         Assert.True(await ExecuteAdministratorScalarAsync<bool>("""
             SELECT
               pg_catalog.has_schema_privilege('zeka_auth_runtime', 'public', 'USAGE')
@@ -160,7 +182,56 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
                 WHERE n.nspname=ANY(ARRAY['public','zeka'])
                   AND pg_catalog.has_function_privilege('zeka_auth_runtime', p.oid, 'EXECUTE')
               ) = ARRAY['zeka.current_organisation_id',
-                        'zeka.reject_auth_membership_write_during_export_fence']
+                        'zeka.reject_auth_membership_write_during_export_fence',
+                        'zeka.reject_auth_organisation_write_during_closure_fence',
+                        'zeka.reject_auth_owned_write_during_closure_fence']
+              AND NOT pg_catalog.has_function_privilege(
+                'zeka_auth_runtime',
+                'zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamp with time zone)',
+                'EXECUTE')
+              AND pg_catalog.has_function_privilege(
+                'zeka_auth_closure_recovery',
+                'zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamp with time zone)',
+                'EXECUTE')
+              AND (
+                SELECT pg_catalog.array_agg(n.nspname || '.' || p.proname ORDER BY n.nspname, p.proname)
+                FROM pg_catalog.pg_proc p
+                JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname=ANY(ARRAY['public','zeka'])
+                  AND pg_catalog.has_function_privilege(
+                    'zeka_auth_closure_recovery', p.oid, 'EXECUTE')
+              ) = ARRAY['zeka.release_auth_closure_fence']
+              AND NOT EXISTS (
+                SELECT FROM pg_catalog.pg_proc p
+                JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+                CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) acl
+                LEFT JOIN pg_catalog.pg_roles grantee ON grantee.oid=acl.grantee
+                WHERE n.nspname='zeka'
+                  AND p.proname=ANY(ARRAY[
+                    'reject_auth_membership_write_during_export_fence',
+                    'reject_auth_organisation_write_during_closure_fence',
+                    'reject_auth_owned_write_during_closure_fence',
+                    'release_auth_closure_fence'])
+                  AND acl.grantee<>p.proowner
+                  AND (grantee.rolname IS DISTINCT FROM CASE
+                        WHEN p.proname='release_auth_closure_fence'
+                          THEN 'zeka_auth_closure_recovery'
+                        ELSE 'zeka_auth_runtime'
+                      END
+                    OR acl.privilege_type<>'EXECUTE'
+                    OR acl.is_grantable)
+              )
+              AND NOT EXISTS (
+                SELECT FROM pg_catalog.pg_proc p
+                JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname='zeka'
+                  AND p.proname=ANY(ARRAY[
+                    'reject_auth_membership_write_during_export_fence',
+                    'reject_auth_organisation_write_during_closure_fence',
+                    'reject_auth_owned_write_during_closure_fence',
+                    'release_auth_closure_fence'])
+                  AND pg_catalog.pg_get_userbyid(p.proowner)<>'zeka_auth_owner'
+              )
             """));
 
         await ExecuteAdministratorAsync("""
@@ -223,10 +294,8 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
     }
 
     private const string ExactLifecycleTablePrivilegesSql = """
-        WITH privilege_names(privilege) AS (
-          VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),('REFERENCES'),('TRIGGER')
-        ), expected(table_name, privilege) AS (
-          SELECT table_name, privilege
+        WITH expected(table_name, grantee, privilege, is_grantable) AS (
+          SELECT table_name, 'zeka_auth_runtime', privilege, false
           FROM unnest(ARRAY[
             'AspNetRoleClaims','AspNetRoles','AspNetUserClaims','AspNetUserLogins','AspNetUserRoles',
             'AspNetUserTokens','AspNetUsers','AuditEntries','IdempotencyRecords','OrganisationMemberships',
@@ -234,42 +303,91 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
           ]) table_name
           CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) privilege
           UNION ALL VALUES
-            ('LifecycleParticipantRegistryRevisions','SELECT'),
-            ('LifecycleParticipantRegistryBindings','SELECT'),
-            ('LifecycleParticipantRegistryActivation','SELECT'),
-            ('AuthExportParticipantExecutions','SELECT'),
-            ('AuthExportParticipantExecutions','INSERT'),
-            ('AuthExportParticipantInbox','SELECT'),
-            ('AuthExportParticipantInbox','INSERT'),
-            ('AuthExportParticipantOutbox','SELECT'),
-            ('AuthExportParticipantOutbox','INSERT'),
-            ('OrganisationLifecycleOperations','SELECT'),
-            ('OrganisationLifecycleOperations','INSERT'),
-            ('OrganisationLifecycleParticipants','SELECT'),
-            ('OrganisationLifecycleParticipants','INSERT'),
-            ('MembershipPermissionGrants','SELECT'),
-            ('MembershipPermissionGrants','INSERT'),
-            ('LifecycleCoordinatorLeases','SELECT'),
-            ('LifecycleCoordinatorLeases','INSERT'),
-            ('LifecycleExportFenceReceipts','SELECT'),
-            ('LifecycleExportFenceReceipts','INSERT'),
-            ('LifecycleExportFragments','SELECT'),
-            ('LifecycleExportFragments','INSERT'),
-            ('LifecycleExportPackages','SELECT'),
-            ('LifecycleExportPackages','INSERT'),
-            ('LifecycleInboxReceipts','SELECT'),
-            ('LifecycleInboxReceipts','INSERT')
-        ), actual(table_name, privilege) AS (
-          SELECT c.relname, privilege_names.privilege
+            ('__EFMigrationsHistory','zeka_auth_migrator','SELECT',false),
+            ('__EFMigrationsHistory','zeka_auth_migrator','INSERT',false),
+            ('__EFMigrationsHistory','zeka_auth_migrator','UPDATE',false),
+            ('__EFMigrationsHistory','zeka_auth_migrator','DELETE',false),
+            ('LifecycleParticipantRegistryRevisions','zeka_auth_runtime','SELECT',false),
+            ('LifecycleParticipantRegistryBindings','zeka_auth_runtime','SELECT',false),
+            ('LifecycleParticipantRegistryActivation','zeka_auth_runtime','SELECT',false),
+            ('AuthExportParticipantExecutions','zeka_auth_runtime','SELECT',false),
+            ('AuthExportParticipantExecutions','zeka_auth_runtime','INSERT',false),
+            ('AuthExportParticipantInbox','zeka_auth_runtime','SELECT',false),
+            ('AuthExportParticipantInbox','zeka_auth_runtime','INSERT',false),
+            ('AuthExportParticipantOutbox','zeka_auth_runtime','SELECT',false),
+            ('AuthExportParticipantOutbox','zeka_auth_runtime','INSERT',false),
+            ('AuthClosureParticipantExecutions','zeka_auth_runtime','SELECT',false),
+            ('AuthClosureParticipantExecutions','zeka_auth_runtime','INSERT',false),
+            ('AuthClosureParticipantInbox','zeka_auth_runtime','SELECT',false),
+            ('AuthClosureParticipantInbox','zeka_auth_runtime','INSERT',false),
+            ('AuthClosureParticipantOutbox','zeka_auth_runtime','SELECT',false),
+            ('AuthClosureParticipantOutbox','zeka_auth_runtime','INSERT',false),
+            ('OrganisationLifecycleOperations','zeka_auth_runtime','SELECT',false),
+            ('OrganisationLifecycleOperations','zeka_auth_runtime','INSERT',false),
+            ('OrganisationLifecycleParticipants','zeka_auth_runtime','SELECT',false),
+            ('OrganisationLifecycleParticipants','zeka_auth_runtime','INSERT',false),
+            ('MembershipPermissionGrants','zeka_auth_runtime','SELECT',false),
+            ('MembershipPermissionGrants','zeka_auth_runtime','INSERT',false),
+            ('LifecycleCoordinatorLeases','zeka_auth_runtime','SELECT',false),
+            ('LifecycleCoordinatorLeases','zeka_auth_runtime','INSERT',false),
+            ('LifecycleClosureFenceReceipts','zeka_auth_runtime','SELECT',false),
+            ('LifecycleClosureFenceReceipts','zeka_auth_runtime','INSERT',false),
+            ('LifecycleExportFenceReceipts','zeka_auth_runtime','SELECT',false),
+            ('LifecycleExportFenceReceipts','zeka_auth_runtime','INSERT',false),
+            ('LifecycleExportFragments','zeka_auth_runtime','SELECT',false),
+            ('LifecycleExportFragments','zeka_auth_runtime','INSERT',false),
+            ('LifecycleExportPackages','zeka_auth_runtime','SELECT',false),
+            ('LifecycleExportPackages','zeka_auth_runtime','INSERT',false),
+            ('LifecycleInboxReceipts','zeka_auth_runtime','SELECT',false),
+            ('LifecycleInboxReceipts','zeka_auth_runtime','INSERT',false)
+        ), actual(table_name, grantee, privilege, is_grantable) AS (
+          SELECT c.relname, COALESCE(grantee.rolname, 'PUBLIC'), acl.privilege_type, acl.is_grantable
           FROM pg_catalog.pg_class c
           JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-          CROSS JOIN privilege_names
+          CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) acl
+          LEFT JOIN pg_catalog.pg_roles grantee ON grantee.oid=acl.grantee
           WHERE n.nspname=ANY(ARRAY['public','zeka'])
             AND c.relkind IN ('r','p')
-            AND pg_catalog.has_table_privilege(
-              'zeka_auth_runtime',
-              pg_catalog.format('%I.%I', n.nspname, c.relname),
-              privilege_names.privilege)
+            AND acl.grantee<>c.relowner
+        )
+        SELECT NOT EXISTS (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+          AND NOT EXISTS (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+          AND NOT EXISTS (
+            SELECT FROM pg_catalog.pg_class c
+            JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname=ANY(ARRAY['public','zeka'])
+              AND c.relkind IN ('r','p')
+              AND pg_catalog.pg_get_userbyid(c.relowner)<>'zeka_auth_owner')
+        """;
+
+    private const string ExactLifecycleColumnPrivilegesSql = """
+        WITH expected(table_name, column_name, grantee, privilege, is_grantable) AS (
+          SELECT table_name, column_name, 'zeka_auth_runtime', 'UPDATE', false
+          FROM (VALUES
+            ('OrganisationLifecycleOperations', ARRAY['State','Revision','SnapshotAt','FenceEvidenceHash',
+              'PackageSha256','PackageReference','FailureCode','CompletedAt','IsActive','ClosingAt',
+              'ArchivedAt','ClosureFenceEvidenceHash']::text[]),
+            ('OrganisationLifecycleParticipants', ARRAY['State','FailureBoundaryDisposition','FailureCode','FailureRetryable','FailedAt']::text[]),
+            ('LifecycleCoordinatorLeases', ARRAY['LeaseId','ExpiresAt','Version']::text[]),
+            ('AuthExportParticipantExecutions', ARRAY['SnapshotAt','FenceEvidenceHash','FragmentHash',
+              'CategoriesJson','ReleasedAt','State']::text[]),
+            ('AuthClosureParticipantExecutions', ARRAY[]::text[]),
+            ('MembershipPermissionGrants', ARRAY['RevokedByMembershipId','RevokedBySubjectId',
+              'RevokedAtUtc','ConcurrencyVersion']::text[])
+          ) inventory(table_name, update_columns)
+          CROSS JOIN LATERAL pg_catalog.unnest(inventory.update_columns) column_name
+        ), actual(table_name, column_name, grantee, privilege, is_grantable) AS (
+          SELECT relation.relname, attribute.attname, COALESCE(grantee.rolname, 'PUBLIC'),
+            acl.privilege_type, acl.is_grantable
+          FROM pg_catalog.pg_attribute attribute
+          JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+          JOIN pg_catalog.pg_namespace namespace ON namespace.oid=relation.relnamespace
+          CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+          LEFT JOIN pg_catalog.pg_roles grantee ON grantee.oid=acl.grantee
+          WHERE namespace.nspname=ANY(ARRAY['public','zeka'])
+            AND relation.relkind IN ('r','p')
+            AND attribute.attnum>0 AND NOT attribute.attisdropped
+            AND acl.grantee<>relation.relowner
         )
         SELECT NOT EXISTS (SELECT * FROM actual EXCEPT SELECT * FROM expected)
           AND NOT EXISTS (SELECT * FROM expected EXCEPT SELECT * FROM actual)
@@ -292,14 +410,24 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
           AND NOT pg_catalog.has_database_privilege('zeka_auth_owner', pg_catalog.current_database(), 'CREATE')
           AND NOT pg_catalog.has_database_privilege('zeka_auth_migrator', pg_catalog.current_database(), 'CREATE')
           AND NOT pg_catalog.has_database_privilege('zeka_auth_runtime', pg_catalog.current_database(), 'CREATE')
+          AND NOT pg_catalog.has_database_privilege(
+            'zeka_auth_closure_recovery', pg_catalog.current_database(), 'CREATE')
           AND NOT pg_catalog.has_schema_privilege('zeka_auth_migrator', 'zeka', 'USAGE')
           AND NOT pg_catalog.has_schema_privilege('zeka_auth_migrator', 'zeka', 'CREATE')
           AND pg_catalog.has_schema_privilege('zeka_auth_runtime', 'zeka', 'USAGE')
           AND NOT pg_catalog.has_schema_privilege('zeka_auth_runtime', 'zeka', 'CREATE')
-          AND (SELECT pg_catalog.count(*)=1 FROM schema_acl)
+          AND pg_catalog.has_schema_privilege('zeka_auth_closure_recovery', 'zeka', 'USAGE')
+          AND NOT pg_catalog.has_schema_privilege('zeka_auth_closure_recovery', 'zeka', 'CREATE')
+          AND NOT pg_catalog.has_schema_privilege('zeka_auth_closure_recovery', 'public', 'USAGE')
+          AND (SELECT pg_catalog.count(*)=2 FROM schema_acl)
           AND EXISTS (
             SELECT FROM schema_acl
             WHERE grantee='zeka_auth_runtime'
+              AND privilege_type='USAGE'
+              AND NOT is_grantable)
+          AND EXISTS (
+            SELECT FROM schema_acl
+            WHERE grantee='zeka_auth_closure_recovery'
               AND privilege_type='USAGE'
               AND NOT is_grantable)
         """;

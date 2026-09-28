@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Diagnostics.Metrics;
 using AdminAreaManagement.Application.Staffs;
+using AdminAreaManagement.Application.Common.Authorization;
 using AdminAreaManagement.Core.Common;
 using AdminAreaManagement.Core.Entities;
 using AdminAreaManagement.Infrastructure.Persistence;
@@ -33,7 +34,8 @@ public sealed class StaffProjectionMessageConfiguration : IEntityTypeConfigurati
 }
 
 public sealed class StaffProjectionOutbox(ApplicationDbContext database, ITenantContextAccessor tenant,
-    IEventBus publisher, ILogger<StaffProjectionOutbox> logger, IConfiguration configuration) : IStaffProjectionOutbox
+    IEventBus publisher, ILogger<StaffProjectionOutbox> logger, IConfiguration configuration,
+    IAdminAreaClosureGate? closureGate = null) : IStaffProjectionOutbox
 {
     public const string DiagnosticsName = "AdminAreaManagement.StaffOutbox";
     private static readonly Meter Metrics = new(DiagnosticsName);
@@ -61,6 +63,11 @@ public sealed class StaffProjectionOutbox(ApplicationDbContext database, ITenant
             .ThenBy(x => x.Id).Take(100).ToListAsync(cancellationToken);
         foreach (var row in messages)
         {
+            // This executes inside the tenant transaction used by the dispatcher. The gate obtains
+            // the same organisation serialization lock as closure entry, so publication cannot race
+            // past a committed closure boundary.
+            if (closureGate is not null)
+                await closureGate.DemandOrdinaryAccessAsync(cancellationToken);
             PendingAge.Record(Math.Max(0, (DateTime.Now - row.Created).TotalSeconds));
             try
             {

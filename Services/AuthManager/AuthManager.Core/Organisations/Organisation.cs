@@ -70,6 +70,15 @@ public sealed class Organisation
         TransitionTo(OrganisationStatus.Closed, updatedAtUtc,
             OrganisationStatus.Pending, OrganisationStatus.Active, OrganisationStatus.Suspended);
 
+    public bool BeginClosure(DateTimeOffset closingAtUtc) =>
+        TransitionTo(OrganisationStatus.Closing, closingAtUtc, OrganisationStatus.Active);
+
+    public bool Archive(DateTimeOffset archivedAtUtc) =>
+        TransitionTo(OrganisationStatus.Archived, archivedAtUtc, OrganisationStatus.Closing);
+
+    public bool RecoverClosure(DateTimeOffset recoveredAtUtc) =>
+        TransitionTo(OrganisationStatus.Active, recoveredAtUtc, OrganisationStatus.Closing);
+
     private bool TransitionTo(
         OrganisationStatus target,
         DateTimeOffset updatedAtUtc,

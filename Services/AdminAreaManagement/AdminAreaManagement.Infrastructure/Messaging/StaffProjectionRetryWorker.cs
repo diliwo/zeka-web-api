@@ -82,7 +82,8 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
                 var database = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var outbox = new StaffProjectionOutbox(database, tenant,
                     scope.ServiceProvider.GetRequiredService<IEventBus>(),
-                    scope.ServiceProvider.GetRequiredService<ILogger<StaffProjectionOutbox>>(), configuration);
+                    scope.ServiceProvider.GetRequiredService<ILogger<StaffProjectionOutbox>>(), configuration,
+                    scope.ServiceProvider.GetRequiredService<IAdminAreaClosureGate>());
                 var transactions = scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
                 await transactions.ExecuteAsync(token =>
                     new DispatchStaffProjectionsCommand.Handler(outbox).Handle(new(), token), budget.Token);

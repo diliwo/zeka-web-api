@@ -59,6 +59,8 @@ public static class DependencyInjection
         services.TryAddSingleton<IExportPackageSink>(provider => provider.GetRequiredService<UnconfiguredExportStorage>());
         services.AddScoped<ILifecycleExportStore, Persistence.Lifecycle.LifecycleExportStore>();
         services.AddScoped<AuthExportParticipant>();
+        services.AddScoped<ILifecycleClosureStore, Persistence.Lifecycle.LifecycleClosureStore>();
+        services.AddScoped<AuthClosureParticipant>();
 
         if (configuration.GetValue<bool>($"{OutboxDispatcherOptions.SectionName}:Enabled"))
             services.AddHostedService<OutboxBackgroundService>();
@@ -73,6 +75,8 @@ public static class DependencyInjection
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IOutboxWriter, OutboxWriter>();
         services.TryAddScoped<IOutboxMessagePublisher, UnconfiguredOutboxMessagePublisher>();
+        services.TryAddScoped<IOutboxPublicationActivityClassifier,
+            LifecycleOutboxPublicationActivityClassifier>();
         services.AddScoped<IOutboxDispatcher, OutboxDispatcher>();
         services.Configure<OutboxDispatcherOptions>(
             configuration.GetSection(OutboxDispatcherOptions.SectionName));

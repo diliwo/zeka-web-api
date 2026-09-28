@@ -116,16 +116,30 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
         var organisation = tenant.Current.OrganisationId.Value;
         if (organisation == Guid.Empty) throw new InvalidOperationException("Tenant context is not established.");
         return await database.Database.CreateExecutionStrategy().ExecuteAsync(
-            () => ExecuteAttemptAsync(work, organisation, cancellationToken));
+            () => ExecuteAttemptAsync(work, organisation, ordinaryActivity: false, cancellationToken));
     }
+    public Task ExecuteOrdinaryAsync(Func<CancellationToken, Task> work, CancellationToken cancellationToken) =>
+        ExecuteOrdinaryAsync(async token => { await work(token); return true; }, cancellationToken);
+    public async Task<T> ExecuteOrdinaryAsync<T>(Func<CancellationToken, Task<T>> work,
+        CancellationToken cancellationToken)
+    {
+        var organisation = tenant.Current.OrganisationId.Value;
+        if (organisation == Guid.Empty) throw new InvalidOperationException("Tenant context is not established.");
+        return await database.Database.CreateExecutionStrategy().ExecuteAsync(
+            () => ExecuteAttemptAsync(work, organisation, ordinaryActivity: true, cancellationToken));
+    }
+    public Task<T> ExecuteLifecycleAsync<T>(Func<CancellationToken, Task<T>> work,
+        CancellationToken cancellationToken) => ExecuteAsync(work, cancellationToken);
+    public Task ExecuteLifecycleAsync(Func<CancellationToken, Task> work,
+        CancellationToken cancellationToken) => ExecuteAsync(work, cancellationToken);
     public Task<T> ExecuteOnceAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
     {
         var organisation = tenant.Current.OrganisationId.Value;
         if (organisation == Guid.Empty) throw new InvalidOperationException("Tenant context is not established.");
-        return ExecuteAttemptAsync(work, organisation, cancellationToken);
+        return ExecuteAttemptAsync(work, organisation, ordinaryActivity: false, cancellationToken);
     }
     private async Task<T> ExecuteAttemptAsync<T>(Func<CancellationToken, Task<T>> work, Guid organisation,
-        CancellationToken cancellationToken)
+        bool ordinaryActivity, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         IDbContextTransaction? transaction = null;
@@ -138,6 +152,9 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
             attempt.Begin(dbTransaction, organisation, transaction.TransactionId, connection.ProcessID);
             await InitializeAsync(database.Database.GetDbConnection(), dbTransaction, organisation, cancellationToken);
             attempt.CompleteInitialization(dbTransaction, organisation);
+            if (ordinaryActivity)
+                await DemandOrdinaryActivityAllowedAsync(
+                    database.Database.GetDbConnection(), dbTransaction, organisation, cancellationToken);
             var result = await work(cancellationToken);
             try { await transaction.CommitAsync(cancellationToken); }
             catch (Exception exception) { throw new TenantCommitIndeterminateException(exception); }
@@ -178,5 +195,29 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
         var value = await command.ExecuteScalarAsync(cancellationToken);
         if (!StringComparer.Ordinal.Equals(value as string, parameter.Value as string))
             throw new InvalidOperationException("Tenant database context initialization failed.");
+    }
+
+    private static async Task DemandOrdinaryActivityAllowedAsync(DbConnection connection, DbTransaction transaction,
+        Guid organisation, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT NOT EXISTS (
+              SELECT 1 FROM public."OrganisationClosureFences"
+              WHERE "OrganisationId" = @organisation_uuid AND "ReleasedAt" IS NULL)
+            FROM (SELECT pg_catalog.pg_advisory_xact_lock(
+                    pg_catalog.hashtextextended(pg_catalog.lower(@organisation_id), 0))) AS barrier;
+            """;
+        var textParameter = command.CreateParameter();
+        textParameter.ParameterName = "organisation_id";
+        textParameter.Value = organisation.ToString("D");
+        command.Parameters.Add(textParameter);
+        var uuidParameter = command.CreateParameter();
+        uuidParameter.ParameterName = "organisation_uuid";
+        uuidParameter.Value = organisation;
+        command.Parameters.Add(uuidParameter);
+        if (await command.ExecuteScalarAsync(cancellationToken) is not true)
+            throw new InvalidOperationException("organisation_closure_fence_active");
     }
 }

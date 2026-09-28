@@ -10,6 +10,7 @@ expected=(
   ROLE-01 ROLE-02 ROLE-03 ROLE-04
   POOL-01 POOL-02 POOL-03 POOL-04 POOL-05 POOL-06 POOL-07 POOL-08 POOL-09
   COV-02 COV-03 COV-05 PRIV-01 PRIV-02 PRIV-03
+  LIFE02-PRIV-01
   OPS-01 OPS-02 OPS-03 OPS-04 OPS-05 OPS-06 OPS-07 OPS-08
 )
 mapfile -t actual < <(jq -r '.targets[] | select(.required == true) | .id' "${inventory}" | sort)

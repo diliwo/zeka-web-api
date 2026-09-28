@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
+using AuthManager.Core.Organisations;
 
 namespace AuthManager.Infrastructure.Persistence.Lifecycle;
 
@@ -110,10 +111,22 @@ public sealed class LifecycleAdmissionStore : ILifecycleAdmissionStore
                             return new AdmissionResult(replay.IsReplay(admission.SubjectId, admission.Family, admission.IdempotencyId)
                                 ? AdmissionStatus.Replay : AdmissionStatus.Conflict, replay);
                         var conflict = existing.FirstOrDefault(x => x.IsActive && (x.Family == admission.Family
+                            || admission.Family == LifecycleOperationFamily.Termination
                             || admission.Family == LifecycleOperationFamily.Export && x.Family == LifecycleOperationFamily.Termination));
                         if (conflict is not null) return new AdmissionResult(AdmissionStatus.Conflict, conflict);
                         var registry = await new LifecycleRegistryReader(database).ReadActiveAsync(cancellationToken);
                         if (registry is null) return new AdmissionResult(AdmissionStatus.RegistryUnavailable);
+                        if (admission.Family == LifecycleOperationFamily.Termination)
+                        {
+                            var organisation = await database.Organisations.AsNoTracking().SingleOrDefaultAsync(
+                                x => x.Id == admission.OrganisationId, cancellationToken);
+                            if (organisation?.Status != OrganisationStatus.Active)
+                                return new AdmissionResult(AdmissionStatus.Denied);
+                            var reviewed = ReviewedClosureRegistryV1.Create();
+                            if (registry.Revision != reviewed.Revision
+                                || registry.InventoryHash != reviewed.InventoryHash)
+                                return new AdmissionResult(AdmissionStatus.RegistryUnavailable);
+                        }
                         var frozenExportInventory = admission.Family == LifecycleOperationFamily.Export
                             ? exportInventory.Freeze(registry) : null;
                         var operation = LifecycleOperation.Admit(Guid.NewGuid(), admission.OrganisationId, admission.SubjectId,

@@ -42,7 +42,7 @@
     <ProjectReference Include="..\..\..\Shared\Zeka.Lifecycle.Contracts\Zeka.Lifecycle.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Security/rls-manifest.v10.json" />
+    <EmbeddedResource Include="Security/rls-manifest.v11.json" />
     <Compile Include="../../../Shared/RlsSecurityManifestVerifier.cs" Link="Security/RlsSecurityManifestVerifier.cs" />
     <Compile Include="../../../Shared/RuntimeDatabaseIdentityValidator.cs" Link="Security/RuntimeDatabaseIdentityValidator.cs" />
     <Compile Include="../../../Shared/TenantAttemptOrderObserver.cs" Link="Security/TenantAttemptOrderObserver.cs" />

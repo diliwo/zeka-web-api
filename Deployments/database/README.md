@@ -7,7 +7,7 @@ These procedures implement the provider-neutral Issue #45 boundary. Environment-
 For each service database, Zeka Platform Operations:
 
 1. creates the database using the separately authorized PostgreSQL administrative process;
-2. executes the matching `bootstrap-*-roles.sql` script to create/reconcile the service `owner`, `migrator`, and `runtime` roles, provision any script-managed schema under the exact reviewed owner, and reconcile ownership, membership, default privileges, and database/schema ACLs; the Auth bootstrap creates `zeka` only when absent and fails closed without adopting it when an unexpected owner already controls it;
+2. executes the matching `bootstrap-*-roles.sql` script to create/reconcile the service `owner`, `migrator`, `runtime`, and LIFE-02 closure-recovery capability roles, provision any script-managed schema under the exact reviewed owner, and reconcile ownership, membership, default privileges, and database/schema ACLs; the Auth bootstrap creates `zeka` only when absent and fails closed without adopting it when an unexpected owner already controls it;
 3. supplies the deployment-only migrator credential through the approved host secret-delivery mechanism;
 4. builds the standalone `Tools/Zeka.DbMigrate` CLI at the reviewed SHA and invokes
    `plan` or `apply` for one closed service descriptor and `latest` or an exact
@@ -22,6 +22,17 @@ For each service database, Zeka Platform Operations:
 7. retains only the sanitized atomic CLI result, reviewed digest and verification evidence.
 
 Application processes never apply migrations at startup. The owner is `NOLOGIN`; runtime workloads receive only their matching runtime credential. Owner/migrator may perform required DDL and RLS/policy management, but are not added to runtime RLS policies for protected-row DML. RLS must not be disabled or bypassed for convenience. A future protected-data backfill requires a separately reviewed tenant-aware or explicitly privileged procedure.
+
+LIFE-02 adds one service-local `NOLOGIN` closure-recovery capability role per participant
+database. Each capability receives only database `CONNECT`, `USAGE` on `zeka`, and
+`EXECUTE` on that service's exact closure-fence release function. It receives no table,
+sequence, owner, migrator, role-administration, RLS-bypass, ordinary runtime, or other
+function privilege. The bootstrap removes every membership involving the capability;
+ordinary runtime cannot inherit it, `SET ROLE` to it, or grant it. Provider-real tests may
+provision a separate ephemeral non-production `LOGIN` principal after the final bootstrap
+and bind it to the capability. Production has no recovery login or credential until the
+separate ADR-005 issuance/delivery decision; recovery therefore remains unavailable and
+fail-closed in production.
 
 The initial Auth bootstrap is both role setup and administrative provisioning for the
 managed `zeka` schema. The restricted migrator then explicitly assumes

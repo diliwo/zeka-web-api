@@ -44,6 +44,7 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
             Assert.Empty(await deployment.Database.GetPendingMigrationsAsync());
         }
 
+        await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-client-roles.sql"));
         await using var verification = Deployment(migratorConnection);
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(ApplicationDbContext).Assembly);
         await new RuntimeDatabaseIdentityValidator(Connection("zeka_client_runtime", RuntimePassword),
@@ -74,9 +75,31 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
             GRANT ALL ON TABLE public."OrganisationExportOutbox" TO zeka_client_runtime;
             GRANT UPDATE ("FenceToken") ON TABLE public."OrganisationExportFences" TO PUBLIC;
             GRANT EXECUTE ON FUNCTION zeka.reject_writes_during_export_fence() TO PUBLIC;
+            GRANT ALL ON TABLE public."OrganisationClosureFences" TO zeka_client_runtime;
+            GRANT ALL ON TABLE public."OrganisationClosureInbox" TO zeka_client_runtime;
+            GRANT ALL ON TABLE public."OrganisationClosureOutbox" TO zeka_client_runtime;
+            GRANT ALL ON TABLE public."OrganisationClosureFences", public."OrganisationClosureInbox",
+              public."OrganisationClosureOutbox" TO PUBLIC;
+            GRANT ALL ON SEQUENCE public."OrganisationClosureFences_Id_seq",
+              public."OrganisationClosureInbox_Id_seq", public."OrganisationClosureOutbox_Id_seq" TO PUBLIC;
+            GRANT UPDATE ("FenceToken") ON TABLE public."OrganisationClosureFences" TO PUBLIC;
+            GRANT EXECUTE ON FUNCTION zeka.reject_writes_during_closure_fence() TO PUBLIC;
+            GRANT EXECUTE ON FUNCTION zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone) TO PUBLIC;
+            ALTER TABLE public."OrganisationClosureFences" OWNER TO postgres;
+            ALTER TABLE public."OrganisationClosureInbox" OWNER TO postgres;
+            ALTER TABLE public."OrganisationClosureOutbox" OWNER TO postgres;
+            ALTER FUNCTION zeka.reject_writes_during_closure_fence() OWNER TO postgres;
+            ALTER FUNCTION zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone) OWNER TO postgres;
             ALTER ROLE zeka_client_owner IN DATABASE {databaseIdentifier} SET application_name='unexpected';
             ALTER ROLE zeka_client_migrator IN DATABASE {databaseIdentifier} SET application_name='unexpected';
             ALTER ROLE zeka_client_runtime IN DATABASE {databaseIdentifier} SET application_name='unexpected';
+            ALTER ROLE zeka_client_closure_recovery IN DATABASE {databaseIdentifier} SET application_name='unexpected';
+            ALTER ROLE zeka_client_closure_recovery LOGIN BYPASSRLS CREATEDB CREATEROLE INHERIT REPLICATION;
+            GRANT CREATE, TEMPORARY ON DATABASE {databaseIdentifier} TO zeka_client_closure_recovery;
+            GRANT CREATE, USAGE ON SCHEMA public, zeka TO zeka_client_closure_recovery;
+            GRANT zeka_client_closure_recovery TO zeka_client_runtime WITH ADMIN OPTION;
+            GRANT ALL ON TABLE public."Clients" TO zeka_client_closure_recovery;
+            GRANT ALL ON SEQUENCE public."Clients_Id_seq" TO zeka_client_closure_recovery;
             """);
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-client-roles.sql"));
         Assert.True(await ExecuteAdministratorScalarAsync<bool>("""
@@ -85,7 +108,9 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
                JOIN pg_catalog.pg_roles r ON r.oid=s.setrole
                JOIN pg_catalog.pg_database d ON d.oid=s.setdatabase
                WHERE d.datname=pg_catalog.current_database()
-                 AND r.rolname=ANY(ARRAY['zeka_client_owner','zeka_client_migrator','zeka_client_runtime']))
+                 AND r.rolname=ANY(ARRAY[
+                   'zeka_client_owner','zeka_client_migrator','zeka_client_runtime',
+                   'zeka_client_closure_recovery']))
               AND pg_catalog.has_table_privilege('zeka_client_runtime','public."Languages"','SELECT')
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public."Languages"','INSERT')
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public."Languages"','UPDATE')
@@ -95,12 +120,20 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public."__EFMigrationsHistory"','SELECT')
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public.issue45_unknown_client','SELECT')
               AND NOT pg_catalog.has_sequence_privilege('zeka_client_runtime','public.issue45_unknown_client_id_seq','USAGE')
+              AND NOT pg_catalog.has_table_privilege(
+                'zeka_client_closure_recovery','public."Clients"','SELECT')
+              AND NOT pg_catalog.has_sequence_privilege(
+                'zeka_client_closure_recovery','public."Clients_Id_seq"','USAGE')
+              AND NOT pg_catalog.pg_has_role(
+                'zeka_client_runtime','zeka_client_closure_recovery','MEMBER')
               AND (
                 SELECT pg_catalog.bool_and(pg_catalog.has_table_privilege(
                   'zeka_client_runtime', pg_catalog.format('public.%I', object_name), privilege_name))
                 FROM (VALUES
                   ('OrganisationExportFences'), ('OrganisationExportFragments'),
-                  ('OrganisationExportInbox'), ('OrganisationExportOutbox')) AS objects(object_name)
+                  ('OrganisationExportInbox'), ('OrganisationExportOutbox'),
+                  ('OrganisationClosureFences'), ('OrganisationClosureInbox'),
+                  ('OrganisationClosureOutbox')) AS objects(object_name)
                 CROSS JOIN (VALUES ('SELECT'), ('INSERT')) AS privileges(privilege_name)
               )
               AND (
@@ -108,17 +141,43 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
                   'zeka_client_runtime', pg_catalog.format('public.%I', object_name), privilege_name))
                 FROM (VALUES
                   ('OrganisationExportFences'), ('OrganisationExportFragments'),
-                  ('OrganisationExportInbox'), ('OrganisationExportOutbox')) AS objects(object_name)
+                  ('OrganisationExportInbox'), ('OrganisationExportOutbox'),
+                  ('OrganisationClosureFences'), ('OrganisationClosureInbox'),
+                  ('OrganisationClosureOutbox')) AS objects(object_name)
                 CROSS JOIN (VALUES
                   ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS privileges(privilege_name)
               )
               AND pg_catalog.has_column_privilege(
                 'zeka_client_runtime', 'public."OrganisationExportFences"', 'ReleasedAt', 'UPDATE')
+              AND NOT pg_catalog.has_column_privilege(
+                'zeka_client_runtime', 'public."OrganisationClosureFences"', 'ReleasedAt', 'UPDATE')
+              AND (
+                SELECT pg_catalog.bool_and(
+                  pg_catalog.pg_get_userbyid(relation.relowner)='zeka_client_owner')
+                FROM (VALUES
+                  ('OrganisationClosureFences'), ('OrganisationClosureInbox'),
+                  ('OrganisationClosureOutbox')) AS objects(object_name)
+                JOIN pg_catalog.pg_class relation
+                  ON relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM (VALUES
+                  ('OrganisationClosureFences'), ('OrganisationClosureInbox'),
+                  ('OrganisationClosureOutbox')) AS objects(object_name)
+                JOIN pg_catalog.pg_class relation
+                  ON relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
+                CROSS JOIN LATERAL pg_catalog.aclexplode(
+                  COALESCE(relation.relacl, pg_catalog.acldefault('r', relation.relowner))) acl
+                WHERE acl.grantee=0
+              )
               AND NOT EXISTS (
                 SELECT 1
                 FROM (VALUES
                   ('OrganisationExportFences'), ('OrganisationExportFragments'),
-                  ('OrganisationExportInbox'), ('OrganisationExportOutbox')) AS objects(object_name)
+                  ('OrganisationExportInbox'), ('OrganisationExportOutbox'),
+                  ('OrganisationClosureFences'), ('OrganisationClosureInbox'),
+                  ('OrganisationClosureOutbox')) AS objects(object_name)
                 JOIN pg_catalog.pg_class relation
                   ON relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
                 JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid=relation.oid
@@ -129,14 +188,17 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
                     object_name='OrganisationExportFences'
                     AND attribute.attname='ReleasedAt'
                     AND acl.grantee=(SELECT oid FROM pg_catalog.pg_roles WHERE rolname='zeka_client_runtime')
-                    AND acl.privilege_type='UPDATE')
+                    AND acl.privilege_type='UPDATE'
+                    AND NOT acl.is_grantable)
               )
               AND (
                 SELECT pg_catalog.bool_and(pg_catalog.has_sequence_privilege(
                   'zeka_client_runtime', pg_catalog.format('public.%I', object_name), privilege_name))
                 FROM (VALUES
                   ('OrganisationExportFences_Id_seq'), ('OrganisationExportFragments_Id_seq'),
-                  ('OrganisationExportInbox_Id_seq'), ('OrganisationExportOutbox_Id_seq')) AS objects(object_name)
+                  ('OrganisationExportInbox_Id_seq'), ('OrganisationExportOutbox_Id_seq'),
+                  ('OrganisationClosureFences_Id_seq'), ('OrganisationClosureInbox_Id_seq'),
+                  ('OrganisationClosureOutbox_Id_seq')) AS objects(object_name)
                 CROSS JOIN (VALUES ('USAGE'), ('SELECT')) AS privileges(privilege_name)
               )
               AND (
@@ -144,7 +206,20 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
                   'zeka_client_runtime', pg_catalog.format('public.%I', object_name), 'UPDATE'))
                 FROM (VALUES
                   ('OrganisationExportFences_Id_seq'), ('OrganisationExportFragments_Id_seq'),
-                  ('OrganisationExportInbox_Id_seq'), ('OrganisationExportOutbox_Id_seq')) AS objects(object_name)
+                  ('OrganisationExportInbox_Id_seq'), ('OrganisationExportOutbox_Id_seq'),
+                  ('OrganisationClosureFences_Id_seq'), ('OrganisationClosureInbox_Id_seq'),
+                  ('OrganisationClosureOutbox_Id_seq')) AS objects(object_name)
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM (VALUES
+                  ('OrganisationClosureFences_Id_seq'), ('OrganisationClosureInbox_Id_seq'),
+                  ('OrganisationClosureOutbox_Id_seq')) AS objects(object_name)
+                JOIN pg_catalog.pg_class relation
+                  ON relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
+                CROSS JOIN LATERAL pg_catalog.aclexplode(
+                  COALESCE(relation.relacl, pg_catalog.acldefault('S', relation.relowner))) acl
+                WHERE acl.grantee=0
               )
               AND pg_catalog.has_function_privilege(
                 'zeka_client_runtime', 'zeka.reject_writes_during_export_fence()', 'EXECUTE')
@@ -157,9 +232,52 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
                   AND acl.grantee=0
                   AND acl.privilege_type='EXECUTE'
               )
+              AND pg_catalog.has_function_privilege(
+                'zeka_client_runtime', 'zeka.reject_writes_during_closure_fence()', 'EXECUTE')
+              AND (
+                SELECT pg_catalog.pg_get_userbyid(procedure.proowner)='zeka_client_owner'
+                FROM pg_catalog.pg_proc procedure
+                WHERE procedure.oid=pg_catalog.to_regprocedure('zeka.reject_writes_during_closure_fence()')
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc procedure
+                CROSS JOIN LATERAL pg_catalog.aclexplode(
+                  COALESCE(procedure.proacl, pg_catalog.acldefault('f', procedure.proowner))) acl
+                WHERE procedure.oid=pg_catalog.to_regprocedure('zeka.reject_writes_during_closure_fence()')
+                  AND acl.grantee=0
+                  AND acl.privilege_type='EXECUTE'
+              )
+              AND NOT pg_catalog.has_function_privilege(
+                'zeka_client_runtime',
+                'zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)', 'EXECUTE')
+              AND pg_catalog.has_function_privilege(
+                'zeka_client_closure_recovery',
+                'zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)', 'EXECUTE')
+              AND NOT pg_catalog.has_function_privilege(
+                'zeka_client_closure_recovery', 'zeka.reject_writes_during_closure_fence()', 'EXECUTE')
+              AND (
+                SELECT pg_catalog.pg_get_userbyid(procedure.proowner)='zeka_client_owner'
+                  AND procedure.prosecdef
+                FROM pg_catalog.pg_proc procedure
+                WHERE procedure.oid=pg_catalog.to_regprocedure(
+                  'zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)')
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc procedure
+                CROSS JOIN LATERAL pg_catalog.aclexplode(
+                  COALESCE(procedure.proacl, pg_catalog.acldefault('f', procedure.proowner))) acl
+                WHERE procedure.oid=pg_catalog.to_regprocedure(
+                    'zeka.release_organisation_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)')
+                  AND acl.grantee=0
+                  AND acl.privilege_type='EXECUTE'
+              )
             """));
         await ExecuteAdministratorAsync("DROP TABLE public.issue45_unknown_client");
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(ApplicationDbContext).Assembly);
+        await AssertInsufficientPrivilegeAsync(Connection("zeka_client_runtime", RuntimePassword),
+            "GRANT zeka_client_closure_recovery TO zeka_client_runtime");
     }
 
     private static DeploymentDbContext Deployment(string connectionString) => new(
@@ -183,6 +301,18 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand(sql, connection);
         return (T)(await command.ExecuteScalarAsync())!;
+    }
+
+    private static async Task AssertInsufficientPrivilegeAsync(string connectionString, string sql)
+    {
+        var exception = await Assert.ThrowsAsync<PostgresException>(async () =>
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand(sql, connection);
+            await command.ExecuteNonQueryAsync();
+        });
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, exception.SqlState);
     }
 
     private static string ReadBootstrapScript(string fileName)

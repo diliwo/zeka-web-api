@@ -698,6 +698,122 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.ToTable("StaffProjectionOutbox", (string)null);
                 });
 
+            modelBuilder.Entity("AdminAreaManagement.Infrastructure.Persistence.Closures.AdminAreaClosureFence", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ParticipantId")
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<int>("ContractVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("EnteredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("FenceRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FenceToken")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<long>("OperationRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("ReleasedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("OperationId", "OrganisationId", "ParticipantId");
+
+                    b.HasIndex("OrganisationId", "ParticipantId")
+                        .IsUnique()
+                        .HasFilter("\"ReleasedAt\" IS NULL");
+
+                    b.HasIndex("OrganisationId", "ParticipantId", "FenceToken")
+                        .IsUnique();
+
+                    b.ToTable("AdminAreaClosureFences", (string)null);
+                });
+
+            modelBuilder.Entity("AdminAreaManagement.Infrastructure.Persistence.Closures.AdminAreaClosureInbox", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CommandType")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ParticipantId")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<DateTimeOffset>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("MessageId", "OrganisationId");
+
+                    b.ToTable("AdminAreaClosureInbox", (string)null);
+                });
+
+            modelBuilder.Entity("AdminAreaManagement.Infrastructure.Persistence.Closures.AdminAreaClosureOutbox", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MessageType")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ParticipantId")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("MessageId", "OrganisationId");
+
+                    b.ToTable("AdminAreaClosureOutbox", (string)null);
+                });
+
             modelBuilder.Entity("AdminAreaManagement.Infrastructure.Persistence.Exports.AdminAreaExportFence", b =>
                 {
                     b.Property<Guid>("OperationId")

@@ -122,6 +122,9 @@ public class ApplicationDbContext : TenantDbContext
     public DbSet<OrganisationExportFragment> OrganisationExportFragments => Set<OrganisationExportFragment>();
     public DbSet<OrganisationExportCommandReceipt> OrganisationExportInbox => Set<OrganisationExportCommandReceipt>();
     public DbSet<OrganisationExportOutboxMessage> OrganisationExportOutbox => Set<OrganisationExportOutboxMessage>();
+    public DbSet<OrganisationClosureFence> OrganisationClosureFences => Set<OrganisationClosureFence>();
+    public DbSet<OrganisationClosureCommandReceipt> OrganisationClosureInbox => Set<OrganisationClosureCommandReceipt>();
+    public DbSet<OrganisationClosureOutboxMessage> OrganisationClosureOutbox => Set<OrganisationClosureOutboxMessage>();
 
     protected override void ConfigureTenantModel(ModelBuilder builder) => ConfigurePersistenceModel(builder);
 
@@ -176,6 +179,9 @@ public sealed class DeploymentDbContext(DbContextOptions<DeploymentDbContext> op
     public DbSet<OrganisationExportFragment> OrganisationExportFragments => Set<OrganisationExportFragment>();
     public DbSet<OrganisationExportCommandReceipt> OrganisationExportInbox => Set<OrganisationExportCommandReceipt>();
     public DbSet<OrganisationExportOutboxMessage> OrganisationExportOutbox => Set<OrganisationExportOutboxMessage>();
+    public DbSet<OrganisationClosureFence> OrganisationClosureFences => Set<OrganisationClosureFence>();
+    public DbSet<OrganisationClosureCommandReceipt> OrganisationClosureInbox => Set<OrganisationClosureCommandReceipt>();
+    public DbSet<OrganisationClosureOutboxMessage> OrganisationClosureOutbox => Set<OrganisationClosureOutboxMessage>();
     protected override void OnModelCreating(ModelBuilder builder) => ApplicationDbContext.ConfigurePersistenceModel(builder);
 }
 

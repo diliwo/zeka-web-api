@@ -19,6 +19,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Zeka.PersistenceSecurity;
 using AdminAreaManagement.Application.Exports;
 using AdminAreaManagement.Infrastructure.Exports;
+using AdminAreaManagement.Infrastructure.Closures;
+using AdminAreaManagement.Application.Closures;
 
 
 
@@ -26,6 +28,21 @@ namespace AdminAreaManagement.Infrastructure;
 
 public static class DependencyInjection
 {
+    /// <summary>
+    /// Enables the bounded LIFE-02 closure participants only for a named evidence fixture tenant.
+    /// Production registration remains deliberately absent.
+    /// </summary>
+    public static IServiceCollection AddAdminAreaFixtureClosureParticipants(this IServiceCollection services,
+        Guid fixtureOrganisationId, string recoveryConnectionString)
+    {
+        services.AddSingleton(new AdminAreaClosureFixtureScope(fixtureOrganisationId));
+        services.AddSingleton<IAdminAreaClosureRecoveryCapability>(
+            new NpgsqlAdminAreaClosureRecoveryCapability(recoveryConnectionString));
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<IAdminAreaClosureParticipant, AdminAreaClosureParticipant>();
+        return services;
+    }
+
     /// <summary>
     /// Enables the bounded LIFE-01 participant only for a named evidence fixture tenant.
     /// Production registration remains deliberately absent.
@@ -59,6 +76,7 @@ public static class DependencyInjection
         services.AddScoped<TenantPostCommitActions>();
         services.AddScoped<TenantCommandGuard>();
         services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
+        services.AddScoped<IAdminAreaClosureGate, AdminAreaClosureGate>();
         services.AddDbContext<ApplicationDbContext>((provider, options) =>
             options.UseNpgsql(
                 runtimeConnection,

@@ -56,7 +56,11 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
                 or AuthManager.Core.Lifecycle.LifecycleCoordinatorLease
                 or AuthManager.Core.Lifecycle.AuthExportParticipantExecution
                 or AuthManager.Core.Lifecycle.AuthExportParticipantInboxReceipt
-                or AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage)
+                or AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage
+                or AuthManager.Core.Lifecycle.LifecycleClosureFenceReceipt
+                or AuthManager.Core.Lifecycle.AuthClosureParticipantExecution
+                or AuthManager.Core.Lifecycle.AuthClosureParticipantInboxReceipt
+                or AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage)
             {
                 var organisation = (Guid)entry.Property("OrganisationId").CurrentValue!;
                 if (!LifecycleOnly || LifecycleTransaction is null || organisation == Guid.Empty
@@ -81,6 +85,10 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<AuthManager.Core.Lifecycle.AuthExportParticipantExecution> AuthExportParticipantExecutions => Set<AuthManager.Core.Lifecycle.AuthExportParticipantExecution>();
     public DbSet<AuthManager.Core.Lifecycle.AuthExportParticipantInboxReceipt> AuthExportParticipantInboxReceipts => Set<AuthManager.Core.Lifecycle.AuthExportParticipantInboxReceipt>();
     public DbSet<AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage> AuthExportParticipantOutboxMessages => Set<AuthManager.Core.Lifecycle.AuthExportParticipantOutboxMessage>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleClosureFenceReceipt> LifecycleClosureFenceReceipts => Set<AuthManager.Core.Lifecycle.LifecycleClosureFenceReceipt>();
+    public DbSet<AuthManager.Core.Lifecycle.AuthClosureParticipantExecution> AuthClosureParticipantExecutions => Set<AuthManager.Core.Lifecycle.AuthClosureParticipantExecution>();
+    public DbSet<AuthManager.Core.Lifecycle.AuthClosureParticipantInboxReceipt> AuthClosureParticipantInboxReceipts => Set<AuthManager.Core.Lifecycle.AuthClosureParticipantInboxReceipt>();
+    public DbSet<AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage> AuthClosureParticipantOutboxMessages => Set<AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
