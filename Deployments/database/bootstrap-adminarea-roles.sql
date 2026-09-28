@@ -1,36 +1,39 @@
 -- Run once per AdminArea database using a separately authorized PostgreSQL role administrator.
 -- Credentials are supplied by the host and never belong in this file.
 DO $bootstrap$
+DECLARE role_spec record;
+        database_setting record;
 BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'zeka_adminarea_owner') THEN
-    CREATE ROLE zeka_adminarea_owner NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT;
-  END IF;
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'zeka_adminarea_migrator') THEN
-    CREATE ROLE zeka_adminarea_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT;
-  END IF;
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'zeka_adminarea_runtime') THEN
-    CREATE ROLE zeka_adminarea_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT;
-  END IF;
-END $bootstrap$;
-ALTER ROLE zeka_adminarea_owner NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
-ALTER ROLE zeka_adminarea_owner RESET ALL;
-ALTER ROLE zeka_adminarea_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
-ALTER ROLE zeka_adminarea_migrator RESET ALL;
-ALTER ROLE zeka_adminarea_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
-ALTER ROLE zeka_adminarea_runtime RESET ALL;
-DO $settings$
-DECLARE setting record;
-BEGIN
-  FOR setting IN
+  FOR role_spec IN
+    SELECT * FROM (VALUES
+      ('zeka_adminarea_owner', 'NOLOGIN'),
+      ('zeka_adminarea_migrator', 'LOGIN'),
+      ('zeka_adminarea_runtime', 'LOGIN')
+    ) AS managed_roles(name, login_mode)
+  LOOP
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname=role_spec.name) THEN
+      EXECUTE pg_catalog.format(
+        'CREATE ROLE %I %s NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT',
+        role_spec.name, role_spec.login_mode);
+    END IF;
+    EXECUTE pg_catalog.format(
+      'ALTER ROLE %I %s NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION',
+      role_spec.name, role_spec.login_mode);
+    EXECUTE pg_catalog.format('ALTER ROLE %I RESET ALL', role_spec.name);
+  END LOOP;
+  FOR database_setting IN
     SELECT role.rolname, database.datname
     FROM pg_catalog.pg_db_role_setting role_setting
     JOIN pg_catalog.pg_roles role ON role.oid=role_setting.setrole
     JOIN pg_catalog.pg_database database ON database.oid=role_setting.setdatabase
-    WHERE role.rolname IN ('zeka_adminarea_owner','zeka_adminarea_migrator','zeka_adminarea_runtime')
+    WHERE role.rolname=ANY(ARRAY[
+      'zeka_adminarea_owner', 'zeka_adminarea_migrator', 'zeka_adminarea_runtime'
+    ])
   LOOP
-    EXECUTE pg_catalog.format('ALTER ROLE %I IN DATABASE %I RESET ALL', setting.rolname, setting.datname);
+    EXECUTE pg_catalog.format(
+      'ALTER ROLE %I IN DATABASE %I RESET ALL', database_setting.rolname, database_setting.datname);
   END LOOP;
-END $settings$;
+END $bootstrap$;
 DO $database$ BEGIN
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO zeka_adminarea_migrator, zeka_adminarea_runtime', current_database());
@@ -162,22 +165,22 @@ BEGIN
   IF pg_catalog.to_regprocedure('zeka.current_organisation_id()') IS NOT NULL THEN
     GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_adminarea_runtime;
   END IF;
-  IF pg_catalog.to_regprocedure('zeka.reject_adminarea_write_during_export()') IS NOT NULL THEN
-    REVOKE ALL ON FUNCTION zeka.reject_adminarea_write_during_export() FROM PUBLIC, zeka_adminarea_runtime;
-    GRANT EXECUTE ON FUNCTION zeka.reject_adminarea_write_during_export() TO zeka_adminarea_runtime;
-  END IF;
-  IF pg_catalog.to_regprocedure('zeka.reject_adminarea_write_during_closure()') IS NOT NULL THEN
-    REVOKE ALL ON FUNCTION zeka.reject_adminarea_write_during_closure() FROM PUBLIC, zeka_adminarea_runtime;
-    GRANT EXECUTE ON FUNCTION zeka.reject_adminarea_write_during_closure() TO zeka_adminarea_runtime;
-  END IF;
-  IF pg_catalog.to_regprocedure('zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)') IS NOT NULL THEN
-    REVOKE ALL ON FUNCTION zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone) FROM PUBLIC, zeka_adminarea_runtime;
-    GRANT EXECUTE ON FUNCTION zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone) TO zeka_adminarea_runtime;
-  END IF;
-  IF pg_catalog.to_regprocedure('public.zeka_city_key(text)') IS NOT NULL THEN
-    GRANT EXECUTE ON FUNCTION public.zeka_city_key(text) TO zeka_adminarea_runtime;
-  END IF;
-  IF pg_catalog.to_regprocedure('public.zeka_city_text(text)') IS NOT NULL THEN
-    GRANT EXECUTE ON FUNCTION public.zeka_city_text(text) TO zeka_adminarea_runtime;
-  END IF;
+  FOREACH object_name IN ARRAY ARRAY[
+    'zeka.reject_adminarea_write_during_export()',
+    'zeka.reject_adminarea_write_during_closure()',
+    'zeka.release_adminarea_closure_fence(uuid,uuid,text,bigint,text,integer,uuid,uuid,uuid,timestamp with time zone)'
+  ] LOOP
+    IF pg_catalog.to_regprocedure(object_name) IS NOT NULL THEN
+      EXECUTE pg_catalog.format(
+        'REVOKE ALL ON FUNCTION %s FROM PUBLIC, zeka_adminarea_runtime', object_name);
+      EXECUTE pg_catalog.format(
+        'GRANT EXECUTE ON FUNCTION %s TO zeka_adminarea_runtime', object_name);
+    END IF;
+  END LOOP;
+  FOREACH object_name IN ARRAY ARRAY['public.zeka_city_key(text)', 'public.zeka_city_text(text)'] LOOP
+    IF pg_catalog.to_regprocedure(object_name) IS NOT NULL THEN
+      EXECUTE pg_catalog.format(
+        'GRANT EXECUTE ON FUNCTION %s TO zeka_adminarea_runtime', object_name);
+    END IF;
+  END LOOP;
 END $existing_objects$;

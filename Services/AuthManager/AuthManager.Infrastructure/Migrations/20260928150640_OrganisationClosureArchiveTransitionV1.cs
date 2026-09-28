@@ -56,134 +56,93 @@ namespace AuthManager.Infrastructure.Migrations
                 maxLength: 64,
                 nullable: true);
 
-            migrationBuilder.CreateTable(
-                name: "AuthClosureParticipantExecutions",
-                columns: table => new
-                {
-                    OperationId = table.Column<Guid>(type: "uuid", nullable: false),
-                    OrganisationId = table.Column<Guid>(type: "uuid", nullable: false),
-                    OperationRevision = table.Column<long>(type: "bigint", nullable: false),
-                    FenceToken = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
-                    FenceRevision = table.Column<long>(type: "bigint", nullable: false),
-                    BoundaryEstablishedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    ReceiptHash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
-                    ReleasedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    State = table.Column<int>(type: "integer", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_AuthClosureParticipantExecutions", x => x.OperationId);
-                    table.ForeignKey(
-                        name: "FK_AuthClosureParticipantExecutions_OrganisationLifecycleOpera~",
-                        columns: x => new { x.OperationId, x.OrganisationId },
-                        principalTable: "OrganisationLifecycleOperations",
-                        principalColumns: new[] { "Id", "OrganisationId" },
-                        onDelete: ReferentialAction.Restrict);
-                });
+            foreach (var (table, columns, primaryKey, foreignKey) in new[]
+                     {
+                         (
+                             "AuthClosureParticipantExecutions",
+                             """
+                             "OperationId" uuid NOT NULL,
+                             "OrganisationId" uuid NOT NULL,
+                             "OperationRevision" bigint NOT NULL,
+                             "FenceToken" character varying(200) NOT NULL,
+                             "FenceRevision" bigint NOT NULL,
+                             "BoundaryEstablishedAt" timestamp with time zone NOT NULL,
+                             "ReceiptHash" character varying(64) NOT NULL,
+                             "ReleasedAt" timestamp with time zone NULL,
+                             "State" integer NOT NULL
+                             """,
+                             "\"OperationId\"",
+                             "FK_AuthClosureParticipantExecutions_OrganisationLifecycleOpera~"
+                         ),
+                         (
+                             "AuthClosureParticipantInbox",
+                             """
+                             "MessageId" uuid NOT NULL,
+                             "OperationId" uuid NOT NULL,
+                             "OrganisationId" uuid NOT NULL,
+                             "MessageType" character varying(300) NOT NULL,
+                             "PayloadSha256" character varying(64) NOT NULL,
+                             "ReceivedAt" timestamp with time zone NOT NULL
+                             """,
+                             "\"MessageId\"",
+                             "FK_AuthClosureParticipantInbox_OrganisationLifecycleOperations~"
+                         ),
+                         (
+                             "AuthClosureParticipantOutbox",
+                             """
+                             "MessageId" uuid NOT NULL,
+                             "OperationId" uuid NOT NULL,
+                             "OrganisationId" uuid NOT NULL,
+                             "MessageType" character varying(300) NOT NULL,
+                             "PayloadJson" jsonb NOT NULL,
+                             "PayloadSha256" character varying(64) NOT NULL,
+                             "OccurredAt" timestamp with time zone NOT NULL
+                             """,
+                             "\"MessageId\"",
+                             "FK_AuthClosureParticipantOutbox_OrganisationLifecycleOperation~"
+                         ),
+                         (
+                             "LifecycleClosureFenceReceipts",
+                             """
+                             "OperationId" uuid NOT NULL,
+                             "ParticipantId" character varying(200) NOT NULL,
+                             "OrganisationId" uuid NOT NULL,
+                             "ContractVersion" integer NOT NULL,
+                             "OperationRevision" bigint NOT NULL,
+                             "FenceToken" character varying(200) NOT NULL,
+                             "FenceRevision" bigint NOT NULL,
+                             "BoundaryEstablishedAt" timestamp with time zone NOT NULL,
+                             "ReceiptHash" character varying(64) NOT NULL,
+                             "MessageId" uuid NOT NULL,
+                             "CausationId" uuid NOT NULL,
+                             "CorrelationId" uuid NOT NULL
+                             """,
+                             "\"OperationId\", \"ParticipantId\"",
+                             "FK_LifecycleClosureFenceReceipts_OrganisationLifecycleOperatio~"
+                         )
+                     })
+            {
+                CreateOperationScopedTable(migrationBuilder, table, columns, primaryKey, foreignKey);
+            }
 
-            migrationBuilder.CreateTable(
-                name: "AuthClosureParticipantInbox",
-                columns: table => new
-                {
-                    MessageId = table.Column<Guid>(type: "uuid", nullable: false),
-                    OperationId = table.Column<Guid>(type: "uuid", nullable: false),
-                    OrganisationId = table.Column<Guid>(type: "uuid", nullable: false),
-                    MessageType = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
-                    PayloadSha256 = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
-                    ReceivedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_AuthClosureParticipantInbox", x => x.MessageId);
-                    table.ForeignKey(
-                        name: "FK_AuthClosureParticipantInbox_OrganisationLifecycleOperations~",
-                        columns: x => new { x.OperationId, x.OrganisationId },
-                        principalTable: "OrganisationLifecycleOperations",
-                        principalColumns: new[] { "Id", "OrganisationId" },
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "AuthClosureParticipantOutbox",
-                columns: table => new
-                {
-                    MessageId = table.Column<Guid>(type: "uuid", nullable: false),
-                    OperationId = table.Column<Guid>(type: "uuid", nullable: false),
-                    OrganisationId = table.Column<Guid>(type: "uuid", nullable: false),
-                    MessageType = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
-                    PayloadJson = table.Column<string>(type: "jsonb", nullable: false),
-                    PayloadSha256 = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
-                    OccurredAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_AuthClosureParticipantOutbox", x => x.MessageId);
-                    table.ForeignKey(
-                        name: "FK_AuthClosureParticipantOutbox_OrganisationLifecycleOperation~",
-                        columns: x => new { x.OperationId, x.OrganisationId },
-                        principalTable: "OrganisationLifecycleOperations",
-                        principalColumns: new[] { "Id", "OrganisationId" },
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "LifecycleClosureFenceReceipts",
-                columns: table => new
-                {
-                    OperationId = table.Column<Guid>(type: "uuid", nullable: false),
-                    ParticipantId = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
-                    OrganisationId = table.Column<Guid>(type: "uuid", nullable: false),
-                    ContractVersion = table.Column<int>(type: "integer", nullable: false),
-                    OperationRevision = table.Column<long>(type: "bigint", nullable: false),
-                    FenceToken = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
-                    FenceRevision = table.Column<long>(type: "bigint", nullable: false),
-                    BoundaryEstablishedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    ReceiptHash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
-                    MessageId = table.Column<Guid>(type: "uuid", nullable: false),
-                    CausationId = table.Column<Guid>(type: "uuid", nullable: false),
-                    CorrelationId = table.Column<Guid>(type: "uuid", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_LifecycleClosureFenceReceipts", x => new { x.OperationId, x.ParticipantId });
-                    table.ForeignKey(
-                        name: "FK_LifecycleClosureFenceReceipts_OrganisationLifecycleOperatio~",
-                        columns: x => new { x.OperationId, x.OrganisationId },
-                        principalTable: "OrganisationLifecycleOperations",
-                        principalColumns: new[] { "Id", "OrganisationId" },
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_AuthClosureParticipantExecutions_OperationId_OrganisationId",
-                table: "AuthClosureParticipantExecutions",
-                columns: new[] { "OperationId", "OrganisationId" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_AuthClosureParticipantInbox_OperationId_MessageType",
-                table: "AuthClosureParticipantInbox",
-                columns: new[] { "OperationId", "MessageType" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_AuthClosureParticipantInbox_OperationId_OrganisationId",
-                table: "AuthClosureParticipantInbox",
-                columns: new[] { "OperationId", "OrganisationId" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_AuthClosureParticipantOutbox_OperationId_MessageType",
-                table: "AuthClosureParticipantOutbox",
-                columns: new[] { "OperationId", "MessageType" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_AuthClosureParticipantOutbox_OperationId_OrganisationId",
-                table: "AuthClosureParticipantOutbox",
-                columns: new[] { "OperationId", "OrganisationId" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_LifecycleClosureFenceReceipts_OperationId_OrganisationId",
-                table: "LifecycleClosureFenceReceipts",
-                columns: new[] { "OperationId", "OrganisationId" });
+            foreach (var (name, table, columns, unique) in new[]
+                     {
+                         ("IX_AuthClosureParticipantExecutions_OperationId_OrganisationId",
+                             "AuthClosureParticipantExecutions", new[] { "OperationId", "OrganisationId" }, false),
+                         ("IX_AuthClosureParticipantInbox_OperationId_MessageType",
+                             "AuthClosureParticipantInbox", new[] { "OperationId", "MessageType" }, false),
+                         ("IX_AuthClosureParticipantInbox_OperationId_OrganisationId",
+                             "AuthClosureParticipantInbox", new[] { "OperationId", "OrganisationId" }, false),
+                         ("IX_AuthClosureParticipantOutbox_OperationId_MessageType",
+                             "AuthClosureParticipantOutbox", new[] { "OperationId", "MessageType" }, true),
+                         ("IX_AuthClosureParticipantOutbox_OperationId_OrganisationId",
+                             "AuthClosureParticipantOutbox", new[] { "OperationId", "OrganisationId" }, false),
+                         ("IX_LifecycleClosureFenceReceipts_OperationId_OrganisationId",
+                             "LifecycleClosureFenceReceipts", new[] { "OperationId", "OrganisationId" }, false)
+                     })
+            {
+                migrationBuilder.CreateIndex(name: name, table: table, columns: columns, unique: unique);
+            }
 
             foreach (var table in new[]
                      {
@@ -353,17 +312,14 @@ namespace AuthManager.Infrastructure.Migrations
                 DROP FUNCTION IF EXISTS zeka.reject_auth_organisation_write_during_closure_fence();
                 DROP FUNCTION IF EXISTS zeka.release_auth_closure_fence(uuid,uuid,bigint,text,uuid,uuid,timestamptz);
                 """);
-            migrationBuilder.DropTable(
-                name: "AuthClosureParticipantExecutions");
-
-            migrationBuilder.DropTable(
-                name: "AuthClosureParticipantInbox");
-
-            migrationBuilder.DropTable(
-                name: "AuthClosureParticipantOutbox");
-
-            migrationBuilder.DropTable(
-                name: "LifecycleClosureFenceReceipts");
+            foreach (var table in new[]
+                     {
+                         "AuthClosureParticipantExecutions", "AuthClosureParticipantInbox",
+                         "AuthClosureParticipantOutbox", "LifecycleClosureFenceReceipts"
+                     })
+            {
+                migrationBuilder.DropTable(name: table);
+            }
 
             migrationBuilder.DropColumn(
                 name: "FailedAt",
@@ -394,6 +350,23 @@ namespace AuthManager.Infrastructure.Migrations
                 table: "OrganisationLifecycleOperations");
 
             migrationBuilder.Sql("RESET ROLE;");
+        }
+
+        private static void CreateOperationScopedTable(
+            MigrationBuilder migrationBuilder,
+            string table,
+            string columns,
+            string primaryKey,
+            string foreignKey)
+        {
+            migrationBuilder.Sql($$"""
+                CREATE TABLE "{{table}}" (
+                  {{columns}},
+                  CONSTRAINT "PK_{{table}}" PRIMARY KEY ({{primaryKey}}),
+                  CONSTRAINT "{{foreignKey}}" FOREIGN KEY ("OperationId", "OrganisationId")
+                    REFERENCES "OrganisationLifecycleOperations" ("Id", "OrganisationId") ON DELETE RESTRICT
+                );
+                """);
         }
     }
 }
