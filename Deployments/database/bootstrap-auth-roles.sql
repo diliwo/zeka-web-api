@@ -71,6 +71,7 @@ GRANT USAGE ON SCHEMA zeka TO zeka_auth_runtime;
 DO $ownership$
 DECLARE object record;
         table_grant record;
+        public_grantee CONSTANT text := 'PUBLIC';
 BEGIN
   FOR object IN SELECT c.oid, n.nspname, c.relname
     FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -87,7 +88,7 @@ BEGIN
       EXECUTE pg_catalog.format(
         'REVOKE ALL ON TABLE %I.%I FROM %s CASCADE',
         object.nspname, object.relname,
-        CASE WHEN table_grant.grantee=0 THEN 'PUBLIC'
+        CASE WHEN table_grant.grantee=0 THEN public_grantee
           ELSE pg_catalog.quote_ident(table_grant.grantee_name) END);
     END LOOP;
   END LOOP;
@@ -162,6 +163,7 @@ DECLARE object_name text;
         function_name text;
         function_grant record;
         update_list text;
+        public_grantee CONSTANT text := 'PUBLIC';
 BEGIN
   FOREACH object_name IN ARRAY ARRAY[
     'LifecycleParticipantRegistryRevisions','LifecycleParticipantRegistryBindings',
@@ -211,7 +213,7 @@ BEGIN
         EXECUTE pg_catalog.format(
           'REVOKE ALL ON TABLE public.%I FROM %s CASCADE',
           lifecycle_object.name,
-          CASE WHEN table_grant.grantee=0 THEN 'PUBLIC'
+          CASE WHEN table_grant.grantee=0 THEN public_grantee
             ELSE pg_catalog.quote_ident(table_grant.grantee_name) END);
       END LOOP;
       FOR column_grant IN
@@ -227,7 +229,7 @@ BEGIN
         EXECUTE pg_catalog.format(
           'REVOKE ALL (%I) ON TABLE public.%I FROM %s CASCADE',
           column_grant.attname, lifecycle_object.name,
-          CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+          CASE WHEN column_grant.grantee=0 THEN public_grantee
             ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
       END LOOP;
       EXECUTE pg_catalog.format(
@@ -262,7 +264,7 @@ BEGIN
         EXECUTE pg_catalog.format(
           'REVOKE ALL ON FUNCTION zeka.%I() FROM %s CASCADE',
           function_name,
-          CASE WHEN function_grant.grantee=0 THEN 'PUBLIC'
+          CASE WHEN function_grant.grantee=0 THEN public_grantee
             ELSE pg_catalog.quote_ident(function_grant.grantee_name) END);
       END LOOP;
       EXECUTE pg_catalog.format(

@@ -96,6 +96,22 @@ public sealed class AuthClosureParticipant(DbContextOptions<AuthDbContext> optio
     private async Task<T> ExecuteAsync<T>(LifecycleMessageHeaderV1 header, string messageType,
         object command, Func<AuthDbContext, Task<T>> transition, CancellationToken cancellationToken)
     {
+        ValidateCommandHeader(header, messageType);
+        var inputHash = Hash(JsonSerializer.SerializeToUtf8Bytes(command, Json));
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                return await ExecuteAttemptAsync(header, messageType, inputHash,
+                    transition, cancellationToken);
+            }
+            catch (Exception exception) when (IsRetryable(exception)) { }
+        }
+        throw new InvalidOperationException("Auth closure participant could not reconcile concurrent delivery.");
+    }
+
+    private static void ValidateCommandHeader(LifecycleMessageHeaderV1 header, string messageType)
+    {
         if (header.ParticipantId != ParticipantId || header.ContractVersion != LifecycleContractV1.Version)
             throw new InvalidOperationException("Auth closure participant identity is required.");
         var phase = messageType switch
@@ -113,55 +129,52 @@ public sealed class AuthClosureParticipant(DbContextOptions<AuthDbContext> optio
                 || header.CorrelationId != header.OperationId))
             throw new InvalidOperationException(
                 "Auth closure entry must be caused by and correlated to the closure operation.");
-        var inputHash = Hash(JsonSerializer.SerializeToUtf8Bytes(command, Json));
-        for (var attempt = 0; attempt < 3; attempt++)
+    }
+
+    private async Task<T> ExecuteAttemptAsync<T>(LifecycleMessageHeaderV1 header,
+        string messageType, string inputHash, Func<AuthDbContext, Task<T>> transition,
+        CancellationToken cancellationToken)
+    {
+        await using var database = new AuthDbContext(options) { LifecycleOnly = true };
+        return await database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            await using var database = new AuthDbContext(options) { LifecycleOnly = true };
+            await using var transaction = await database.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+            await InitializeAsync(database, transaction, header.OrganisationId, cancellationToken);
             try
             {
-                return await database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+                var prior = await database.AuthClosureParticipantInboxReceipts.SingleOrDefaultAsync(
+                    x => x.MessageId == header.MessageId, cancellationToken);
+                if (prior is not null)
                 {
-                    await using var transaction = await database.Database.BeginTransactionAsync(
-                        IsolationLevel.Serializable, cancellationToken);
-                    await InitializeAsync(database, transaction, header.OrganisationId, cancellationToken);
-                    try
-                    {
-                        var prior = await database.AuthClosureParticipantInboxReceipts.SingleOrDefaultAsync(
-                            x => x.MessageId == header.MessageId, cancellationToken);
-                        if (prior is not null)
-                        {
-                            if (prior.OperationId != header.OperationId
-                                || prior.OrganisationId != header.OrganisationId
-                                || prior.MessageType != messageType
-                                || prior.PayloadSha256 != inputHash)
-                                throw new InvalidOperationException("Closure inbox identity conflicts with a prior command.");
-                            var priorOutput = await database.AuthClosureParticipantOutboxMessages.SingleAsync(
-                                x => x.OperationId == header.OperationId && x.MessageType == typeof(T).Name,
-                                cancellationToken);
-                            return DeserializeOutput<T>(priorOutput.PayloadJson);
-                        }
+                    if (prior.OperationId != header.OperationId
+                        || prior.OrganisationId != header.OrganisationId
+                        || prior.MessageType != messageType
+                        || prior.PayloadSha256 != inputHash)
+                        throw new InvalidOperationException("Closure inbox identity conflicts with a prior command.");
+                    var priorOutput = await database.AuthClosureParticipantOutboxMessages.SingleAsync(
+                        x => x.OperationId == header.OperationId && x.MessageType == typeof(T).Name,
+                        cancellationToken);
+                    return DeserializeOutput<T>(priorOutput.PayloadJson);
+                }
 
-                        database.Add(AuthClosureParticipantInboxReceipt.Create(header.MessageId,
-                            header.OperationId, header.OrganisationId, messageType, inputHash, clock.GetUtcNow()));
-                        var output = await transition(database);
-                        var payloadJson = JsonSerializer.Serialize(output, Json);
-                        database.Add(AuthClosureParticipantOutboxMessage.Create(Guid.NewGuid(),
-                            header.OperationId, header.OrganisationId, typeof(T).Name, payloadJson,
-                            Hash(Encoding.UTF8.GetBytes(payloadJson)), clock.GetUtcNow()));
-                        await database.SaveChangesAsync(cancellationToken);
-                        await transaction.CommitAsync(cancellationToken);
-                        return output;
-                    }
-                    finally
-                    {
-                        database.LifecycleTransaction = null;
-                        database.LifecycleOrganisationId = Guid.Empty;
-                    }
-                });
+                database.Add(AuthClosureParticipantInboxReceipt.Create(header.MessageId,
+                    header.OperationId, header.OrganisationId, messageType, inputHash, clock.GetUtcNow()));
+                var output = await transition(database);
+                var payloadJson = JsonSerializer.Serialize(output, Json);
+                database.Add(AuthClosureParticipantOutboxMessage.Create(Guid.NewGuid(),
+                    header.OperationId, header.OrganisationId, typeof(T).Name, payloadJson,
+                    Hash(Encoding.UTF8.GetBytes(payloadJson)), clock.GetUtcNow()));
+                await database.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return output;
             }
-            catch (Exception exception) when (IsRetryable(exception)) { }
-        }
-        throw new InvalidOperationException("Auth closure participant could not reconcile concurrent delivery.");
+            finally
+            {
+                database.LifecycleTransaction = null;
+                database.LifecycleOrganisationId = Guid.Empty;
+            }
+        });
     }
 
     private static async Task AcquireBarrierLock(AuthDbContext database, Guid organisationId,
