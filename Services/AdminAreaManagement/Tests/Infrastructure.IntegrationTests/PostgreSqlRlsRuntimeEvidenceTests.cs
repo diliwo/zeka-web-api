@@ -114,7 +114,10 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
             """);
         await migrator.MigrateAsync("20260912180000_PostgreSqlRlsAndRuntimeRoles");
         var pending = (await deployment.Database.GetPendingMigrationsAsync()).ToArray();
-        if (!pending.SequenceEqual(["20260917212648_DurableDocumentFileOperations"], StringComparer.Ordinal))
+        if (!pending.SequenceEqual([
+                "20260917212648_DurableDocumentFileOperations",
+                "20260928074338_Life01AdminAreaExportParticipant"
+            ], StringComparer.Ordinal))
             throw new InvalidOperationException(
                 $"Supported upgrade checkpoint drifted: [{string.Join(", ", pending)}].");
         await migrator.MigrateAsync();
@@ -176,6 +179,10 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
 {
     private static readonly string[] ProtectedTables =
     [
+        "AdminAreaExportFences",
+        "AdminAreaExportFragments",
+        "AdminAreaExportInbox",
+        "AdminAreaExportOutbox",
         "ContactPersons",
         "DocumentPartners",
         "Emails",
@@ -197,7 +204,7 @@ public sealed class PostgreSqlRlsRuntimeEvidenceTests(PostgreSqlRlsRuntimeDataba
         var applied = new List<string>();
         while (await reader.ReadAsync()) applied.Add(reader.GetString(0));
         Assert.Contains("20260912180000_PostgreSqlRlsAndRuntimeRoles", applied);
-        Assert.Equal("20260917212648_DurableDocumentFileOperations", applied[^1]);
+        Assert.Equal("20260928074338_Life01AdminAreaExportParticipant", applied[^1]);
     }
 
     [Fact]

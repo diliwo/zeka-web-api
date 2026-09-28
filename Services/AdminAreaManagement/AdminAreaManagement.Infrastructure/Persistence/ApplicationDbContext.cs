@@ -1,5 +1,6 @@
 using AdminAreaManagement.Core.Common;
 using AdminAreaManagement.Core.Entities;
+using AdminAreaManagement.Infrastructure.Persistence.Exports;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Zeka.Extensions.MultiTenancy.Abstractions;
@@ -40,6 +41,10 @@ public class ApplicationDbContext : TenantDbContext
     public DbSet<TrainingField> TrainingFields => Set<TrainingField>();
     public DbSet<City> Cities => Set<City>();
     public DbSet<Nationality> Nationalities => Set<Nationality>();
+    public DbSet<AdminAreaExportFence> AdminAreaExportFences => Set<AdminAreaExportFence>();
+    public DbSet<AdminAreaExportInbox> AdminAreaExportInbox => Set<AdminAreaExportInbox>();
+    public DbSet<AdminAreaExportOutbox> AdminAreaExportOutbox => Set<AdminAreaExportOutbox>();
+    public DbSet<AdminAreaExportFragment> AdminAreaExportFragments => Set<AdminAreaExportFragment>();
 
     protected override void ConfigureTenantModel(ModelBuilder builder) => ConfigurePersistenceModel(builder);
 
@@ -77,6 +82,10 @@ public sealed class DeploymentDbContext(DbContextOptions<DeploymentDbContext> op
     public DbSet<TrainingField> TrainingFields => Set<TrainingField>();
     public DbSet<City> Cities => Set<City>();
     public DbSet<Nationality> Nationalities => Set<Nationality>();
+    public DbSet<AdminAreaExportFence> AdminAreaExportFences => Set<AdminAreaExportFence>();
+    public DbSet<AdminAreaExportInbox> AdminAreaExportInbox => Set<AdminAreaExportInbox>();
+    public DbSet<AdminAreaExportOutbox> AdminAreaExportOutbox => Set<AdminAreaExportOutbox>();
+    public DbSet<AdminAreaExportFragment> AdminAreaExportFragments => Set<AdminAreaExportFragment>();
     protected override void OnModelCreating(ModelBuilder builder) => ApplicationDbContext.ConfigurePersistenceModel(builder);
 }
 
