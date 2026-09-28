@@ -174,3 +174,29 @@ BEGIN
     GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_auth_runtime;
   END IF;
 END $lifecycle_objects$;
+DO $membership_permission_objects$
+DECLARE column_grant record;
+BEGIN
+  IF pg_catalog.to_regclass('public."MembershipPermissionGrants"') IS NOT NULL THEN
+    REVOKE ALL ON TABLE public."MembershipPermissionGrants" FROM PUBLIC, zeka_auth_runtime;
+    FOR column_grant IN
+      SELECT DISTINCT attribute.attname, acl.grantee,
+        pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
+      FROM pg_catalog.pg_attribute attribute
+      JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+      CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+      WHERE relation.oid='public."MembershipPermissionGrants"'::regclass
+        AND attribute.attnum>0 AND NOT attribute.attisdropped
+        AND acl.grantee<>relation.relowner
+    LOOP
+      EXECUTE pg_catalog.format(
+        'REVOKE ALL (%I) ON TABLE public."MembershipPermissionGrants" FROM %s CASCADE',
+        column_grant.attname,
+        CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+          ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
+    END LOOP;
+    GRANT SELECT, INSERT ON TABLE public."MembershipPermissionGrants" TO zeka_auth_runtime;
+    GRANT UPDATE ("RevokedByMembershipId", "RevokedBySubjectId", "RevokedAtUtc", "ConcurrencyVersion")
+      ON TABLE public."MembershipPermissionGrants" TO zeka_auth_runtime;
+  END IF;
+END $membership_permission_objects$;

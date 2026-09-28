@@ -239,7 +239,9 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
             ('OrganisationLifecycleOperations','SELECT'),
             ('OrganisationLifecycleOperations','INSERT'),
             ('OrganisationLifecycleParticipants','SELECT'),
-            ('OrganisationLifecycleParticipants','INSERT')
+            ('OrganisationLifecycleParticipants','INSERT'),
+            ('MembershipPermissionGrants','SELECT'),
+            ('MembershipPermissionGrants','INSERT')
         ), actual(table_name, privilege) AS (
           SELECT c.relname, privilege_names.privilege
           FROM pg_catalog.pg_class c

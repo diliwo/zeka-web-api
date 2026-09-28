@@ -31,6 +31,16 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
             if (entry.Entity is Lifecycle.LifecycleRegistryRevisionRecord or Lifecycle.LifecycleRegistryBindingRecord
                 && entry.State != EntityState.Added)
                 throw new InvalidOperationException("Registry revisions and bindings are immutable.");
+            if (entry.Entity is MembershipPermissionGrant && entry.State == EntityState.Deleted)
+                throw new InvalidOperationException("Membership permission grant history is append-preserving.");
+            if (entry.Entity is MembershipPermissionGrant && entry.State == EntityState.Modified
+                && (entry.Property(nameof(MembershipPermissionGrant.OrganisationId)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.OrganisationMembershipId)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.PermissionKey)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.GrantedByMembershipId)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.GrantedBySubjectId)).IsModified
+                    || entry.Property(nameof(MembershipPermissionGrant.GrantedAtUtc)).IsModified))
+                throw new InvalidOperationException("Membership permission grant authority evidence is immutable.");
             if (entry.Entity is AuthManager.Core.Lifecycle.LifecycleOperation or AuthManager.Core.Lifecycle.LifecycleParticipant)
             {
                 var organisation = (Guid)entry.Property("OrganisationId").CurrentValue!;
@@ -47,6 +57,7 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<Organisation> Organisations => Set<Organisation>();
     public DbSet<OrganisationMembership> OrganisationMemberships => Set<OrganisationMembership>();
     public DbSet<PermissionSet> PermissionSets => Set<PermissionSet>();
+    public DbSet<MembershipPermissionGrant> MembershipPermissionGrants => Set<MembershipPermissionGrant>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -59,5 +70,6 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
         modelBuilder.ApplyConfiguration(new OrganisationConfiguration());
         modelBuilder.ApplyConfiguration(new OrganisationMembershipConfiguration());
         modelBuilder.ApplyConfiguration(new PermissionSetConfiguration());
+        modelBuilder.ApplyConfiguration(new MembershipPermissionGrantConfiguration());
     }
 }

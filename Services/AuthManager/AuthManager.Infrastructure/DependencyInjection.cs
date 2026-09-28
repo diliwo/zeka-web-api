@@ -48,6 +48,7 @@ public static class DependencyInjection
         services.AddScoped<AuthManager.Application.Lifecycle.ILifecycleAdmissionStore, Persistence.Lifecycle.LifecycleAdmissionStore>();
         services.AddScoped<AuthManager.Application.Lifecycle.ILifecycleRegistryReader, Persistence.Lifecycle.LifecycleRegistryReader>();
         services.AddScoped<AuthManager.Application.Authorization.IActiveOrganisationMembership, ActiveOrganisationMembership>();
+        services.AddScoped<AuthManager.Application.Authorization.IMembershipPermissionGrantStore, MembershipPermissionGrantStore>();
 
         if (configuration.GetValue<bool>($"{OutboxDispatcherOptions.SectionName}:Enabled"))
             services.AddHostedService<OutboxBackgroundService>();

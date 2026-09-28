@@ -3,6 +3,10 @@ using AuthManager.Core.Enums;
 using AuthManager.Core.Organisations;
 using AuthManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AuthManager.Infrastructure.Identity;
 
@@ -15,8 +19,12 @@ public sealed class CurrentTenantAccessResolver(AuthDbContext database, TimeProv
         if (authenticatedSubjectId == Guid.Empty || selectedOrganisationId == Guid.Empty)
             return CurrentTenantAccess.Denied(now);
 
-        // A single database observation avoids assembling an authorization decision from stale claims
-        // or independently cached organisation, membership, and role records.
+        await using var transaction = await database.Database.BeginTransactionAsync(
+            IsolationLevel.RepeatableRead, cancellationToken);
+        await InitializeTenantContextAsync(database, transaction, selectedOrganisationId, cancellationToken);
+
+        // A repeatable-read database observation avoids assembling an authorization decision from stale claims
+        // or independently cached organisation, membership, role, and explicit-grant records.
         var matches = await (
             from membership in database.OrganisationMemberships.AsNoTracking()
             join organisation in database.Organisations on membership.OrganisationId equals organisation.Id
@@ -38,8 +46,49 @@ public sealed class CurrentTenantAccessResolver(AuthDbContext database, TimeProv
             return CurrentTenantAccess.Denied(now);
 
         var match = matches[0];
+        var explicitGrants = await database.MembershipPermissionGrants.AsNoTracking()
+            .Where(grant => grant.OrganisationId == selectedOrganisationId
+                && grant.OrganisationMembershipId == match.Id
+                && grant.RevokedAtUtc == null)
+            .OrderBy(grant => grant.PermissionKey)
+            .ThenBy(grant => grant.Id)
+            .Select(grant => new { grant.Id, grant.PermissionKey, grant.ConcurrencyVersion })
+            .ToListAsync(cancellationToken);
+        if (explicitGrants.Any(grant => !TenantPermissions.IsKnown(grant.PermissionKey)))
+            return CurrentTenantAccess.Denied(now);
+        var effectivePermissions = permissions.Concat(explicitGrants.Select(grant => grant.PermissionKey))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var grantVersion = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|',
+            explicitGrants.Select(grant => $"{grant.Id:D}:{grant.ConcurrencyVersion}:{grant.PermissionKey}")))));
+        await transaction.CommitAsync(cancellationToken);
         return new CurrentTenantAccess(TenantAccessOutcome.Authorized, selectedOrganisationId, match.Id,
-            permissions.Order(StringComparer.Ordinal).ToArray(),
-            $"v1:{match.OrganisationVersion}:{match.MembershipVersion}:{match.Role}", now);
+            effectivePermissions,
+            $"v2:{match.OrganisationVersion}:{match.MembershipVersion}:{match.Role}:{grantVersion}", now);
+    }
+
+    private static async Task InitializeTenantContextAsync(
+        AuthDbContext database,
+        IDbContextTransaction transaction,
+        Guid organisationId,
+        CancellationToken cancellationToken)
+    {
+        if (!database.Database.IsNpgsql())
+        {
+            return;
+        }
+
+        await using var command = database.Database.GetDbConnection().CreateCommand();
+        command.Transaction = transaction.GetDbTransaction();
+        command.CommandText = "select pg_catalog.set_config('zeka.organisation_id', @organisation_id, true)";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "organisation_id";
+        parameter.Value = organisationId.ToString("D");
+        command.Parameters.Add(parameter);
+        if (!Equals(await command.ExecuteScalarAsync(cancellationToken), parameter.Value))
+        {
+            throw new InvalidOperationException("Authorization tenant context initialization failed.");
+        }
     }
 }
