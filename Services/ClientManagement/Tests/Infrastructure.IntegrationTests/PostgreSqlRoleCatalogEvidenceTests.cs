@@ -68,6 +68,12 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
             GRANT INSERT, UPDATE, DELETE ON TABLE public."Languages" TO zeka_client_runtime;
             GRANT USAGE, SELECT ON SEQUENCE public."Languages_LanguageId_seq" TO zeka_client_runtime;
             GRANT SELECT ON TABLE public."__EFMigrationsHistory" TO zeka_client_runtime;
+            GRANT ALL ON TABLE public."OrganisationExportFences" TO zeka_client_runtime;
+            GRANT ALL ON TABLE public."OrganisationExportFragments" TO zeka_client_runtime;
+            GRANT ALL ON TABLE public."OrganisationExportInbox" TO zeka_client_runtime;
+            GRANT ALL ON TABLE public."OrganisationExportOutbox" TO zeka_client_runtime;
+            GRANT UPDATE ("FenceToken") ON TABLE public."OrganisationExportFences" TO PUBLIC;
+            GRANT EXECUTE ON FUNCTION zeka.reject_writes_during_export_fence() TO PUBLIC;
             ALTER ROLE zeka_client_owner IN DATABASE {databaseIdentifier} SET application_name='unexpected';
             ALTER ROLE zeka_client_migrator IN DATABASE {databaseIdentifier} SET application_name='unexpected';
             ALTER ROLE zeka_client_runtime IN DATABASE {databaseIdentifier} SET application_name='unexpected';
@@ -89,6 +95,68 @@ public sealed class PostgreSqlClientRoleCatalogEvidenceTests : IAsyncLifetime
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public."__EFMigrationsHistory"','SELECT')
               AND NOT pg_catalog.has_table_privilege('zeka_client_runtime','public.issue45_unknown_client','SELECT')
               AND NOT pg_catalog.has_sequence_privilege('zeka_client_runtime','public.issue45_unknown_client_id_seq','USAGE')
+              AND (
+                SELECT pg_catalog.bool_and(pg_catalog.has_table_privilege(
+                  'zeka_client_runtime', pg_catalog.format('public.%I', object_name), privilege_name))
+                FROM (VALUES
+                  ('OrganisationExportFences'), ('OrganisationExportFragments'),
+                  ('OrganisationExportInbox'), ('OrganisationExportOutbox')) AS objects(object_name)
+                CROSS JOIN (VALUES ('SELECT'), ('INSERT')) AS privileges(privilege_name)
+              )
+              AND (
+                SELECT pg_catalog.bool_and(NOT pg_catalog.has_table_privilege(
+                  'zeka_client_runtime', pg_catalog.format('public.%I', object_name), privilege_name))
+                FROM (VALUES
+                  ('OrganisationExportFences'), ('OrganisationExportFragments'),
+                  ('OrganisationExportInbox'), ('OrganisationExportOutbox')) AS objects(object_name)
+                CROSS JOIN (VALUES
+                  ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS privileges(privilege_name)
+              )
+              AND pg_catalog.has_column_privilege(
+                'zeka_client_runtime', 'public."OrganisationExportFences"', 'ReleasedAt', 'UPDATE')
+              AND NOT EXISTS (
+                SELECT 1
+                FROM (VALUES
+                  ('OrganisationExportFences'), ('OrganisationExportFragments'),
+                  ('OrganisationExportInbox'), ('OrganisationExportOutbox')) AS objects(object_name)
+                JOIN pg_catalog.pg_class relation
+                  ON relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
+                JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid=relation.oid
+                CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+                WHERE attribute.attnum>0 AND NOT attribute.attisdropped
+                  AND acl.grantee<>relation.relowner
+                  AND NOT (
+                    object_name='OrganisationExportFences'
+                    AND attribute.attname='ReleasedAt'
+                    AND acl.grantee=(SELECT oid FROM pg_catalog.pg_roles WHERE rolname='zeka_client_runtime')
+                    AND acl.privilege_type='UPDATE')
+              )
+              AND (
+                SELECT pg_catalog.bool_and(pg_catalog.has_sequence_privilege(
+                  'zeka_client_runtime', pg_catalog.format('public.%I', object_name), privilege_name))
+                FROM (VALUES
+                  ('OrganisationExportFences_Id_seq'), ('OrganisationExportFragments_Id_seq'),
+                  ('OrganisationExportInbox_Id_seq'), ('OrganisationExportOutbox_Id_seq')) AS objects(object_name)
+                CROSS JOIN (VALUES ('USAGE'), ('SELECT')) AS privileges(privilege_name)
+              )
+              AND (
+                SELECT pg_catalog.bool_and(NOT pg_catalog.has_sequence_privilege(
+                  'zeka_client_runtime', pg_catalog.format('public.%I', object_name), 'UPDATE'))
+                FROM (VALUES
+                  ('OrganisationExportFences_Id_seq'), ('OrganisationExportFragments_Id_seq'),
+                  ('OrganisationExportInbox_Id_seq'), ('OrganisationExportOutbox_Id_seq')) AS objects(object_name)
+              )
+              AND pg_catalog.has_function_privilege(
+                'zeka_client_runtime', 'zeka.reject_writes_during_export_fence()', 'EXECUTE')
+              AND NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc procedure
+                CROSS JOIN LATERAL pg_catalog.aclexplode(
+                  COALESCE(procedure.proacl, pg_catalog.acldefault('f', procedure.proowner))) acl
+                WHERE procedure.oid=pg_catalog.to_regprocedure('zeka.reject_writes_during_export_fence()')
+                  AND acl.grantee=0
+                  AND acl.privilege_type='EXECUTE'
+              )
             """));
         await ExecuteAdministratorAsync("DROP TABLE public.issue45_unknown_client");
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(ApplicationDbContext).Assembly);

@@ -164,14 +164,119 @@ BEGIN
         CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
           ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
     END LOOP;
+    REVOKE ALL ON TABLE public."OrganisationLifecycleOperations" FROM PUBLIC, zeka_auth_runtime;
     GRANT SELECT, INSERT ON TABLE public."OrganisationLifecycleOperations" TO zeka_auth_runtime;
-    GRANT UPDATE ("State", "Revision") ON TABLE public."OrganisationLifecycleOperations" TO zeka_auth_runtime;
+    GRANT UPDATE ("State", "Revision", "SnapshotAt", "FenceEvidenceHash", "PackageSha256",
+      "PackageReference", "FailureCode", "CompletedAt", "IsActive")
+      ON TABLE public."OrganisationLifecycleOperations" TO zeka_auth_runtime;
   END IF;
   IF pg_catalog.to_regclass('public."OrganisationLifecycleParticipants"') IS NOT NULL THEN
+    FOR column_grant IN
+      SELECT DISTINCT attribute.attname, acl.grantee,
+        pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
+      FROM pg_catalog.pg_attribute attribute
+      JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+      CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+      WHERE relation.oid='public."OrganisationLifecycleParticipants"'::regclass
+        AND attribute.attnum>0 AND NOT attribute.attisdropped
+        AND acl.grantee<>relation.relowner
+    LOOP
+      EXECUTE pg_catalog.format(
+        'REVOKE ALL (%I) ON TABLE public."OrganisationLifecycleParticipants" FROM %s CASCADE',
+        column_grant.attname,
+        CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+          ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
+    END LOOP;
+    REVOKE ALL ON TABLE public."OrganisationLifecycleParticipants" FROM PUBLIC, zeka_auth_runtime;
     GRANT SELECT, INSERT ON TABLE public."OrganisationLifecycleParticipants" TO zeka_auth_runtime;
+    GRANT UPDATE ("State") ON TABLE public."OrganisationLifecycleParticipants" TO zeka_auth_runtime;
   END IF;
+  FOREACH object_name IN ARRAY ARRAY[
+    'LifecycleCoordinatorLeases','LifecycleExportFenceReceipts','LifecycleExportFragments',
+    'LifecycleExportPackages','LifecycleInboxReceipts'
+  ] LOOP
+    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('REVOKE ALL ON TABLE public.%I FROM PUBLIC, zeka_auth_runtime', object_name);
+      FOR column_grant IN
+        SELECT DISTINCT attribute.attname, acl.grantee,
+          pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
+        FROM pg_catalog.pg_attribute attribute
+        JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+        CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+        WHERE relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
+          AND attribute.attnum>0 AND NOT attribute.attisdropped
+          AND acl.grantee<>relation.relowner
+      LOOP
+        EXECUTE pg_catalog.format(
+          'REVOKE ALL (%I) ON TABLE public.%I FROM %s CASCADE',
+          column_grant.attname, object_name,
+          CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+            ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
+      END LOOP;
+      EXECUTE pg_catalog.format('GRANT SELECT, INSERT ON TABLE public.%I TO zeka_auth_runtime', object_name);
+    END IF;
+  END LOOP;
+  IF pg_catalog.to_regclass('public."LifecycleCoordinatorLeases"') IS NOT NULL THEN
+    GRANT UPDATE ("LeaseId", "ExpiresAt", "Version")
+      ON TABLE public."LifecycleCoordinatorLeases" TO zeka_auth_runtime;
+  END IF;
+  IF pg_catalog.to_regclass('public."AuthExportParticipantExecutions"') IS NOT NULL THEN
+    ALTER TABLE public."AuthExportParticipantExecutions" OWNER TO zeka_auth_owner;
+    REVOKE ALL ON TABLE public."AuthExportParticipantExecutions" FROM PUBLIC, zeka_auth_runtime;
+    FOR column_grant IN
+      SELECT DISTINCT attribute.attname, acl.grantee,
+        pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
+      FROM pg_catalog.pg_attribute attribute
+      JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+      CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+      WHERE relation.oid='public."AuthExportParticipantExecutions"'::regclass
+        AND attribute.attnum>0 AND NOT attribute.attisdropped
+        AND acl.grantee<>relation.relowner
+    LOOP
+      EXECUTE pg_catalog.format(
+        'REVOKE ALL (%I) ON TABLE public."AuthExportParticipantExecutions" FROM %s CASCADE',
+        column_grant.attname,
+        CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+          ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
+    END LOOP;
+    GRANT SELECT, INSERT ON TABLE public."AuthExportParticipantExecutions" TO zeka_auth_runtime;
+    GRANT UPDATE ("SnapshotAt", "FenceEvidenceHash", "FragmentHash", "CategoriesJson",
+      "ReleasedAt", "State")
+      ON TABLE public."AuthExportParticipantExecutions" TO zeka_auth_runtime;
+  END IF;
+  FOREACH object_name IN ARRAY ARRAY[
+    'AuthExportParticipantInbox','AuthExportParticipantOutbox'
+  ] LOOP
+    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('ALTER TABLE public.%I OWNER TO zeka_auth_owner', object_name);
+      EXECUTE pg_catalog.format('REVOKE ALL ON TABLE public.%I FROM PUBLIC, zeka_auth_runtime', object_name);
+      FOR column_grant IN
+        SELECT DISTINCT attribute.attname, acl.grantee,
+          pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
+        FROM pg_catalog.pg_attribute attribute
+        JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+        CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+        WHERE relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
+          AND attribute.attnum>0 AND NOT attribute.attisdropped
+          AND acl.grantee<>relation.relowner
+      LOOP
+        EXECUTE pg_catalog.format(
+          'REVOKE ALL (%I) ON TABLE public.%I FROM %s CASCADE',
+          column_grant.attname, object_name,
+          CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+            ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
+      END LOOP;
+      EXECUTE pg_catalog.format('GRANT SELECT, INSERT ON TABLE public.%I TO zeka_auth_runtime', object_name);
+    END IF;
+  END LOOP;
   IF pg_catalog.to_regprocedure('zeka.current_organisation_id()') IS NOT NULL THEN
     GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_auth_runtime;
+  END IF;
+  IF pg_catalog.to_regprocedure('zeka.reject_auth_membership_write_during_export_fence()') IS NOT NULL THEN
+    ALTER FUNCTION zeka.reject_auth_membership_write_during_export_fence() OWNER TO zeka_auth_owner;
+    REVOKE ALL ON FUNCTION zeka.reject_auth_membership_write_during_export_fence()
+      FROM PUBLIC, zeka_auth_runtime;
+    GRANT EXECUTE ON FUNCTION zeka.reject_auth_membership_write_during_export_fence() TO zeka_auth_runtime;
   END IF;
 END $lifecycle_objects$;
 DO $membership_permission_objects$
