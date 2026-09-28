@@ -17,7 +17,9 @@ public sealed class OrganisationExportFence : TenantOwnedEntity
     public string ParticipantId { get; private set; } = string.Empty;
     public string FenceToken { get; private set; } = string.Empty;
     public long FenceRevision { get; private set; } = 1;
-    public OrganisationExportFenceState State { get; private set; }
+    public OrganisationExportFenceState State => ReleasedAt is null
+        ? OrganisationExportFenceState.Active
+        : OrganisationExportFenceState.Released;
     public DateTimeOffset EnteredAt { get; private set; }
     public DateTimeOffset? ReleasedAt { get; private set; }
 
@@ -34,7 +36,6 @@ public sealed class OrganisationExportFence : TenantOwnedEntity
             OperationRevision = operationRevision,
             ParticipantId = participantId,
             FenceToken = fenceToken,
-            State = OrganisationExportFenceState.Active,
             EnteredAt = enteredAt
         };
         fence.AssignToOrganisation(organisationId);
@@ -48,8 +49,6 @@ public sealed class OrganisationExportFence : TenantOwnedEntity
         if (releasedAt == default || releasedAt.Offset != TimeSpan.Zero || releasedAt < EnteredAt)
             throw new InvalidOperationException("Export fence release time is invalid.");
         if (State == OrganisationExportFenceState.Released) return;
-        State = OrganisationExportFenceState.Released;
         ReleasedAt = releasedAt;
-        FenceRevision = checked(FenceRevision + 1);
     }
 }

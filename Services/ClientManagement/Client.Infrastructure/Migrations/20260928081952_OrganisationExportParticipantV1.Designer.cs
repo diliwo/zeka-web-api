@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ClientManagement.Infrastructure.Migrations
 {
     [DbContext(typeof(DeploymentDbContext))]
-    [Migration("20260928074326_OrganisationExportParticipantV1")]
+    [Migration("20260928081952_OrganisationExportParticipantV1")]
     partial class OrganisationExportParticipantV1
     {
         /// <inheritdoc />
@@ -1130,16 +1130,13 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("State")
-                        .HasColumnType("integer");
-
                     b.HasKey("Id");
 
                     b.HasAlternateKey("Id", "OrganisationId");
 
                     b.HasIndex("OrganisationId")
                         .IsUnique()
-                        .HasFilter("\"State\" = 1");
+                        .HasFilter("\"ReleasedAt\" IS NULL");
 
                     b.HasIndex("OperationId", "OrganisationId")
                         .IsUnique();

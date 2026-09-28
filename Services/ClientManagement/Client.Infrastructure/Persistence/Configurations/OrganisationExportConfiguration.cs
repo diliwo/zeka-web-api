@@ -12,7 +12,8 @@ public sealed class OrganisationExportFenceConfiguration : IEntityTypeConfigurat
         builder.HasKey(x => x.Id);
         builder.HasIndex(x => new { x.OperationId, x.OrganisationId }).IsUnique();
         builder.HasIndex(x => x.OrganisationId).IsUnique()
-            .HasFilter("\"State\" = 1");
+            .HasFilter("\"ReleasedAt\" IS NULL");
+        builder.Ignore(x => x.State);
         builder.Property(x => x.ParticipantId).HasMaxLength(200).IsRequired();
         builder.Property(x => x.FenceToken).HasMaxLength(200).IsRequired();
         builder.Property(x => x.FenceRevision).IsConcurrencyToken();

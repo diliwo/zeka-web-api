@@ -13,14 +13,17 @@ public sealed class ClientOrganisationExportParticipant(
     ApplicationDbContext database,
     ITenantTransactionExecutor transactions,
     IClientExportArtifactStore artifacts,
+    IClientExportFixtureScope fixtureScope,
     TimeProvider clock) : IClientOrganisationExportParticipant
 {
     private static readonly string[] ExpectedCategories = ClientExportContract.Categories;
+    private const string ArtifactSet = "client-management-export-v1";
 
     public Task<OrganisationExportFenceEnteredV1> EnterFenceAsync(EnterOrganisationExportFenceV1 command,
         CancellationToken cancellationToken = default)
     {
         ValidateHeader(command.Header);
+        fixtureScope.Demand(command.Header.OrganisationId);
         var requestHash = ClientExportCanonical.RequestHash(command);
         return transactions.ExecuteAsync(async token =>
         {
@@ -28,7 +31,7 @@ public sealed class ClientOrganisationExportParticipant(
             if (replay is not null) return replay;
             await AcquireBarrierLock(command.Header.OrganisationId, token);
             var active = await database.OrganisationExportFences.SingleOrDefaultAsync(
-                x => x.State == OrganisationExportFenceState.Active, token);
+                x => x.ReleasedAt == null, token);
             if (active is not null && active.OperationId != command.Header.OperationId)
                 throw new InvalidOperationException("organisation_export_fence_active");
             var now = clock.GetUtcNow();
@@ -50,15 +53,17 @@ public sealed class ClientOrganisationExportParticipant(
         CancellationToken cancellationToken = default)
     {
         ValidateHeader(command.Header);
+        fixtureScope.Demand(command.Header.OrganisationId);
         var requestHash = ClientExportCanonical.RequestHash(command);
         return transactions.ExecuteAsync(async token =>
         {
+            await AcquireBarrierLock(command.Header.OrganisationId, token);
             var replay = await Replay<OrganisationExportFragmentReadyV1>(command.Header, requestHash, token);
             if (replay is not null) return replay;
             var fence = await database.OrganisationExportFences.SingleOrDefaultAsync(
                 x => x.OperationId == command.Header.OperationId, token)
                 ?? throw new InvalidOperationException("organisation_export_fence_missing");
-            if (fence.State != OrganisationExportFenceState.Active)
+            if (fence.ReleasedAt is not null)
                 throw new InvalidOperationException("organisation_export_fence_released");
             var ownReceipt = command.FenceEvidence.Receipts.SingleOrDefault(x =>
                 x.ParticipantId == ClientExportContract.ParticipantId)
@@ -77,6 +82,7 @@ public sealed class ClientOrganisationExportParticipant(
 
             var materialized = await Materialize(command, token);
             var categories = new List<ExportCategoryFragmentV1>(materialized.Count);
+            var artifactReceipts = new List<ClientExportArtifactReceipt>();
             var now = clock.GetUtcNow();
             foreach (var item in materialized.OrderBy(x => x.Category, StringComparer.Ordinal))
             {
@@ -86,9 +92,12 @@ public sealed class ClientOrganisationExportParticipant(
                 if (item.Content is not null)
                 {
                     schema = "client-export-csv-v1";
-                    hash = ClientExportCanonical.Sha256(item.Content);
-                    reference = await artifacts.PutIfAbsentAsync(command.Header.OrganisationId,
-                        command.Header.OperationId, item.Category, hash, item.Content, token);
+                    var receipt = await artifacts.WriteVerifiedAsync(command.Header.OrganisationId,
+                        command.Header.OperationId, new ClientExportArtifactWrite(
+                            ArtifactSet, $"{item.Category}.csv", item.Content), token);
+                    hash = receipt.ContentSha256;
+                    reference = receipt.ArtifactReference;
+                    artifactReceipts.Add(receipt);
                 }
                 var contract = new ExportCategoryFragmentV1(item.Category, item.Disposition,
                     item.RecordCount, schema, hash, reference, item.ReasonCode);
@@ -102,6 +111,8 @@ public sealed class ClientOrganisationExportParticipant(
             }
             if (!categories.Select(x => x.Category).SequenceEqual(ExpectedCategories, StringComparer.Ordinal))
                 throw new InvalidOperationException("organisation_export_category_inventory_mismatch");
+            await artifacts.VerifyExactAsync(command.Header.OrganisationId, command.Header.OperationId,
+                ArtifactSet, artifactReceipts, token);
             var response = new OrganisationExportFragmentReadyV1(
                 ReplyHeader(command.Header, Guid.NewGuid()), command.SnapshotAt, fence.FenceToken, categories);
             PersistReply(command.Header, requestHash, response, now);
@@ -114,21 +125,24 @@ public sealed class ClientOrganisationExportParticipant(
         CancellationToken cancellationToken = default)
     {
         ValidateHeader(command.Header);
+        fixtureScope.Demand(command.Header.OrganisationId);
         var requestHash = ClientExportCanonical.RequestHash(command);
         return transactions.ExecuteAsync(async token =>
         {
             var replay = await Replay<OrganisationExportFenceReleasedV1>(command.Header, requestHash, token);
             if (replay is not null) return replay;
             await AcquireBarrierLock(command.Header.OrganisationId, token);
-            var fence = await database.OrganisationExportFences.SingleOrDefaultAsync(
+            var fence = await database.OrganisationExportFences.AsNoTracking().SingleOrDefaultAsync(
                 x => x.OperationId == command.Header.OperationId, token)
                 ?? throw new InvalidOperationException("organisation_export_fence_missing");
             if (fence.OperationRevision != command.Header.OperationRevision)
                 throw new InvalidOperationException("organisation_export_revision_conflict");
+            if (!StringComparer.Ordinal.Equals(fence.FenceToken, command.FenceToken))
+                throw new InvalidOperationException("organisation_export_fence_token_invalid");
             var now = clock.GetUtcNow();
-            fence.Release(command.FenceToken, now);
+            await ReleaseFenceRow(fence.OrganisationId, fence.OperationId, fence.FenceToken, now, token);
             var response = new OrganisationExportFenceReleasedV1(
-                ReplyHeader(command.Header, Guid.NewGuid()), fence.FenceToken, fence.ReleasedAt!.Value);
+                ReplyHeader(command.Header, Guid.NewGuid()), fence.FenceToken, now);
             PersistReply(command.Header, requestHash, response, now);
             await database.SaveChangesAsync(token);
             return response;
@@ -309,6 +323,37 @@ public sealed class ClientOrganisationExportParticipant(
         parameter.Value = organisationId.ToString("D");
         command.Parameters.Add(parameter);
         await command.ExecuteScalarAsync(token);
+    }
+
+    private async Task ReleaseFenceRow(Guid organisationId, Guid operationId, string fenceToken,
+        DateTimeOffset releasedAt, CancellationToken token)
+    {
+        var transaction = database.Database.CurrentTransaction?.GetDbTransaction()
+            ?? throw new InvalidOperationException("organisation_export_transaction_missing");
+        await using var command = transaction.Connection!.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE public."OrganisationExportFences"
+            SET "ReleasedAt" = @released_at
+            WHERE "OrganisationId" = @organisation_id
+              AND "OperationId" = @operation_id
+              AND "FenceToken" = @fence_token
+              AND "ReleasedAt" IS NULL
+            """;
+        AddParameter(command, "released_at", releasedAt);
+        AddParameter(command, "organisation_id", organisationId);
+        AddParameter(command, "operation_id", operationId);
+        AddParameter(command, "fence_token", fenceToken);
+        if (await command.ExecuteNonQueryAsync(token) != 1)
+            throw new InvalidOperationException("organisation_export_fence_release_conflict");
+    }
+
+    private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 
     private static LifecycleMessageHeaderV1 ReplyHeader(LifecycleMessageHeaderV1 request, Guid messageId) =>

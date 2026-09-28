@@ -14,8 +14,6 @@ using ClientManagement.Application.Common.Authorization;
 using Microsoft.Extensions.Hosting;
 using Zeka.PersistenceSecurity;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using ClientManagement.Application.Lifecycle;
-using ClientManagement.Infrastructure.Persistence.Lifecycle;
 
 namespace ClientManagement.Infrastructure;
 
@@ -35,8 +33,6 @@ public static class DependencyInjection
         services.AddScoped<TenantTransactionAttemptState>();
         services.AddScoped<TenantCommandGuard>();
         services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
-        services.TryAddSingleton(TimeProvider.System);
-        services.AddScoped<IClientOrganisationExportParticipant, ClientOrganisationExportParticipant>();
         services.AddDbContext<ApplicationDbContext>((provider, options) =>
             options.UseNpgsql(
                 runtimeConnection,

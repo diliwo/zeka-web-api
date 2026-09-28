@@ -1127,16 +1127,13 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.Property<bool>("Softdelete")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("State")
-                        .HasColumnType("integer");
-
                     b.HasKey("Id");
 
                     b.HasAlternateKey("Id", "OrganisationId");
 
                     b.HasIndex("OrganisationId")
                         .IsUnique()
-                        .HasFilter("\"State\" = 1");
+                        .HasFilter("\"ReleasedAt\" IS NULL");
 
                     b.HasIndex("OperationId", "OrganisationId")
                         .IsUnique();

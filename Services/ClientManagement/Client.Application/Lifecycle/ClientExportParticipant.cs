@@ -20,8 +20,18 @@ public static class ClientExportContract
 
 public interface IClientExportArtifactStore
 {
-    Task<string> PutIfAbsentAsync(Guid organisationId, Guid operationId, string category,
-        string contentSha256, ReadOnlyMemory<byte> content, CancellationToken cancellationToken);
+    Task<ClientExportArtifactReceipt> WriteVerifiedAsync(Guid organisationId, Guid operationId,
+        ClientExportArtifactWrite artifact, CancellationToken cancellationToken);
+    Task VerifyExactAsync(Guid organisationId, Guid operationId, string setName,
+        IReadOnlyCollection<ClientExportArtifactReceipt> expected, CancellationToken cancellationToken);
+}
+
+public sealed record ClientExportArtifactWrite(string SetName, string RelativeName, ReadOnlyMemory<byte> Content);
+public sealed record ClientExportArtifactReceipt(string ArtifactReference, string ContentSha256, long Length);
+
+public interface IClientExportFixtureScope
+{
+    void Demand(Guid organisationId);
 }
 
 public interface IClientOrganisationExportParticipant
