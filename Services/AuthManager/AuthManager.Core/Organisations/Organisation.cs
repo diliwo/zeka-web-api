@@ -83,6 +83,10 @@ public sealed class Organisation
         TransitionTo(OrganisationStatus.PurgeInProgress, irreversibleAtUtc,
             OrganisationStatus.DispositionReady);
 
+    public bool MarkVerifiedPurged(DateTimeOffset verifiedAtUtc) =>
+        TransitionTo(OrganisationStatus.VerifiedPurged, verifiedAtUtc,
+            OrganisationStatus.PurgeInProgress);
+
     public bool RecoverClosure(DateTimeOffset recoveredAtUtc) =>
         TransitionTo(OrganisationStatus.Active, recoveredAtUtc, OrganisationStatus.Closing);
 

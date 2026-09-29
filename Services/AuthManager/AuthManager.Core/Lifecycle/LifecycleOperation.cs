@@ -33,6 +33,7 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
     public DateTimeOffset? IrreversibleStartedAt { get; private set; }
     public long? IrreversibleRevision { get; private set; }
     public DateTimeOffset? PurgeExecutionCompletedAt { get; private set; }
+    public string? VerificationEvidenceHash { get; private set; }
     public DateTimeOffset? SnapshotAt { get; private set; }
     public string? FenceEvidenceHash { get; private set; }
     public string? PackageSha256 { get; private set; }
@@ -172,6 +173,21 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
         State = LifecycleOperationState.PurgeExecutionComplete;
         Revision++;
         // Completion of execution is not terminal verification. IsActive and CompletedAt remain unchanged.
+    }
+
+    public void MarkVerifiedPurged(DateTimeOffset verifiedAt, string evidenceHash)
+    {
+        DemandTerminationState(LifecycleOperationState.PurgeExecutionComplete);
+        if (PurgeExecutionCompletedAt is null || IrreversibleRevision is null
+            || PurgePlanHash is null || PurgeBoundaryEvidenceHash is null
+            || verifiedAt == default || verifiedAt.Offset != TimeSpan.Zero
+            || verifiedAt < PurgeExecutionCompletedAt || CompletedAt is not null)
+            throw new InvalidOperationException("Verification requires completed execution of the same operation.");
+        VerificationEvidenceHash = RequireSha256(evidenceHash, nameof(evidenceHash));
+        CompletedAt = verifiedAt;
+        State = LifecycleOperationState.VerifiedPurged;
+        IsActive = false;
+        Revision++;
     }
 
     public void BeginClosureRecovery()

@@ -799,7 +799,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
     }
 
     [Fact]
-    public async Task Provider_real_LIFE04A_fixture_admission_is_atomic_and_runtime_cannot_admit()
+    public async Task Provider_real_LIFE04A_Life05aPositive_fixture_admission_verification_and_runtime_isolation()
     {
         var environment = await CreateEnvironmentAsync();
         var successor = ReviewedDispositionRegistryV1.Create();
@@ -858,8 +858,16 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             GRANT zeka_auth_runtime TO {fixtureRole};
             GRANT SELECT, INSERT ON public."LifecyclePurgePlans",
                 public."LifecyclePurgeOutbox", public."LifecyclePurgeProgress" TO {fixtureRole};
+            GRANT SELECT, INSERT ON public."LifecycleVerificationCommands",
+                public."LifecycleVerificationEvidence" TO {fixtureRole};
+            GRANT UPDATE ("CommandMessageId", "CommandHash", "ReceiptId", "ReceiptHash",
+                "EvidenceHash", "VerifierVersion", "ObservedAt", "ExpiresAt",
+                "EligibleResidualCount", "RetainedPresentCount", "RetainedExpectedCount",
+                "FileResidualCount", "PostconditionSatisfied")
+                ON public."LifecycleVerificationEvidence" TO {fixtureRole};
             GRANT UPDATE ("State", "Revision", "PurgePlanHash", "PurgeBoundaryEvidenceHash",
-                "IrreversibleStartedAt", "IrreversibleRevision", "PurgeExecutionCompletedAt")
+                "IrreversibleStartedAt", "IrreversibleRevision", "PurgeExecutionCompletedAt",
+                "VerificationEvidenceHash", "CompletedAt", "IsActive")
                 ON public."OrganisationLifecycleOperations" TO {fixtureRole};
             GRANT UPDATE ("State", "LastReceiptId", "EvidenceHash", "SafeFailureCode",
                 "Attempts", "CompletedAt") ON public."LifecyclePurgeProgress" TO {fixtureRole};
@@ -949,6 +957,40 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         var fixtureConnection = Connection(environment.AdministratorConnection, fixtureRole, password);
         var participantConnection = Connection(environment.AdministratorConnection,
             participantRole, participantPassword);
+        DirectoryInfo? repository = new(AppContext.BaseDirectory);
+        while (repository is not null && !File.Exists(Path.Combine(repository.FullName,
+                   "Deployments/database/bootstrap-life05a-verifier-fixture.sql")))
+            repository = repository.Parent;
+        Assert.NotNull(repository);
+        await Execute(environment.AdministratorConnection, await File.ReadAllTextAsync(
+            Path.Combine(repository.FullName,
+                "Deployments/database/bootstrap-life05a-verifier-fixture.sql")));
+        var verifierRoles = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["auth-management"] = "zeka_life05a_verify_auth_management",
+            ["admin-area"] = "zeka_life05a_verify_admin_area",
+            ["admin-area-documents"] = "zeka_life05a_verify_admin_area_documents",
+            ["client-management"] = "zeka_life05a_verify_client_management"
+        };
+        var verifierConnections = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (owner, role) in verifierRoles)
+        {
+            var verifierPassword = Guid.NewGuid().ToString("N");
+            await Execute(environment.AdministratorConnection,
+                $"ALTER ROLE {role} PASSWORD '{verifierPassword}'");
+            var ownerConnection = Connection(environment.AdministratorConnection,
+                role, verifierPassword);
+            verifierConnections.Add(owner, ownerConnection);
+            await Assert.ThrowsAnyAsync<Exception>(() => RuntimeScalar(ownerConnection,
+                OrganisationA, "DELETE FROM life04a_fixture.\"Payloads\""));
+            Assert.Equal(0L, await RuntimeScalar(ownerConnection, OrganisationA,
+                $"SELECT count(*) FROM life04a_fixture.\"Payloads\" WHERE \"OrganisationId\"='{OrganisationB:D}'::uuid"));
+            foreach (var otherOwner in verifierRoles.Keys.Where(x => x != owner))
+                foreach (var table in new[] { "Items", "Payloads" })
+                    Assert.Equal(0L, await RuntimeScalar(ownerConnection, OrganisationA,
+                        $"SELECT count(*) FROM life04a_fixture.\"{table}\" WHERE \"ParticipantId\"='{otherOwner}'"));
+        }
+        var documentVerifierConnection = verifierConnections["admin-area-documents"];
         await Assert.ThrowsAnyAsync<Exception>(() => RuntimeScalar(fixtureConnection,
             OrganisationA, "SELECT count(*) FROM life04a_fixture.\"Payloads\""));
         await Assert.ThrowsAnyAsync<Exception>(() => RuntimeScalar(participantConnection,
@@ -1017,13 +1059,17 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             .OrderBy(x => x.Category, StringComparer.Ordinal).ToArray();
         Assert.Equal(3, destructive.Length);
         var tempRoot = Path.Combine(Path.GetTempPath(), $"zeka-life04a-{Guid.NewGuid():N}");
+        var documentItemDigest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes("fixture:admin-area-document-storage")))
+            .ToLowerInvariant();
         var documentPath = Path.Combine(tempRoot, OrganisationA.ToString("N"),
-            "synthetic-document.bin");
+            operation.Id.ToString("N"), documentItemDigest + ".bin");
         Directory.CreateDirectory(Path.GetDirectoryName(documentPath)!);
         await File.WriteAllTextAsync(documentPath, "synthetic-document-fixture");
+        var writeFence = new SyntheticFixtureWriteFence(OrganisationA, operation.Id);
         var participants = destructive.Select(x => x.ParticipantId).Distinct(StringComparer.Ordinal)
             .ToDictionary(x => x, x => new PgFixturePurgeParticipant(participantConnection, x,
-                    x == "admin-area-documents" ? documentPath : null),
+                    x == "admin-area-documents" ? documentPath : null, writeFence),
                 StringComparer.Ordinal);
         await Assert.ThrowsAnyAsync<Exception>(() => participants[destructive[0].ParticipantId]
             .ExecuteAsync(destructive[0], default));
@@ -1050,6 +1096,9 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         Assert.Equal(PurgeOutcomeV1.FailedRetryable, retryableDocument.State);
         Assert.Equal(PurgeReceiptStatus.Recorded,
             (await purgeCoordinator.RecordReceiptAsync(retryableDocument, default)).Status);
+        Assert.Empty(await new LifecycleVerificationStore(Options(fixtureConnection),
+            evaluationClock, fixtureScope, writeFence).IssueCommandsAsync(operation.Id, OrganisationA,
+            default));
         Assert.True(File.Exists(documentPath));
         Assert.Equal($"{(int)LifecycleOperationState.PurgeInProgress}|{(int)PurgeProgressState.FailedRetryable}",
             await RuntimeScalar(fixtureConnection, OrganisationA, """
@@ -1062,7 +1111,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         Assert.Equal(0L, await RuntimeScalar(participantConnection, OrganisationA,
             "SELECT count(*) FROM life04a_fixture.\"Payloads\" WHERE \"Category\"='admin-area-document-storage'"));
         var firstReceipt = await new PgFixturePurgeParticipant(participantConnection,
-                destructive[0].ParticipantId, documentPath)
+                destructive[0].ParticipantId, documentPath, writeFence)
             .ExecuteAsync(destructive[0], default);
         Assert.False(File.Exists(documentPath));
         Assert.Equal(PurgeOutcomeV1.Purged, firstReceipt.State);
@@ -1089,7 +1138,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         await Assert.ThrowsAnyAsync<Exception>(() => participants[destructive[1].ParticipantId]
             .ExecuteAsync(destructive[1], default));
         var restarted = new PgFixturePurgeParticipant(participantConnection,
-            destructive[1].ParticipantId);
+            destructive[1].ParticipantId, writeFence: writeFence);
         var secondReceipt = await restarted.ExecuteAsync(destructive[1], default);
         Assert.Equal(PurgeOutcomeV1.Purged, secondReceipt.State);
         Assert.Equal(PurgeReceiptStatus.Recorded,
@@ -1101,6 +1150,9 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                         WHERE p."OperationId"=op."Id" AND p."State"=1)::text
                 FROM public."OrganisationLifecycleOperations" op WHERE op."Family"=1
                 """));
+        Assert.Empty(await new LifecycleVerificationStore(Options(fixtureConnection),
+            evaluationClock, fixtureScope, writeFence).IssueCommandsAsync(operation.Id, OrganisationA,
+            default));
         var final = await purgeCoordinator.RecordReceiptAsync(await participants[destructive[2].ParticipantId]
             .ExecuteAsync(destructive[2], default), default);
         Assert.Equal(PurgeReceiptStatus.Recorded, final.Status);
@@ -1126,6 +1178,265 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                 FROM public."Organisations" org JOIN public."OrganisationLifecycleOperations" op
                   ON op."OrganisationId"=org."Id" WHERE op."Family"=1
                 """));
+        Assert.Equal(organisationBBefore,
+            await OrganisationDigest(environment.AdministratorConnection, OrganisationB));
+        Assert.Equal(globalBefore, await GlobalReferenceDigest(environment.AdministratorConnection));
+        // LIFE-05A begins only after LIFE-04A execution. A separate SELECT-only owner
+        // identity observes each frozen category; the destructive receipt is not proof.
+        await Assert.ThrowsAnyAsync<Exception>(() => RuntimeScalar(documentVerifierConnection,
+            OrganisationA, "SELECT count(*) FROM public.\"LifecyclePurgeProgress\""));
+        await Assert.ThrowsAnyAsync<Exception>(() => RuntimeScalar(documentVerifierConnection,
+            OrganisationA, "DELETE FROM life04a_fixture.\"Payloads\""));
+        Assert.Equal(0L, await RuntimeScalar(documentVerifierConnection, OrganisationA,
+            $"SELECT count(*) FROM life04a_fixture.\"Payloads\" WHERE \"OrganisationId\"='{OrganisationB:D}'::uuid"));
+        var verificationClock = new MutableClock(Now.AddMinutes(4));
+        var ownerVerifiers = successor.Inventory
+            .Where(x => x.Capability.Key == ReviewedDispositionRegistryV1.CapabilityKey)
+            .Select(x => x.ParticipantId).Distinct(StringComparer.Ordinal)
+            .Select(id => (INonProductionPurgeVerifier)new PgFixturePurgeVerifier(
+                verifierConnections[id], id, verificationClock,
+                id == "admin-area-documents" ? tempRoot : null,
+                id == "admin-area-documents" ? documentPath : null))
+            .ToArray();
+        var verificationStore = new LifecycleVerificationStore(Options(fixtureConnection),
+            verificationClock, fixtureScope, writeFence, ownerVerifiers);
+        foreach (var executionState in new[] { PurgeProgressState.Pending,
+                     PurgeProgressState.FailedRetryable, PurgeProgressState.InterventionRequired })
+        {
+            await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection,
+                $"UPDATE public.\"LifecyclePurgeProgress\" SET \"State\"={(int)executionState} " +
+                "WHERE \"OperationId\"='" + operation.Id +
+                "'::uuid AND \"Category\"='admin-area-document-storage'"));
+            Assert.Empty(await verificationStore.IssueCommandsAsync(operation.Id,
+                OrganisationA, default));
+        }
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection,
+            "UPDATE public.\"LifecyclePurgeProgress\" SET \"State\"=2 WHERE \"OperationId\"='" +
+            operation.Id + "'::uuid AND \"Category\"='admin-area-document-storage'"));
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection, """
+            CREATE TABLE life04a_fixture."ProgressBackup" AS
+              SELECT * FROM public."LifecyclePurgeProgress"
+              WHERE "Category"='admin-area-document-storage';
+            DELETE FROM public."LifecyclePurgeProgress"
+              WHERE "Category"='admin-area-document-storage';
+            """));
+        Assert.Empty(await verificationStore.IssueCommandsAsync(operation.Id,
+            OrganisationA, default));
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection, """
+            INSERT INTO public."LifecyclePurgeProgress"
+              SELECT * FROM life04a_fixture."ProgressBackup";
+            DROP TABLE life04a_fixture."ProgressBackup";
+            """));
+        var verifierCommands = await verificationStore.IssueCommandsAsync(operation.Id,
+            OrganisationA, default);
+        Assert.Equal(4, verifierCommands.Count);
+        Assert.Single(verifierCommands, x => x.ExpectedDisposition == "RETAIN");
+        var verification = new LifecycleVerificationCoordinator(verificationStore,
+            fixtureScope, ownerVerifiers, writeFence);
+        var documentVerify = Assert.Single(verifierCommands,
+            x => x.Category == "admin-area-document-storage");
+        var documentOwner = Assert.Single(ownerVerifiers,
+            x => x.ParticipantId == documentVerify.ParticipantId);
+        var documentObservation = await documentOwner.ObserveAsync(documentVerify, default);
+        Assert.True(documentObservation.PostconditionSatisfied);
+        Assert.Equal(0, documentObservation.EligibleResidualCount);
+        Assert.Equal(0, documentObservation.FileResidualCount);
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection, $"""
+            INSERT INTO life04a_fixture."Payloads"
+            SELECT "OrganisationId", "ParticipantId", "Category", "ItemId", 'residual-metadata'
+            FROM life04a_fixture."Items"
+            WHERE "OrganisationId"='{OrganisationA:D}'::uuid
+              AND "Category"='admin-area-document-storage';
+            """));
+        var metadataOnly = await documentOwner.ObserveAsync(documentVerify, default);
+        Assert.False(metadataOnly.PostconditionSatisfied);
+        Assert.Equal(1, metadataOnly.EligibleResidualCount);
+        Assert.Equal(0, metadataOnly.FileResidualCount);
+        await writeFence.WriteAsync(() => File.WriteAllTextAsync(documentPath, "residual-file"));
+        var bothResidual = await documentOwner.ObserveAsync(documentVerify, default);
+        Assert.False(bothResidual.PostconditionSatisfied);
+        Assert.Equal(1, bothResidual.EligibleResidualCount);
+        Assert.Equal(1, bothResidual.FileResidualCount);
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection, $"""
+            DELETE FROM life04a_fixture."Payloads"
+            WHERE "OrganisationId"='{OrganisationA:D}'::uuid
+              AND "Category"='admin-area-document-storage';
+            """));
+        var fileOnly = await documentOwner.ObserveAsync(documentVerify, default);
+        Assert.False(fileOnly.PostconditionSatisfied);
+        Assert.Equal(0, fileOnly.EligibleResidualCount);
+        Assert.Equal(1, fileOnly.FileResidualCount);
+        await writeFence.WriteAsync(() => { File.Delete(documentPath); return Task.CompletedTask; });
+        var wrongPath = new PgFixturePurgeVerifier(documentVerifierConnection,
+            documentVerify.ParticipantId, verificationClock, tempRoot,
+            Path.Combine(tempRoot, OrganisationB.ToString("N"), "synthetic-document.bin"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            wrongPath.ObserveAsync(documentVerify, default));
+        var wrongSameTenantPath = new PgFixturePurgeVerifier(documentVerifierConnection,
+            documentVerify.ParticipantId, verificationClock, tempRoot,
+            Path.Combine(tempRoot, OrganisationA.ToString("N"),
+                operation.Id.ToString("N"), "wrong-item.bin"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            wrongSameTenantPath.ObserveAsync(documentVerify, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            documentOwner.ObserveAsync(documentVerify with
+                { TerminationOperationId = Guid.NewGuid() }, default));
+        var outsideTenantPath = Path.Combine(tempRoot, "outside-tenant.bin");
+        await writeFence.WriteAsync(async () =>
+        {
+            await File.WriteAllTextAsync(outsideTenantPath, "outside-tenant-content");
+            File.CreateSymbolicLink(documentPath, outsideTenantPath);
+        });
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            documentOwner.ObserveAsync(documentVerify, default));
+        await writeFence.WriteAsync(() =>
+        {
+            File.Delete(documentPath);
+            File.Delete(outsideTenantPath);
+            return Task.CompletedTask;
+        });
+        var retainedCommand = Assert.Single(verifierCommands,
+            x => x.ExpectedDisposition == "RETAIN");
+        var retainedOwner = Assert.Single(ownerVerifiers,
+            x => x.ParticipantId == retainedCommand.ParticipantId);
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection, $"""
+            DELETE FROM life04a_fixture."Payloads"
+            WHERE "OrganisationId"='{OrganisationA:D}'::uuid
+              AND "Category"='{retainedCommand.Category}';
+            """));
+        var missingRetained = await retainedOwner.ObserveAsync(retainedCommand, default);
+        Assert.False(missingRetained.PostconditionSatisfied);
+        Assert.Equal(0, missingRetained.RetainedPresentCount);
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection, $"""
+            INSERT INTO life04a_fixture."Payloads"
+            SELECT "OrganisationId", "ParticipantId", "Category", "ItemId", 'retained-control'
+            FROM life04a_fixture."Items"
+            WHERE "OrganisationId"='{OrganisationA:D}'::uuid
+              AND "Category"='{retainedCommand.Category}';
+            """));
+        var wrongTenantDocument = new PgFixturePurgeVerifier(documentVerifierConnection,
+            documentVerify.ParticipantId, verificationClock, tempRoot,
+            Path.Combine(tempRoot, OrganisationB.ToString("N"), "wrong-tenant.bin"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            wrongTenantDocument.ObserveAsync(documentVerify, default));
+        var outsideFile = Path.Combine(Path.GetTempPath(), $"zeka-life05a-outside-{Guid.NewGuid():N}");
+        await File.WriteAllTextAsync(outsideFile, "external-synthetic-control");
+        File.CreateSymbolicLink(documentPath, outsideFile);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            documentOwner.ObserveAsync(documentVerify, default));
+        File.Delete(documentPath);
+        File.Delete(outsideFile);
+        Assert.Equal(VerificationStatus.Conflict,
+            (await verificationStore.RecordObservedAsync(documentVerify,
+                new PgFixturePurgeVerifier(documentVerifierConnection, documentVerify.ParticipantId,
+                    verificationClock, tempRoot, documentPath), default)).Status);
+        Assert.Equal(VerificationStatus.Conflict,
+            (await verificationStore.RecordObservedAsync(
+                documentVerify with { PlanHash = new string('b', 64) },
+                documentOwner, default)).Status);
+        Assert.Equal(VerificationStatus.Conflict,
+            (await verificationStore.RecordObservedAsync(
+                documentVerify with { MessageId = Guid.NewGuid() },
+                documentOwner, default)).Status);
+        Assert.Equal(VerificationStatus.Recorded,
+            (await verification.ObserveAsync(documentVerify)).Status);
+        var currentVerificationRevision = Convert.ToInt64(await RuntimeScalar(fixtureConnection,
+            OrganisationA, "SELECT \"Revision\" FROM public.\"OrganisationLifecycleOperations\" WHERE \"Family\"=1"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            verificationStore.FinalizeAsync(operation.Id, OrganisationA,
+                currentVerificationRevision, default));
+        await using (var held = await writeFence.HoldAsync(OrganisationA, operation.Id, default))
+            Assert.Equal(VerificationStatus.Incomplete,
+                (await verificationStore.FinalizeAsync(operation.Id, OrganisationA,
+                currentVerificationRevision,
+                default, held)).Status);
+        // A file reappearing after successful verification invalidates the terminal path.
+        await writeFence.WriteAsync(() => File.WriteAllTextAsync(documentPath,
+            "reappeared-after-verification"));
+        verificationClock.Advance(TimeSpan.FromSeconds(1));
+        var expectedRevision = Convert.ToInt64(await RuntimeScalar(fixtureConnection,
+            OrganisationA, "SELECT \"Revision\" FROM public.\"OrganisationLifecycleOperations\" WHERE \"Family\"=1"));
+        await verification.IssueCommandsAsync(operation.Id, OrganisationA);
+        await using (var held = await writeFence.HoldAsync(OrganisationA, operation.Id, default))
+            Assert.Equal(VerificationStatus.Incomplete,
+                (await verificationStore.FinalizeAsync(operation.Id, OrganisationA,
+                    expectedRevision, default, held)).Status);
+        var reappearedResult = await verification.ReobserveAndFinalizeAsync(operation.Id,
+            OrganisationA, expectedRevision);
+        Assert.True(reappearedResult.Status == VerificationStatus.Incomplete,
+            reappearedResult.ToString());
+        Assert.Equal(1L, await RuntimeScalar(verifierConnections["admin-area"], OrganisationA,
+            "SELECT count(*) FROM life04a_fixture.\"Payloads\" WHERE \"Category\"='admin-area-owned-records'"));
+        await writeFence.WriteAsync(() => { File.Delete(documentPath); return Task.CompletedTask; });
+        verificationClock.Advance(TimeSpan.FromSeconds(1));
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection, """
+            INSERT INTO life04a_fixture."Payloads"
+              ("OrganisationId", "ParticipantId", "Category", "ItemId", "SyntheticContent")
+            SELECT "OrganisationId", "ParticipantId", "Category", "ItemId", 'residual-metadata'
+            FROM life04a_fixture."Items"
+            WHERE "OrganisationId"='46020000-0000-0000-0000-000000000001'::uuid
+              AND "Category"='admin-area-document-storage'
+            """));
+        var metadataResidualCommand = Assert.Single(
+            await verification.IssueCommandsAsync(operation.Id, OrganisationA),
+            x => x.Category == "admin-area-document-storage");
+        var metadataResidual = await documentOwner.ObserveAsync(metadataResidualCommand, default);
+        Assert.False(metadataResidual.PostconditionSatisfied);
+        Assert.Equal(1, metadataResidual.EligibleResidualCount);
+        Assert.Equal(0, metadataResidual.FileResidualCount);
+        Assert.Equal(VerificationStatus.Recorded,
+            (await verification.ObserveAsync(metadataResidualCommand)).Status);
+        await using (var held = await writeFence.HoldAsync(OrganisationA, operation.Id, default))
+            Assert.Equal(VerificationStatus.Incomplete,
+                (await verificationStore.FinalizeAsync(operation.Id, OrganisationA,
+                    expectedRevision, default, held)).Status);
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection, """
+            DELETE FROM life04a_fixture."Payloads"
+            WHERE "OrganisationId"='46020000-0000-0000-0000-000000000001'::uuid
+              AND "Category"='admin-area-document-storage'
+            """));
+        verificationClock.Advance(TimeSpan.FromSeconds(1));
+        VerifyPurgeCommandV1? staleReplayCommand = null;
+        foreach (var command in await verification.IssueCommandsAsync(operation.Id, OrganisationA))
+        {
+            var owner = Assert.Single(ownerVerifiers,
+                x => x.ParticipantId == command.ParticipantId);
+            Assert.Equal(VerificationStatus.Recorded,
+                (await verificationStore.RecordObservedAsync(command, owner, default)).Status);
+            if (command.Category == "admin-area-document-storage")
+            {
+                staleReplayCommand = command;
+            }
+        }
+        verificationClock.Advance(TimeSpan.FromSeconds(61));
+        Assert.Equal(VerificationStatus.Replay,
+            (await verificationStore.RecordObservedAsync(
+                Assert.IsType<VerifyPurgeCommandV1>(staleReplayCommand),
+                documentOwner, default)).Status);
+        await using (var held = await writeFence.HoldAsync(OrganisationA, operation.Id, default))
+            Assert.Equal(VerificationStatus.Incomplete,
+                (await verificationStore.FinalizeAsync(operation.Id, OrganisationA,
+                    expectedRevision, default, held)).Status);
+        Assert.Equal(VerificationStatus.Finalized,
+            (await verification.ReobserveAndFinalizeAsync(operation.Id, OrganisationA,
+                expectedRevision)).Status);
+        Assert.Equal($"{(int)OrganisationStatus.VerifiedPurged}|{(int)LifecycleOperationState.VerifiedPurged}|false",
+            await RuntimeScalar(environment.RuntimeConnection, OrganisationA, """
+                SELECT org."Status"::text || '|' || op."State"::text || '|' || op."IsActive"::text
+                FROM public."Organisations" org JOIN public."OrganisationLifecycleOperations" op
+                  ON op."OrganisationId"=org."Id" WHERE op."Family"=1
+                """));
+        Assert.Equal(1L, await RuntimeScalar(fixtureConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"OutboxMessages\" WHERE \"MessageType\"='OrganisationVerifiedPurgedV1'"));
+        Assert.Equal(4L, await RuntimeScalar(fixtureConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"LifecycleVerificationEvidence\" WHERE \"PostconditionSatisfied\"=true"));
+        Assert.Equal(64, Assert.IsType<string>(await RuntimeScalar(fixtureConnection,
+            OrganisationA, "SELECT \"VerificationEvidenceHash\" FROM public.\"OrganisationLifecycleOperations\" WHERE \"Family\"=1")).Length);
+        Assert.Contains("historical backups", Assert.IsType<string>(await RuntimeScalar(
+            fixtureConnection, OrganisationA,
+            "SELECT \"Payload\" FROM public.\"OutboxMessages\" WHERE \"MessageType\"='OrganisationVerifiedPurgedV1'")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writeFence.WriteAsync(
+            () => File.WriteAllTextAsync(documentPath, "after-terminal")));
         Assert.Equal(organisationBBefore,
             await OrganisationDigest(environment.AdministratorConnection, OrganisationB));
         Assert.Equal(globalBefore, await GlobalReferenceDigest(environment.AdministratorConnection));
@@ -1239,6 +1550,8 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                SET "State"=6, "IsActive"=false, "CompletedAt"="ArchivedAt",
                    "Revision"="Revision"-1
              WHERE "Id"='{operation.Id:D}'::uuid;
+            DROP TABLE public."LifecycleVerificationEvidence";
+            DROP TABLE public."LifecycleVerificationCommands";
             DROP TABLE public."LifecyclePurgeOutbox";
             DROP TABLE public."LifecyclePurgeProgress";
             DROP TABLE public."LifecyclePurgePlans";
@@ -1247,7 +1560,8 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
               DROP COLUMN "PurgeBoundaryEvidenceHash",
               DROP COLUMN "IrreversibleStartedAt",
               DROP COLUMN "IrreversibleRevision",
-              DROP COLUMN "PurgeExecutionCompletedAt";
+              DROP COLUMN "PurgeExecutionCompletedAt",
+              DROP COLUMN "VerificationEvidenceHash";
             DROP TABLE public."RetentionDecisionRecords";
             DROP TABLE public."RetentionDecisionSets";
             ALTER TABLE public."OrganisationLifecycleOperations"
@@ -1256,7 +1570,8 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
               DROP COLUMN "DispositionInventoryHash";
             DELETE FROM public."__EFMigrationsHistory"
              WHERE "MigrationId" IN ('20260929175544_LifecycleRetentionEligibilityV1',
-                 '20260929195328_Life04aPurgeProtocolV1');
+                 '20260929195328_Life04aPurgeProtocolV1',
+                 '20260929222145_Life05aVerificationFoundation');
             """);
         if (missingReceipt)
             await Execute(environment.AdministratorConnection, $"""

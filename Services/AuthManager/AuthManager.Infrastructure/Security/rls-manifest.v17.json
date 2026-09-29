@@ -1,0 +1,1219 @@
+{
+  "schemaVersion": 17,
+  "service": "AuthManagement",
+  "modelContext": "AuthManager.Infrastructure.Persistence.AuthDbContext",
+  "migrationId": "20260929222145_Life05aVerificationFoundation",
+  "ownerRole": "zeka_auth_owner",
+  "migratorRole": "zeka_auth_migrator",
+  "runtimeRole": "zeka_auth_runtime",
+  "recoveryRole": "zeka_auth_closure_recovery",
+  "recoveryFunctions": [
+    "zeka.release_auth_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_revision bigint, p_fence_token text, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)"
+  ],
+  "managedSchemas": [
+    "public",
+    "zeka"
+  ],
+  "prohibitedRelationKinds": [
+    "FOREIGN_TABLE",
+    "MATERIALIZED_VIEW",
+    "VIEW"
+  ],
+  "relationTopology": [],
+  "protectedTables": [
+    {
+      "schema": "public",
+      "name": "AuthClosureParticipantExecutions"
+    },
+    {
+      "schema": "public",
+      "name": "AuthClosureParticipantInbox"
+    },
+    {
+      "schema": "public",
+      "name": "AuthClosureParticipantOutbox"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantExecutions"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantInbox"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantOutbox"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleClosureFenceReceipts"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleCoordinatorLeases"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleExportFenceReceipts"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleExportFragments"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleExportPackages"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleInboxReceipts"
+    },
+    {
+      "schema": "public",
+      "name": "LifecyclePurgeOutbox"
+    },
+    {
+      "schema": "public",
+      "name": "LifecyclePurgePlans"
+    },
+    {
+      "schema": "public",
+      "name": "LifecyclePurgeProgress"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleVerificationCommands"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleVerificationEvidence"
+    },
+    {
+      "schema": "public",
+      "name": "MembershipPermissionGrants"
+    },
+    {
+      "schema": "public",
+      "name": "OrganisationLifecycleOperations"
+    },
+    {
+      "schema": "public",
+      "name": "OrganisationLifecycleParticipants"
+    },
+    {
+      "schema": "public",
+      "name": "RetentionDecisionRecords"
+    },
+    {
+      "schema": "public",
+      "name": "RetentionDecisionSets"
+    }
+  ],
+  "excludedTables": [
+    {
+      "schema": "public",
+      "name": "AspNetRoleClaims"
+    },
+    {
+      "schema": "public",
+      "name": "AspNetRoles"
+    },
+    {
+      "schema": "public",
+      "name": "AspNetUserClaims"
+    },
+    {
+      "schema": "public",
+      "name": "AspNetUserLogins"
+    },
+    {
+      "schema": "public",
+      "name": "AspNetUserRoles"
+    },
+    {
+      "schema": "public",
+      "name": "AspNetUserTokens"
+    },
+    {
+      "schema": "public",
+      "name": "AspNetUsers"
+    },
+    {
+      "schema": "public",
+      "name": "AuditEntries"
+    },
+    {
+      "schema": "public",
+      "name": "IdempotencyRecords"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleParticipantRegistryActivation"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleParticipantRegistryBindings"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleParticipantRegistryRevisions"
+    },
+    {
+      "schema": "public",
+      "name": "OrganisationMemberships"
+    },
+    {
+      "schema": "public",
+      "name": "Organisations"
+    },
+    {
+      "schema": "public",
+      "name": "OutboxMessages"
+    },
+    {
+      "schema": "public",
+      "name": "PermissionSets"
+    }
+  ],
+  "migrationHistoryTable": {
+    "schema": "public",
+    "name": "__EFMigrationsHistory"
+  },
+  "sequences": [
+    {
+      "schema": "public",
+      "name": "AspNetRoleClaims_Id_seq"
+    },
+    {
+      "schema": "public",
+      "name": "AspNetUserClaims_Id_seq"
+    }
+  ],
+  "tablePrivileges": [
+    {
+      "object": {
+        "schema": "public",
+        "name": "AspNetRoleClaims"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AspNetRoles"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AspNetUserClaims"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AspNetUserLogins"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AspNetUserRoles"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AspNetUserTokens"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AspNetUsers"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuditEntries"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthClosureParticipantExecutions"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthClosureParticipantInbox"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthClosureParticipantOutbox"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantInbox"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantOutbox"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "IdempotencyRecords"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleClosureFenceReceipts"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleCoordinatorLeases"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleExportFenceReceipts"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleExportFragments"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleExportPackages"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleInboxReceipts"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleParticipantRegistryActivation"
+      },
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleParticipantRegistryBindings"
+      },
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleParticipantRegistryRevisions"
+      },
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecyclePurgeOutbox"
+      },
+      "privileges": []
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecyclePurgePlans"
+      },
+      "privileges": []
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecyclePurgeProgress"
+      },
+      "privileges": []
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleVerificationCommands"
+      },
+      "privileges": []
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleVerificationEvidence"
+      },
+      "privileges": []
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "MembershipPermissionGrants"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleParticipants"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationMemberships"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "Organisations"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OutboxMessages"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "PermissionSets"
+      },
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "RetentionDecisionRecords"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "RetentionDecisionSets"
+      },
+      "privileges": [
+        "INSERT",
+        "SELECT"
+      ]
+    }
+  ],
+  "sequencePrivileges": [
+    {
+      "object": {
+        "schema": "public",
+        "name": "AspNetRoleClaims_Id_seq"
+      },
+      "privileges": [
+        "SELECT",
+        "USAGE"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AspNetUserClaims_Id_seq"
+      },
+      "privileges": [
+        "SELECT",
+        "USAGE"
+      ]
+    }
+  ],
+  "runtimeFunctions": [
+    "zeka.current_organisation_id()",
+    "zeka.reject_auth_membership_write_during_export_fence()",
+    "zeka.reject_auth_organisation_write_during_closure_fence()",
+    "zeka.reject_auth_owned_write_during_closure_fence()",
+    "zeka.release_auth_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_revision bigint, p_fence_token text, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)"
+  ],
+  "runtimeFunctionDefinitions": [
+    {
+      "functionIdentity": "zeka.current_organisation_id()",
+      "definitionSha256": "be88914966acd2f06292da857c60c6c9a98dc7f37fd3210f99d9c031f9f2341b"
+    },
+    {
+      "functionIdentity": "zeka.reject_auth_membership_write_during_export_fence()",
+      "definitionSha256": "1254b4409b72c1882a794419bc67961668d096ade2355f4f6b90ef08b4a39cdd"
+    },
+    {
+      "functionIdentity": "zeka.reject_auth_organisation_write_during_closure_fence()",
+      "definitionSha256": "057cd09d3ce76c74e789b85452cacc1dd3570711f287cc33efef0c4585391acb"
+    },
+    {
+      "functionIdentity": "zeka.reject_auth_owned_write_during_closure_fence()",
+      "definitionSha256": "0e10422448a763e4bdf78af94770dd3f88ea98090906967262b56bd26a8d96b4"
+    },
+    {
+      "functionIdentity": "zeka.release_auth_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_revision bigint, p_fence_token text, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)",
+      "definitionSha256": "06308fd4955b27116016155097b3870780c31d6b4f4f27c0cdcd7cebdc28d7a9"
+    }
+  ],
+  "securityDefinerFunctions": [
+    {
+      "functionIdentity": "zeka.release_auth_closure_fence(p_operation_id uuid, p_organisation_id uuid, p_revision bigint, p_fence_token text, p_causation_id uuid, p_correlation_id uuid, p_released_at timestamp with time zone)"
+    }
+  ],
+  "defaultPrivileges": [
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "FUNCTION",
+      "scope": "GLOBAL",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "RELATION",
+      "scope": "GLOBAL",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "SEQUENCE",
+      "scope": "GLOBAL",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "TYPE",
+      "scope": "GLOBAL",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "SCHEMA",
+      "scope": "GLOBAL",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "FUNCTION",
+      "scope": "SCHEMA",
+      "schema": "public",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "TYPE",
+      "scope": "SCHEMA",
+      "schema": "public",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "RELATION",
+      "scope": "SCHEMA",
+      "schema": "public",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "SEQUENCE",
+      "scope": "SCHEMA",
+      "schema": "public",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "FUNCTION",
+      "scope": "SCHEMA",
+      "schema": "zeka",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "RELATION",
+      "scope": "SCHEMA",
+      "schema": "zeka",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "SEQUENCE",
+      "scope": "SCHEMA",
+      "schema": "zeka",
+      "grants": []
+    },
+    {
+      "owner": "zeka_auth_owner",
+      "objectType": "TYPE",
+      "scope": "SCHEMA",
+      "schema": "zeka",
+      "grants": []
+    }
+  ],
+  "parameterPrivileges": [],
+  "policyPrefix": "rls_",
+  "policyUsingExpression": "(\"OrganisationId\" = zeka.current_organisation_id())",
+  "policyWithCheckExpression": "(\"OrganisationId\" = zeka.current_organisation_id())",
+  "contextFunction": "zeka.current_organisation_id",
+  "globalControlPlaneTables": [
+    {
+      "schema": "public",
+      "name": "LifecycleParticipantRegistryActivation"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleParticipantRegistryBindings"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleParticipantRegistryRevisions"
+    }
+  ],
+  "organisationScopedSurvivingControlTables": [
+    {
+      "schema": "public",
+      "name": "AuthClosureParticipantExecutions"
+    },
+    {
+      "schema": "public",
+      "name": "AuthClosureParticipantInbox"
+    },
+    {
+      "schema": "public",
+      "name": "AuthClosureParticipantOutbox"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantExecutions"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantInbox"
+    },
+    {
+      "schema": "public",
+      "name": "AuthExportParticipantOutbox"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleClosureFenceReceipts"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleCoordinatorLeases"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleExportFenceReceipts"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleExportFragments"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleExportPackages"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleInboxReceipts"
+    },
+    {
+      "schema": "public",
+      "name": "LifecyclePurgeOutbox"
+    },
+    {
+      "schema": "public",
+      "name": "LifecyclePurgePlans"
+    },
+    {
+      "schema": "public",
+      "name": "LifecyclePurgeProgress"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleVerificationCommands"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleVerificationEvidence"
+    },
+    {
+      "schema": "public",
+      "name": "MembershipPermissionGrants"
+    },
+    {
+      "schema": "public",
+      "name": "OrganisationLifecycleOperations"
+    },
+    {
+      "schema": "public",
+      "name": "OrganisationLifecycleParticipants"
+    },
+    {
+      "schema": "public",
+      "name": "RetentionDecisionRecords"
+    },
+    {
+      "schema": "public",
+      "name": "RetentionDecisionSets"
+    }
+  ],
+  "additionalPolicyRoles": [
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthClosureParticipantExecutions"
+      },
+      "roles": [
+        "zeka_auth_owner"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthClosureParticipantInbox"
+      },
+      "roles": [
+        "zeka_auth_owner"
+      ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthClosureParticipantOutbox"
+      },
+      "roles": [
+        "zeka_auth_owner"
+      ]
+    }
+  ],
+  "columnPrivileges": [
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "CategoriesJson",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "FenceEvidenceHash",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "FragmentHash",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "ReleasedAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "SnapshotAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "AuthExportParticipantExecutions"
+      },
+      "column": "State",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleCoordinatorLeases"
+      },
+      "column": "ExpiresAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleCoordinatorLeases"
+      },
+      "column": "LeaseId",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleCoordinatorLeases"
+      },
+      "column": "Version",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "MembershipPermissionGrants"
+      },
+      "column": "ConcurrencyVersion",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "MembershipPermissionGrants"
+      },
+      "column": "RevokedAtUtc",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "MembershipPermissionGrants"
+      },
+      "column": "RevokedByMembershipId",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "MembershipPermissionGrants"
+      },
+      "column": "RevokedBySubjectId",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "ArchivedAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "ClosingAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "ClosureFenceEvidenceHash",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "CompletedAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "DispositionReadyAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "FailureCode",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "FenceEvidenceHash",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "IsActive",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "PackageReference",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "PackageSha256",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "RetentionDecisionSetHash",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "Revision",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "SnapshotAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleOperations"
+      },
+      "column": "State",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleParticipants"
+      },
+      "column": "FailedAt",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleParticipants"
+      },
+      "column": "FailureBoundaryDisposition",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleParticipants"
+      },
+      "column": "FailureCode",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleParticipants"
+      },
+      "column": "FailureRetryable",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "OrganisationLifecycleParticipants"
+      },
+      "column": "State",
+      "privileges": [
+        "UPDATE"
+      ],
+      "grantable": false
+    }
+  ]
+}

@@ -268,10 +268,11 @@ BEGIN
       END IF;
     END IF;
   END LOOP;
-  -- LIFE-04A evidence tables are present in production schema but unavailable to the
+  -- LIFE-04A/05A evidence tables are present in production schema but unavailable to the
   -- ordinary runtime. Only isolated conformance setup may grant a fixture identity.
   FOREACH object_name IN ARRAY ARRAY[
-    'LifecyclePurgePlans','LifecyclePurgeOutbox','LifecyclePurgeProgress'
+    'LifecyclePurgePlans','LifecyclePurgeOutbox','LifecyclePurgeProgress',
+    'LifecycleVerificationCommands','LifecycleVerificationEvidence'
   ] LOOP
     IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
       EXECUTE pg_catalog.format('ALTER TABLE public.%I OWNER TO zeka_auth_owner', object_name);

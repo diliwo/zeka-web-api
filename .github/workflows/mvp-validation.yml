@@ -148,6 +148,48 @@ jobs:
           done
           exit "${test_status}"
 
+  life05a_verifier:
+    name: LIFE-05A synthetic verifier (exact head)
+    needs: source_policy
+    if: ${{ needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out exact pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - name: Restore AuthManager integration tests with ephemeral package authentication
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+        run: |
+          : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
+          export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
+          dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
+
+      - name: Verify isolated PostgreSQL role smoke and LIFE-05A purge/verify tests
+        env:
+          ZEKA_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/ci/run-life05a-verifier.sh TestResults/life05a-verifier
+
+      - name: Retain safe LIFE-05A result counts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: life05a-exact-head-verifier
+          path: TestResults/life05a-verifier/summary.json
+          if-no-files-found: warn
+          retention-days: 14
+
   production_conformance:
     name: Issue 46 production conformance targets
     needs: source_policy
@@ -364,6 +406,7 @@ jobs:
       - source_policy
       - build_and_test
       - postgresql
+      - life05a_verifier
       - production_conformance
       - docker_images
       - sonar
@@ -376,6 +419,7 @@ jobs:
           TRUSTED_SOURCE: ${{ needs.source_policy.outputs.trusted }}
           BUILD_AND_TEST_RESULT: ${{ needs.build_and_test.result }}
           POSTGRESQL_RESULT: ${{ needs.postgresql.result }}
+          LIFE05A_VERIFIER_RESULT: ${{ needs.life05a_verifier.result }}
           PRODUCTION_CONFORMANCE_RESULT: ${{ needs.production_conformance.result }}
           DOCKER_IMAGES_RESULT: ${{ needs.docker_images.result }}
           SONAR_RESULT: ${{ needs.sonar.result }}
@@ -389,6 +433,7 @@ jobs:
           for component_result in \
             "Build and non-PostgreSQL tests:${BUILD_AND_TEST_RESULT}" \
             "PostgreSQL Testcontainers:${POSTGRESQL_RESULT}" \
+            "LIFE-05A synthetic verifier (exact head):${LIFE05A_VERIFIER_RESULT}" \
             "Issue 46 production conformance targets:${PRODUCTION_CONFORMANCE_RESULT}" \
             "Docker images (4):${DOCKER_IMAGES_RESULT}" \
             "SonarQube Cloud / Quality Gate:${SONAR_RESULT}"
