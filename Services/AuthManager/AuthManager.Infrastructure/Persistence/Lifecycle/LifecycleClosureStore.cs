@@ -87,7 +87,7 @@ public sealed class LifecycleClosureStore(
                 x => x.Id == operation.OrganisationId, cancellationToken);
             if (!organisation.Archive(archivedAt))
                 return Result(ClosureProgressStatus.Conflict, operation.Id, operation.Revision);
-            operation.CompleteTermination(archivedAt, evidence.EvidenceHash);
+            operation.CompleteClosureArchive(archivedAt, evidence.EvidenceHash);
             var factHeader = FactHeader(operation,
                 LifecycleMessageIdentityV1.ForPhase(operation.Id, CoordinatorParticipant,
                     "archived-fact", operation.Revision),
@@ -97,7 +97,7 @@ public sealed class LifecycleClosureStore(
         }
 
         await database.SaveChangesAsync(cancellationToken);
-        return Result(operation.State == LifecycleOperationState.Completed
+        return Result(operation.State == LifecycleOperationState.Archived
                 ? ClosureProgressStatus.Archived : ClosureProgressStatus.AwaitingParticipants,
             operation.Id, operation.Revision, operation.FailureCode);
     }, cancellationToken);
@@ -134,7 +134,8 @@ public sealed class LifecycleClosureStore(
         var operation = await Operation(database, operationId, cancellationToken);
         if (operation is null || operation.Family != LifecycleOperationFamily.Termination)
             return Result(ClosureProgressStatus.Rejected, operationId, operation?.Revision ?? 0);
-        if (operation.State == LifecycleOperationState.Completed)
+        if (operation.State is LifecycleOperationState.Archived or LifecycleOperationState.DispositionReady
+            or LifecycleOperationState.Completed)
             return Result(ClosureProgressStatus.Rejected, operation.Id, operation.Revision);
         if (operation.State == LifecycleOperationState.ReleasingFence)
             return Result(ClosureProgressStatus.Replay, operation.Id, operation.Revision);
@@ -215,7 +216,10 @@ public sealed class LifecycleClosureStore(
         {
             await EstablishLifecycleContextAsync(database, transaction, organisationId, cancellationToken);
             return await database.Set<LifecycleOperation>().Where(x => x.IsActive
-                    && x.Family == LifecycleOperationFamily.Termination)
+                    && x.Family == LifecycleOperationFamily.Termination
+                    && (x.State == LifecycleOperationState.Pending
+                        || x.State == LifecycleOperationState.EnteringFence
+                        || x.State == LifecycleOperationState.ReleasingFence))
                 .OrderBy(x => x.RequestedAt).Select(x => x.Id).ToListAsync(cancellationToken);
         }
         finally { ResetLifecycleContext(database); }
@@ -268,7 +272,7 @@ public sealed class LifecycleClosureStore(
             await database.SaveChangesAsync(cancellationToken);
             return Result(ClosureProgressStatus.RecoveryStarted, operation.Id, operation.Revision);
         }
-        return Result(operation.State == LifecycleOperationState.Completed
+        return Result(operation.State is LifecycleOperationState.Archived or LifecycleOperationState.DispositionReady
                 ? ClosureProgressStatus.Archived : ClosureProgressStatus.Replay,
             operation.Id, operation.Revision, operation.FailureCode);
     }, cancellationToken);

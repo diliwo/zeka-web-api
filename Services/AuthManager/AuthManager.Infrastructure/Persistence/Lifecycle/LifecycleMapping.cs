@@ -32,11 +32,13 @@ internal static class LifecycleMapping
         operation.HasKey(x => x.Id);
         operation.HasAlternateKey(x => new { x.Id, x.OrganisationId });
         operation.Property(x => x.InventoryHash).HasMaxLength(64);
+        operation.Property(x => x.DispositionInventoryHash).HasMaxLength(64);
         // Canonical bytes are hash-bound; jsonb would normalize their representation on round-trip.
         operation.Property(x => x.ExportInventoryJson).HasColumnType("text");
         operation.Property(x => x.ExportInventoryHash).HasMaxLength(64);
         operation.Property(x => x.FenceEvidenceHash).HasMaxLength(64);
         operation.Property(x => x.ClosureFenceEvidenceHash).HasMaxLength(64);
+        operation.Property(x => x.RetentionDecisionSetHash).HasMaxLength(64);
         operation.Property(x => x.PackageSha256).HasMaxLength(64);
         operation.Property(x => x.PackageReference).HasMaxLength(500);
         operation.Property(x => x.FailureCode).HasMaxLength(200);
@@ -48,6 +50,39 @@ internal static class LifecycleMapping
             .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
         operation.Navigation(x => x.Participants).UsePropertyAccessMode(PropertyAccessMode.Field);
         operation.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+        var decisionSet = model.Entity<RetentionDecisionSet>();
+        decisionSet.ToTable("RetentionDecisionSets");
+        decisionSet.HasKey(x => x.Id);
+        decisionSet.HasAlternateKey(x => new { x.Id, x.OperationId, x.OrganisationId });
+        decisionSet.Property(x => x.InventoryHash).HasMaxLength(64);
+        decisionSet.Property(x => x.DispositionInventoryHash).HasMaxLength(64);
+        decisionSet.Property(x => x.SetHash).HasMaxLength(64);
+        decisionSet.Property(x => x.PolicyId).HasMaxLength(200);
+        decisionSet.Property(x => x.PolicyVersion).HasMaxLength(200);
+        decisionSet.HasIndex(x => new { x.OperationId, x.EvaluatedAt });
+        decisionSet.HasOne<LifecycleOperation>().WithMany()
+            .HasForeignKey(x => new { x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
+        decisionSet.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+        foreach (var property in decisionSet.Metadata.GetProperties())
+            property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+
+        var decision = model.Entity<RetentionDecisionRecord>();
+        decision.ToTable("RetentionDecisionRecords");
+        decision.HasKey(x => new { x.SetId, x.Category });
+        decision.Property(x => x.Category).HasMaxLength(200);
+        decision.Property(x => x.ParticipantId).HasMaxLength(200);
+        decision.Property(x => x.PolicyId).HasMaxLength(200);
+        decision.Property(x => x.PolicyVersion).HasMaxLength(200);
+        decision.Property(x => x.HoldReference).HasMaxLength(200);
+        decision.Property(x => x.ReasonCode).HasMaxLength(200);
+        decision.HasOne<RetentionDecisionSet>().WithMany()
+            .HasForeignKey(x => new { x.SetId, x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OperationId, x.OrganisationId })
+            .OnDelete(DeleteBehavior.Restrict);
+        decision.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+        foreach (var property in decision.Metadata.GetProperties())
+            property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
         var participant = model.Entity<LifecycleParticipant>();
         participant.ToTable("OrganisationLifecycleParticipants");
         participant.HasKey(x => new { x.OperationId, x.Family, x.CapabilityKey, x.OwnershipScope });
@@ -62,7 +97,9 @@ internal static class LifecycleMapping
             nameof(LifecycleOperation.PackageReference), nameof(LifecycleOperation.FailureCode),
             nameof(LifecycleOperation.CompletedAt), nameof(LifecycleOperation.IsActive),
             nameof(LifecycleOperation.ClosingAt), nameof(LifecycleOperation.ArchivedAt),
-            nameof(LifecycleOperation.ClosureFenceEvidenceHash)
+            nameof(LifecycleOperation.ClosureFenceEvidenceHash),
+            nameof(LifecycleOperation.DispositionReadyAt),
+            nameof(LifecycleOperation.RetentionDecisionSetHash)
         };
         foreach (var property in operation.Metadata.GetProperties().Where(p => !mutableOperationProperties.Contains(p.Name)))
             property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);

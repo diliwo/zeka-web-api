@@ -125,7 +125,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                 [ClosureProgressStatus.AwaitingParticipants, ClosureProgressStatus.Archived]);
         }
 
-        Assert.Equal($"{(int)OrganisationStatus.Archived}|{(int)LifecycleOperationState.Completed}|false|4",
+        Assert.Equal($"{(int)OrganisationStatus.Archived}|{(int)LifecycleOperationState.Archived}|true|4",
             await RuntimeScalar(environment.RuntimeConnection, OrganisationA, """
                 SELECT o."Status"::text || '|' || op."State"::text || '|' || op."IsActive"::text
                        || '|' || (SELECT count(*) FROM public."LifecycleClosureFenceReceipts"
@@ -486,7 +486,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         await new FixtureClosureContractDispatcher(environment.RuntimeConnection, clock, coordinator)
             .DispatchAsync(first);
 
-        Assert.Equal($"{(int)OrganisationStatus.Archived}|{(int)LifecycleOperationState.Completed}|4",
+        Assert.Equal($"{(int)OrganisationStatus.Archived}|{(int)LifecycleOperationState.Archived}|4",
             await RuntimeScalar(environment.RuntimeConnection, OrganisationA, """
                 SELECT o."Status"::text || '|' || op."State"::text || '|'
                        || (SELECT count(*) FROM public."LifecycleClosureFenceReceipts"
@@ -647,6 +647,320 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             WHERE "Id"='{archivedOrdinaryId:D}'::uuid
               AND "ProcessedAtUtc" IS NULL AND "DeadLetteredAtUtc" IS NOT NULL
             """));
+    }
+
+    [Fact]
+    public async Task Provider_real_LIFE03_blocks_predecessor_and_unresolved_sets_then_records_only_eligibility()
+    {
+        var environment = await CreateEnvironmentAsync();
+        var predecessor = ReviewedClosureRegistryV1.Create();
+        var successor = ReviewedDispositionRegistryV1.Create();
+        await using (var activation = new AuthDbContext(Options(environment.MigratorConnection)))
+        {
+            await activation.Database.OpenConnectionAsync();
+            await activation.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            Assert.True(await new ReviewedLifecycleRegistryActivation(activation)
+                .ActivateAsync(predecessor, 0, default));
+        }
+
+        var closureClock = new FixedClock(Now.AddMinutes(1));
+        async Task<Guid> Archive(Guid organisationId, LifecycleRegistry reviewed)
+        {
+            var admission = await new LifecycleAdmission(new CurrentAccess(),
+                new LifecycleAdmissionStore(Options(environment.RuntimeConnection), closureClock,
+                    reviewedTerminationRegistry: reviewed))
+                .AdmitAsync(environment.OwnerUserId, organisationId,
+                    LifecycleOperationFamily.Termination, Guid.NewGuid());
+            var operation = Assert.IsType<LifecycleOperation>(admission.Operation);
+            var coordinator = new LifecycleClosureCoordinator(
+                new LifecycleClosureStore(Options(environment.RuntimeConnection), closureClock));
+            Assert.Equal(ClosureProgressStatus.Progressed,
+                (await coordinator.BeginAsync(operation.Id, organisationId)).Status);
+            await new FixtureClosureContractDispatcher(environment.RuntimeConnection, closureClock, coordinator)
+                .DispatchAsync(await ReadCloseCommands(environment.RuntimeConnection, organisationId));
+            Assert.Equal(((int)OrganisationStatus.Archived).ToString(),
+                await RuntimeScalar(environment.RuntimeConnection, organisationId,
+                    "SELECT \"Status\"::text FROM public.\"Organisations\" WHERE \"Id\"=current_setting('zeka.organisation_id')::uuid"));
+            return operation.Id;
+        }
+
+        var oldOperation = await Archive(OrganisationB, predecessor);
+        await using (var activation = new AuthDbContext(Options(environment.MigratorConnection)))
+        {
+            await activation.Database.OpenConnectionAsync();
+            await activation.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            Assert.True(await new ReviewedLifecycleRegistryActivation(activation)
+                .ActivateAsync(successor, 1, default));
+        }
+        var operationId = await Archive(OrganisationA, successor);
+        var organisationBBefore = await OrganisationDigest(environment.AdministratorConnection, OrganisationB);
+        var globalBefore = await GlobalReferenceDigest(environment.AdministratorConnection);
+        var pendingOrdinaryId = await StageOutbox(environment.RuntimeConnection,
+            "SyntheticPendingDispositionOrdinaryMessageV1", "{}", operationId, Now.AddMinutes(2));
+        var outboxBefore = await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"OutboxMessages\"");
+        var evaluationClock = new FixedClock(Now.AddMinutes(3));
+        var store = new LifecycleDispositionStore(Options(environment.RuntimeConnection), evaluationClock);
+
+        Assert.Equal(DispositionEvaluationStatus.Blocked,
+            (await new LifecycleDispositionCoordinator(store,
+                new FixtureRetentionPolicy(_ => throw new InvalidOperationException(
+                    "Predecessor must not call a policy provider.")), evaluationClock)
+                .EvaluateAsync(Guid.NewGuid(), oldOperation, OrganisationB)).Status);
+        Assert.Equal(0L, await RuntimeScalar(environment.RuntimeConnection, OrganisationB,
+            "SELECT count(*) FROM public.\"RetentionDecisionSets\""));
+
+        var delayedClock = new MutableClock(Now.AddMinutes(2));
+        var expired = await new LifecycleDispositionCoordinator(
+                new LifecycleDispositionStore(Options(environment.RuntimeConnection), delayedClock),
+                new FixtureRetentionPolicy(request =>
+                {
+                    delayedClock.Advance(TimeSpan.FromSeconds(2));
+                    return new RetentionEvaluationResponse(request.Categories.Select(category =>
+                        new RetentionCategoryDecision(category.Category, "fixture-policy", "1",
+                            request.EvaluatedAt, request.EvaluatedAt.AddSeconds(1),
+                            RetentionDecisionCode.Retain, null, null, "synthetic-decision")).ToArray());
+                }), delayedClock)
+            .EvaluateAsync(Guid.NewGuid(), operationId, OrganisationA);
+        Assert.Equal(DispositionEvaluationStatus.Blocked, expired.Status);
+        Assert.Equal(0L, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"RetentionDecisionSets\""));
+
+        RetentionEvaluationResponse Decisions(RetentionEvaluationRequest request,
+            RetentionDecisionCode firstCode, bool future = false) => new(
+            request.Categories.Select((category, index) => new RetentionCategoryDecision(
+                category.Category, "fixture-policy", "1", request.EvaluatedAt,
+                request.EvaluatedAt.AddDays(1), index == 0 ? firstCode : RetentionDecisionCode.Purge,
+                index == 0 && firstCode != RetentionDecisionCode.Purge ? null
+                    : future && index == 0 ? request.EvaluatedAt.AddDays(1) : request.EvaluatedAt,
+                index == 0 && firstCode == RetentionDecisionCode.Held ? "synthetic-hold" : null,
+                "synthetic-decision")).ToArray());
+
+        var incomplete = await new LifecycleDispositionCoordinator(store,
+                new FixtureRetentionPolicy(request => new RetentionEvaluationResponse(
+                    Decisions(request, RetentionDecisionCode.Purge).Decisions.Skip(1).ToArray())),
+                evaluationClock)
+            .EvaluateAsync(Guid.NewGuid(), operationId, OrganisationA);
+        Assert.Equal(DispositionEvaluationStatus.Blocked, incomplete.Status);
+        Assert.Equal(DispositionEvaluationStatus.Blocked,
+            (await new LifecycleDispositionCoordinator(store,
+                new FixtureRetentionPolicy(request => new RetentionEvaluationResponse(
+                    Decisions(request, RetentionDecisionCode.Purge).Decisions
+                        .Select(x => x with { ValidUntil = request.EvaluatedAt.AddSeconds(-1) })
+                        .ToArray())), evaluationClock)
+                .EvaluateAsync(Guid.NewGuid(), operationId, OrganisationA)).Status);
+        Assert.Equal($"{(int)OrganisationStatus.Archived}|{(int)LifecycleOperationState.Archived}|true",
+            await RuntimeScalar(environment.RuntimeConnection, OrganisationA, """
+                SELECT org."Status"::text || '|' || op."State"::text || '|' || op."IsActive"::text
+                FROM public."Organisations" org JOIN public."OrganisationLifecycleOperations" op
+                  ON op."OrganisationId"=org."Id"
+                WHERE op."Family"=1
+                """));
+
+        var readyId = Guid.NewGuid();
+        var policy = new FixtureRetentionPolicy(request => Decisions(request, RetentionDecisionCode.Retain));
+        var coordinatorReady = new LifecycleDispositionCoordinator(store, policy, evaluationClock);
+        var ready = await coordinatorReady.EvaluateAsync(readyId, operationId, OrganisationA);
+        Assert.Equal(DispositionEvaluationStatus.Ready, ready.Status);
+        Assert.Equal(64, ready.DecisionSetHash?.Length);
+        Assert.Single(ready.RetainedExceptions);
+        Assert.Equal(3, ready.PurgeEligibleCategories.Count);
+        Assert.Empty(ready.FuturePurgeCategories);
+        Assert.Equal(DispositionEvaluationStatus.Replay,
+            (await coordinatorReady.EvaluateAsync(readyId, operationId, OrganisationA)).Status);
+        Assert.Equal($"{(int)OrganisationStatus.DispositionReady}|{(int)LifecycleOperationState.DispositionReady}|true|",
+            await RuntimeScalar(environment.RuntimeConnection, OrganisationA, """
+                SELECT org."Status"::text || '|' || op."State"::text || '|' || op."IsActive"::text
+                       || '|' || coalesce(op."CompletedAt"::text, '')
+                FROM public."Organisations" org JOIN public."OrganisationLifecycleOperations" op
+                  ON op."OrganisationId"=org."Id" WHERE op."Family"=1
+                """));
+        Assert.Equal(1L, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"RetentionDecisionSets\""));
+        Assert.Equal(4L, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"RetentionDecisionRecords\""));
+        Assert.Equal(outboxBefore, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"OutboxMessages\""));
+        var publisher = new BlockingPublisher();
+        await using (var provider = DispatcherProvider(environment.RuntimeConnection,
+                         evaluationClock, publisher))
+        await using (var scope = provider.CreateAsyncScope())
+            await scope.ServiceProvider.GetRequiredService<IOutboxDispatcher>()
+                .DispatchBatchAsync();
+        Assert.DoesNotContain(publisher.Messages, x => x.Id == pendingOrdinaryId);
+        Assert.Equal(1L, await ExecuteScalar(environment.AdministratorConnection, $"""
+            SELECT count(*) FROM public."OutboxMessages"
+            WHERE "Id"='{pendingOrdinaryId:D}'::uuid AND "ProcessedAtUtc" IS NULL
+              AND "DeadLetteredAtUtc" IS NOT NULL
+            """));
+        Assert.Equal(organisationBBefore,
+            await OrganisationDigest(environment.AdministratorConnection, OrganisationB));
+        Assert.Equal(globalBefore, await GlobalReferenceDigest(environment.AdministratorConnection));
+    }
+
+    [Theory]
+    [InlineData(RetentionDecisionCode.Held)]
+    [InlineData(RetentionDecisionCode.Unknown)]
+    [InlineData(RetentionDecisionCode.Blocked)]
+    [InlineData(RetentionDecisionCode.Purge)]
+    public async Task Provider_real_LIFE03_persists_each_unresolved_set_without_readiness_or_replacement(
+        RetentionDecisionCode firstCode)
+    {
+        var environment = await CreateEnvironmentAsync();
+        var successor = ReviewedDispositionRegistryV1.Create();
+        await using (var activation = new AuthDbContext(Options(environment.MigratorConnection)))
+        {
+            await activation.Database.OpenConnectionAsync();
+            await activation.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            Assert.True(await new ReviewedLifecycleRegistryActivation(activation)
+                .ActivateAsync(successor, 0, default));
+        }
+        var closureClock = new FixedClock(Now.AddMinutes(1));
+        var admission = await new LifecycleAdmission(new CurrentAccess(),
+            new LifecycleAdmissionStore(Options(environment.RuntimeConnection), closureClock,
+                reviewedTerminationRegistry: successor))
+            .AdmitAsync(environment.OwnerUserId, OrganisationA,
+                LifecycleOperationFamily.Termination, Guid.NewGuid());
+        var operation = Assert.IsType<LifecycleOperation>(admission.Operation);
+        var closure = new LifecycleClosureCoordinator(
+            new LifecycleClosureStore(Options(environment.RuntimeConnection), closureClock));
+        Assert.Equal(ClosureProgressStatus.Progressed,
+            (await closure.BeginAsync(operation.Id, OrganisationA)).Status);
+        await new FixtureClosureContractDispatcher(environment.RuntimeConnection, closureClock, closure)
+            .DispatchAsync(await ReadCloseCommands(environment.RuntimeConnection, OrganisationA));
+
+        var evaluatedAt = Now.AddMinutes(2);
+        var evaluationClock = new MutableClock(evaluatedAt);
+        var evaluation = Guid.NewGuid();
+        var policy = new FixtureRetentionPolicy(request => new RetentionEvaluationResponse(
+            request.Categories.Select((category, index) => new RetentionCategoryDecision(
+                category.Category, "fixture-policy", "1", evaluatedAt, evaluatedAt.AddDays(2),
+                index == 0 ? firstCode : RetentionDecisionCode.Retain,
+                index == 0 && firstCode == RetentionDecisionCode.Purge
+                    ? evaluatedAt.AddDays(1) : null,
+                index == 0 && firstCode == RetentionDecisionCode.Held ? "synthetic-hold" : null,
+                "synthetic-decision")).ToArray()));
+        var coordinator = new LifecycleDispositionCoordinator(
+            new LifecycleDispositionStore(Options(environment.RuntimeConnection), evaluationClock),
+            policy, evaluationClock);
+        var blocked = await coordinator.EvaluateAsync(evaluation, operation.Id, OrganisationA);
+        Assert.Equal(DispositionEvaluationStatus.Blocked, blocked.Status);
+        Assert.Equal(64, blocked.DecisionSetHash?.Length);
+        Assert.Equal(3, blocked.RetainedExceptions.Count);
+        Assert.Equal(firstCode == RetentionDecisionCode.Purge ? 1 : 0,
+            blocked.FuturePurgeCategories.Count);
+        evaluationClock.Advance(TimeSpan.FromDays(3));
+        Assert.Equal(DispositionEvaluationStatus.Replay,
+            (await coordinator.EvaluateAsync(evaluation, operation.Id, OrganisationA)).Status);
+        Assert.Equal(DispositionEvaluationStatus.Blocked,
+            (await coordinator.EvaluateAsync(Guid.NewGuid(), operation.Id, OrganisationA)).Status);
+        Assert.Equal(1L, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"RetentionDecisionSets\""));
+        Assert.Equal(4L, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"RetentionDecisionRecords\""));
+        Assert.Equal($"{(int)OrganisationStatus.Archived}|{(int)LifecycleOperationState.Archived}",
+            await RuntimeScalar(environment.RuntimeConnection, OrganisationA, """
+                SELECT org."Status"::text || '|' || op."State"::text
+                FROM public."Organisations" org JOIN public."OrganisationLifecycleOperations" op
+                  ON op."OrganisationId"=org."Id" WHERE op."Family"=1
+                """));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Provider_real_LIFE03_migrates_only_complete_LIFE02_archive_without_erasing_closure_truth(
+        bool missingReceipt)
+    {
+        var environment = await CreateEnvironmentAsync();
+        var predecessor = ReviewedClosureRegistryV1.Create();
+        await using (var activation = new AuthDbContext(Options(environment.MigratorConnection)))
+        {
+            await activation.Database.OpenConnectionAsync();
+            await activation.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            Assert.True(await new ReviewedLifecycleRegistryActivation(activation)
+                .ActivateAsync(predecessor, 0, default));
+        }
+        var closureClock = new FixedClock(Now.AddMinutes(1));
+        var admission = await new LifecycleAdmission(new CurrentAccess(),
+            new LifecycleAdmissionStore(Options(environment.RuntimeConnection), closureClock))
+            .AdmitAsync(environment.OwnerUserId, OrganisationA,
+                LifecycleOperationFamily.Termination, Guid.NewGuid());
+        var operation = Assert.IsType<LifecycleOperation>(admission.Operation);
+        var closure = new LifecycleClosureCoordinator(
+            new LifecycleClosureStore(Options(environment.RuntimeConnection), closureClock));
+        Assert.Equal(ClosureProgressStatus.Progressed,
+            (await closure.BeginAsync(operation.Id, OrganisationA)).Status);
+        await new FixtureClosureContractDispatcher(environment.RuntimeConnection, closureClock, closure)
+            .DispatchAsync(await ReadCloseCommands(environment.RuntimeConnection, OrganisationA));
+        var closureEvidence = (string)(await ExecuteScalar(environment.AdministratorConnection, $"""
+            SELECT "ArchivedAt"::text || '|' || "ClosureFenceEvidenceHash" || '|' || "Revision"::text
+            FROM public."OrganisationLifecycleOperations" WHERE "Id"='{operation.Id:D}'::uuid
+            """))!;
+
+        // Reconstruct the exact pre-LIFE-03 schema and successful LIFE-02 row in an isolated
+        // disposable database, then run the real migration instead of copying its SQL.
+        await Execute(environment.AdministratorConnection, $"""
+            UPDATE public."OrganisationLifecycleOperations"
+               SET "State"=6, "IsActive"=false, "CompletedAt"="ArchivedAt",
+                   "Revision"="Revision"-1
+             WHERE "Id"='{operation.Id:D}'::uuid;
+            DROP TABLE public."RetentionDecisionRecords";
+            DROP TABLE public."RetentionDecisionSets";
+            ALTER TABLE public."OrganisationLifecycleOperations"
+              DROP COLUMN "RetentionDecisionSetHash",
+              DROP COLUMN "DispositionReadyAt",
+              DROP COLUMN "DispositionInventoryHash";
+            DELETE FROM public."__EFMigrationsHistory"
+             WHERE "MigrationId"='20260929175544_LifecycleRetentionEligibilityV1';
+            """);
+        if (missingReceipt)
+            await Execute(environment.AdministratorConnection, $"""
+                DELETE FROM public."LifecycleClosureFenceReceipts"
+                 WHERE "OperationId"='{operation.Id:D}'::uuid
+                   AND "ParticipantId"=(SELECT min("ParticipantId")
+                     FROM public."LifecycleClosureFenceReceipts"
+                     WHERE "OperationId"='{operation.Id:D}'::uuid)
+                """);
+        await using (var migrator = new AuthDbContext(Options(environment.MigratorConnection)))
+        {
+            await migrator.Database.OpenConnectionAsync();
+            await migrator.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            if (missingReceipt)
+            {
+                await Assert.ThrowsAnyAsync<Exception>(() => migrator.GetService<IMigrator>().MigrateAsync());
+                Assert.Equal(0L, await ExecuteScalar(environment.AdministratorConnection, """
+                    SELECT count(*) FROM public."__EFMigrationsHistory"
+                    WHERE "MigrationId"='20260929175544_LifecycleRetentionEligibilityV1'
+                    """));
+                Assert.Equal("6|false", (string)(await ExecuteScalar(
+                    environment.AdministratorConnection, $"""
+                        SELECT "State"::text || '|' || "IsActive"::text
+                        FROM public."OrganisationLifecycleOperations" WHERE "Id"='{operation.Id:D}'::uuid
+                        """))!);
+                return;
+            }
+            await migrator.GetService<IMigrator>().MigrateAsync();
+        }
+        var migrated = (string)(await ExecuteScalar(environment.AdministratorConnection, $"""
+            SELECT "ArchivedAt"::text || '|' || "ClosureFenceEvidenceHash" || '|' || "Revision"::text
+            FROM public."OrganisationLifecycleOperations" WHERE "Id"='{operation.Id:D}'::uuid
+            """))!;
+        Assert.Equal(closureEvidence, migrated);
+        Assert.Equal("8|true|true|true", (string)(await ExecuteScalar(
+            environment.AdministratorConnection, $"""
+                SELECT "State"::text || '|' || "IsActive"::text || '|'
+                       || ("CompletedAt" IS NULL)::text || '|'
+                       || ("DispositionInventoryHash" IS NULL)::text
+                FROM public."OrganisationLifecycleOperations" WHERE "Id"='{operation.Id:D}'::uuid
+                """))!);
+        Assert.Equal(DispositionEvaluationStatus.Blocked,
+            (await new LifecycleDispositionCoordinator(
+                new LifecycleDispositionStore(Options(environment.RuntimeConnection),
+                    new FixedClock(Now.AddMinutes(2))),
+                new FixtureRetentionPolicy(_ => throw new InvalidOperationException("No policy call")),
+                new FixedClock(Now.AddMinutes(2)))
+                .EvaluateAsync(Guid.NewGuid(), operation.Id, OrganisationA)).Status);
     }
 
     private async Task<TestEnvironment> CreateEnvironmentAsync()
@@ -896,6 +1210,20 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private sealed class MutableClock(DateTimeOffset now) : TimeProvider
+    {
+        private DateTimeOffset current = now;
+        public override DateTimeOffset GetUtcNow() => current;
+        public void Advance(TimeSpan duration) => current = current.Add(duration);
+    }
+
+    private sealed class FixtureRetentionPolicy(
+        Func<RetentionEvaluationRequest, RetentionEvaluationResponse> evaluate) : IRetentionPolicy
+    {
+        public Task<RetentionEvaluationResponse?> EvaluateAsync(RetentionEvaluationRequest request,
+            CancellationToken cancellationToken) => Task.FromResult<RetentionEvaluationResponse?>(evaluate(request));
     }
 
     private sealed class BlockingPublisher : IOutboxMessagePublisher

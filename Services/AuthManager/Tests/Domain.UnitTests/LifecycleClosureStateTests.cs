@@ -42,13 +42,15 @@ public sealed class LifecycleClosureStateTests
             x.Capability.Family == LifecycleOperationFamily.Termination).ToArray();
         foreach (var participant in closure.Take(3))
             operation.RecordClosureAccepted(participant.ParticipantId);
-        Assert.Throws<InvalidOperationException>(() => operation.CompleteTermination(
+        Assert.Throws<InvalidOperationException>(() => operation.CompleteClosureArchive(
             Now.AddSeconds(2), new string('a', 64)));
 
         operation.RecordClosureAccepted(closure[3].ParticipantId);
-        operation.CompleteTermination(Now.AddSeconds(2), new string('a', 64));
-        Assert.Equal(LifecycleOperationState.Completed, operation.State);
-        Assert.False(operation.IsActive);
+        operation.CompleteClosureArchive(Now.AddSeconds(2), new string('a', 64));
+        Assert.Equal(LifecycleOperationState.Archived, operation.State);
+        Assert.True(operation.IsActive);
+        Assert.Equal(Now.AddSeconds(2), operation.ArchivedAt);
+        Assert.Null(operation.CompletedAt);
     }
 
     [Fact]

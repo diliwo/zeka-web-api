@@ -120,7 +120,8 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         var before = await Row(operation.Id);
         var workflowMutable = new[] { "State", "Revision", "SnapshotAt", "FenceEvidenceHash",
             "PackageSha256", "PackageReference", "FailureCode", "CompletedAt", "IsActive",
-            "ClosingAt", "ArchivedAt", "ClosureFenceEvidenceHash" };
+            "ClosingAt", "ArchivedAt", "ClosureFenceEvidenceHash", "DispositionReadyAt",
+            "RetentionDecisionSetHash" };
         foreach (var column in ef.Except(workflowMutable))
         {
             var property = model.Model.FindEntityType(typeof(LifecycleOperation))!.GetProperties()
@@ -194,7 +195,7 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         var table = StoreObjectIdentifier.Table("OrganisationLifecycleOperations", null);
         var mutable = new[] { "State", "Revision", "SnapshotAt", "FenceEvidenceHash", "PackageSha256",
             "PackageReference", "FailureCode", "CompletedAt", "IsActive", "ClosingAt", "ArchivedAt",
-            "ClosureFenceEvidenceHash" };
+            "ClosureFenceEvidenceHash", "DispositionReadyAt", "RetentionDecisionSetHash" };
         var frozen = model.Model.FindEntityType(typeof(LifecycleOperation))!.GetProperties()
             .Select(p => p.GetColumnName(table)!).Except(mutable).Order(StringComparer.Ordinal);
         var mutations = frozen.Select(column =>

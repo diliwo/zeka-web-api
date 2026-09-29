@@ -80,13 +80,24 @@ public sealed class LifecycleAdmissionStore : ILifecycleAdmissionStore
     private readonly DbContextOptions<AuthDbContext> options;
     private readonly TimeProvider clock;
     private readonly IReviewedExportCategoryInventory exportInventory;
+    private readonly LifecycleRegistry reviewedTerminationRegistry;
 
     public LifecycleAdmissionStore(DbContextOptions<AuthDbContext> options, TimeProvider clock,
-        IReviewedExportCategoryInventory? exportInventory = null)
+        IReviewedExportCategoryInventory? exportInventory = null,
+        LifecycleRegistry? reviewedTerminationRegistry = null)
     {
         this.options = options;
         this.clock = clock;
         this.exportInventory = exportInventory ?? new ReviewedExportCategoryInventoryV1();
+        this.reviewedTerminationRegistry = reviewedTerminationRegistry ?? ReviewedClosureRegistryV1.Create();
+        var predecessor = ReviewedClosureRegistryV1.Create();
+        var successor = ReviewedDispositionRegistryV1.Create();
+        if (this.reviewedTerminationRegistry.Revision != predecessor.Revision
+                || this.reviewedTerminationRegistry.InventoryHash != predecessor.InventoryHash)
+            if (this.reviewedTerminationRegistry.Revision != successor.Revision
+                || this.reviewedTerminationRegistry.InventoryHash != successor.InventoryHash)
+                throw new ArgumentException("Only an exact reviewed termination registry is permitted.",
+                    nameof(reviewedTerminationRegistry));
     }
 
     public async Task<AdmissionResult> AdmitAsync(AuthorizedLifecycleAdmission admission, CancellationToken cancellationToken)
@@ -122,9 +133,8 @@ public sealed class LifecycleAdmissionStore : ILifecycleAdmissionStore
                                 x => x.Id == admission.OrganisationId, cancellationToken);
                             if (organisation?.Status != OrganisationStatus.Active)
                                 return new AdmissionResult(AdmissionStatus.Denied);
-                            var reviewed = ReviewedClosureRegistryV1.Create();
-                            if (registry.Revision != reviewed.Revision
-                                || registry.InventoryHash != reviewed.InventoryHash)
+                            if (registry.Revision != reviewedTerminationRegistry.Revision
+                                || registry.InventoryHash != reviewedTerminationRegistry.InventoryHash)
                                 return new AdmissionResult(AdmissionStatus.RegistryUnavailable);
                         }
                         var frozenExportInventory = admission.Family == LifecycleOperationFamily.Export

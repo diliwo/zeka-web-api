@@ -7,5 +7,6 @@ public enum OrganisationStatus
     Suspended = 3,
     Closed = 4,
     Closing = 5,
-    Archived = 6
+    Archived = 6,
+    DispositionReady = 7
 }
