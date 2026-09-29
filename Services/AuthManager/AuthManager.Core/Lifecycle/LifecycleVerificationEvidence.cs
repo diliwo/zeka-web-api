@@ -14,6 +14,8 @@ public sealed class LifecycleVerificationCommand : ITenantOwnedEntity
     public string Category { get; private set; } = "";
     public string ItemId { get; private set; } = "";
     public string CommandHash { get; private set; } = "";
+    // Database-assigned order resolves commands issued under an identical logical clock.
+    public long IssueOrdinal { get; private set; }
     public DateTimeOffset IssuedAt { get; private set; }
     public DateTimeOffset ExpiresAt { get; private set; }
 

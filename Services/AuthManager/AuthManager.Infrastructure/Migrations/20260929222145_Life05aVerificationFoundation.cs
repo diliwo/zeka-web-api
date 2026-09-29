@@ -1,5 +1,6 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
@@ -31,6 +32,8 @@ namespace AuthManager.Infrastructure.Migrations
                     Category = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                     ItemId = table.Column<string>(type: "character varying(240)", maxLength: 240, nullable: false),
                     CommandHash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    IssueOrdinal = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     IssuedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     ExpiresAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
@@ -80,9 +83,15 @@ namespace AuthManager.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateIndex(
-                name: "IX_LifecycleVerificationCommands_OperationId_Category_IssuedAt",
+                name: "IX_LifecycleVerificationCommands_OperationId_Category_IssueOrdinal",
                 table: "LifecycleVerificationCommands",
-                columns: new[] { "OperationId", "Category", "IssuedAt" });
+                columns: new[] { "OperationId", "Category", "IssueOrdinal" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_LifecycleVerificationCommands_IssueOrdinal",
+                table: "LifecycleVerificationCommands",
+                column: "IssueOrdinal",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_LifecycleVerificationCommands_PlanId_OperationId_Organisati~",

@@ -167,7 +167,9 @@ internal static class LifecycleMapping
         verificationCommand.Property(x => x.Category).HasMaxLength(200);
         verificationCommand.Property(x => x.ItemId).HasMaxLength(240);
         verificationCommand.Property(x => x.CommandHash).HasMaxLength(64);
-        verificationCommand.HasIndex(x => new { x.OperationId, x.Category, x.IssuedAt });
+        verificationCommand.Property(x => x.IssueOrdinal).UseIdentityByDefaultColumn();
+        verificationCommand.HasIndex(x => x.IssueOrdinal).IsUnique();
+        verificationCommand.HasIndex(x => new { x.OperationId, x.Category, x.IssueOrdinal });
         verificationCommand.HasOne<LifecyclePurgePlan>().WithMany()
             .HasForeignKey(x => new { x.PlanId, x.OperationId, x.OrganisationId })
             .HasPrincipalKey(x => new { x.Id, x.OperationId, x.OrganisationId })

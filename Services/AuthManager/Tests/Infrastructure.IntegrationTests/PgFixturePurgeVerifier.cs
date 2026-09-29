@@ -34,34 +34,59 @@ internal sealed class PgFixturePurgeVerifier(string readOnlyConnectionString, st
                 throw new InvalidOperationException("Verifier tenant context failed.");
         }
         string? disposition;
+        string? expectedPayloadHash;
+        string? expectedFileHash;
         await using (var item = new NpgsqlCommand("""
-            SELECT "Disposition" FROM life04a_fixture."Items"
+            SELECT "Disposition", "ExpectedPayloadSha256", "ExpectedFileSha256"
+            FROM life04a_fixture."Items"
             WHERE "OrganisationId"=@org AND "ParticipantId"=@participant
               AND "Category"=@category AND "ItemId"=@item
             """, connection, transaction))
         {
             Bind(item, command);
-            disposition = await item.ExecuteScalarAsync(cancellationToken) as string;
+            await using var reader = await item.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                throw new InvalidOperationException("Frozen owner-local fixture obligation is missing.");
+            disposition = reader.GetString(0);
+            expectedPayloadHash = reader.GetString(1);
+            expectedFileHash = reader.IsDBNull(2) ? null : reader.GetString(2);
         }
         // A missing or changed frozen fixture obligation is incomplete evidence, never absence.
-        if (disposition != command.ExpectedDisposition)
+        if (disposition != command.ExpectedDisposition
+            || !IsHash(expectedPayloadHash)
+            || (participantId == "admin-area-documents"
+                && command.Category == "admin-area-document-storage"
+                && !IsHash(expectedFileHash)))
             throw new InvalidOperationException("Frozen owner-local fixture obligation is missing.");
         long metadataCount;
+        var retainedContentMatches = true;
         await using (var metadata = new NpgsqlCommand("""
-            SELECT count(*) FROM life04a_fixture."Payloads"
+            SELECT "SyntheticContent" FROM life04a_fixture."Payloads"
             WHERE "OrganisationId"=@org AND "ParticipantId"=@participant
               AND "Category"=@category AND "ItemId"=@item
             """, connection, transaction))
         {
             Bind(metadata, command);
-            metadataCount = Convert.ToInt64(await metadata.ExecuteScalarAsync(cancellationToken));
+            await using var reader = await metadata.ExecuteReaderAsync(cancellationToken);
+            metadataCount = 0;
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                metadataCount++;
+                if (disposition == "RETAIN")
+                    retainedContentMatches = metadataCount == 1
+                        && VerifyPurgeCommandV1.Sha(reader.GetString(0)) == expectedPayloadHash;
+            }
         }
         int? fileResidual = null;
+        var retainedFileMatches = true;
         if (participantId == "admin-area-documents"
             && command.Category == "admin-area-document-storage")
-            fileResidual = ObserveDocumentFile(command);
+            (fileResidual, retainedFileMatches) = ObserveDocumentFile(command,
+                disposition == "RETAIN" ? expectedFileHash : null);
         else if (documentPath is not null || documentRoot is not null)
             throw new InvalidOperationException("Document storage bound to wrong fixture owner.");
+        if (!retainedContentMatches || !retainedFileMatches)
+            throw new InvalidOperationException("Frozen retained fixture content differs.");
         var now = clock.GetUtcNow();
         if (now >= command.ExpiresAt)
             throw new InvalidOperationException("Verification observation expired.");
@@ -74,17 +99,18 @@ internal sealed class PgFixturePurgeVerifier(string readOnlyConnectionString, st
             ? fileResidual != 0 : fileResidual != 1);
         var satisfied = residual == 0 && retained == expectedRetained && !fileFailure;
         var proof = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"zeka-owner-observation-v1\n{command.Hash()}\n{now:O}\n{disposition}\n{residual}\n{retained}\n{expectedRetained}\n{fileResidual}\n{fileExpected}"))).ToLowerInvariant();
+            $"zeka-owner-observation-v2\n{command.Hash()}\n{now:O}\n{disposition}\n{residual}\n{retained}\n{expectedRetained}\n{fileResidual}\n{fileExpected}\n{retainedContentMatches}\n{retainedFileMatches}"))).ToLowerInvariant();
         return new VerifyPurgeReceiptV1(Guid.NewGuid(), command.MessageId,
             command.Hash(), command.OrganisationId, command.TerminationOperationId,
             command.IrreversibleRevision, command.RegistryRevision, command.InventoryHash,
             command.DecisionSetId, command.DecisionSetHash, command.PlanId, command.PlanHash,
             participantId, command.CapabilityKey, command.Category, command.ItemId,
-            "synthetic-pg-owner-query-v1", now, command.ExpiresAt, residual,
+            "synthetic-pg-owner-query-v2", now, command.ExpiresAt, residual,
             retained, expectedRetained, fileResidual, fileExpected, satisfied, proof);
     }
 
-    private int ObserveDocumentFile(VerifyPurgeCommandV1 command)
+    private (int Count, bool ContentMatches) ObserveDocumentFile(VerifyPurgeCommandV1 command,
+        string? expectedHash)
     {
         if (documentRoot is null || documentPath is null)
             throw new InvalidOperationException("Document verifier requires isolated root and path.");
@@ -112,11 +138,15 @@ internal sealed class PgFixturePurgeVerifier(string readOnlyConnectionString, st
                 throw new InvalidOperationException("Document verification file is a symbolic link.");
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
-            return 1;
+            return (1, expectedHash is null
+                || Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant() == expectedHash);
         }
-        catch (FileNotFoundException) { return 0; }
-        catch (DirectoryNotFoundException) { return 0; }
+        catch (FileNotFoundException) { return (0, expectedHash is null); }
+        catch (DirectoryNotFoundException) { return (0, expectedHash is null); }
     }
+
+    private static bool IsHash(string? value) => value?.Length == 64
+        && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static void Bind(NpgsqlCommand query, VerifyPurgeCommandV1 command)
     {

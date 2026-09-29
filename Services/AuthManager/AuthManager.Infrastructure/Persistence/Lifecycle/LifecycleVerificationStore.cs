@@ -172,7 +172,7 @@ public sealed class LifecycleVerificationStore(DbContextOptions<AuthDbContext> o
                     && x.ParticipantId == command.ParticipantId && x.ItemId == command.ItemId
                     && command.ExpectedDisposition == (x.Decision == RetentionDecisionCode.Purge
                         ? "PURGE" : "RETAIN")) != 1
-                || receipt.VerifierVersion != "synthetic-pg-owner-query-v1"
+                || receipt.VerifierVersion != "synthetic-pg-owner-query-v2"
                 || receipt.RetainedExpectedCount != (command.ExpectedDisposition == "RETAIN" ? 1 : 0)
                 || receipt.FileExpectedCount != (command.Category == "admin-area-document-storage"
                     && command.ParticipantId == "admin-area-documents"
@@ -245,7 +245,7 @@ public sealed class LifecycleVerificationStore(DbContextOptions<AuthDbContext> o
                         && x.ParticipantId == entry.ParticipantId
                         && x.PlanId == plan.Id && x.PostconditionSatisfied
                         && x.ObservedAt <= now && x.ObservedAt >= now.Subtract(ObservationWindow)
-                        && x.ExpiresAt > now && x.VerifierVersion == "synthetic-pg-owner-query-v1"
+                        && x.ExpiresAt > now && x.VerifierVersion == "synthetic-pg-owner-query-v2"
                         && issued.Any(c => c.MessageId == x.CommandMessageId
                             && c.CommandHash == x.CommandHash
                             && c.Category == entry.Category && c.ParticipantId == entry.ParticipantId
@@ -253,7 +253,7 @@ public sealed class LifecycleVerificationStore(DbContextOptions<AuthDbContext> o
                             && c.IssuedAt >= now.Subtract(ObservationWindow)
                             && !issued.Any(later => later.Category == c.Category
                                 && later.OperationId == c.OperationId
-                                && later.IssuedAt >= c.IssuedAt
+                                && later.IssueOrdinal > c.IssueOrdinal
                                 && later.MessageId != c.MessageId))) != 1))
                 return new VerificationResult(VerificationStatus.Incomplete, operationId);
             // The evidence digest is independent of the LIFE-04A execution receipt hashes.

@@ -19,7 +19,7 @@ public sealed class Life05aFailClosedContractTests
         command.RegistryRevision, command.InventoryHash, command.DecisionSetId,
         command.DecisionSetHash, command.PlanId, command.PlanHash,
         command.ParticipantId, command.CapabilityKey, command.Category, command.ItemId,
-        "synthetic-pg-owner-query-v1", At.AddSeconds(1), command.ExpiresAt,
+        "synthetic-pg-owner-query-v2", At.AddSeconds(1), command.ExpiresAt,
         0, 0, 0, 0, 0, true, Hash);
 
     [Fact]

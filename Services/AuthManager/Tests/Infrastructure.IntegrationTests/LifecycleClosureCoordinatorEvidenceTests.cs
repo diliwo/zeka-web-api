@@ -874,6 +874,8 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             """);
         const string participantRole = "zeka_life04a_participant_fixture";
         var participantPassword = Guid.NewGuid().ToString("N");
+        var expectedPayloadHash = VerifyPurgeCommandV1.Sha("synthetic-fixture-content");
+        var expectedDocumentHash = VerifyPurgeCommandV1.Sha("synthetic-document-fixture");
         await Execute(environment.AdministratorConnection, $"""
             CREATE ROLE {participantRole} LOGIN PASSWORD '{participantPassword}';
             DO $block$ BEGIN
@@ -884,6 +886,8 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                 "OrganisationId" uuid NOT NULL, "ParticipantId" text NOT NULL,
                 "Category" text NOT NULL, "ItemId" text NOT NULL,
                 "Disposition" text NOT NULL,
+                "ExpectedPayloadSha256" text NOT NULL,
+                "ExpectedFileSha256" text NULL,
                 PRIMARY KEY ("OrganisationId", "ParticipantId", "Category"));
             CREATE TABLE life04a_fixture."Payloads" (
                 "OrganisationId" uuid NOT NULL, "ParticipantId" text NOT NULL,
@@ -937,13 +941,18 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             INSERT INTO life04a_fixture."Items"
             SELECT '{OrganisationA:D}'::uuid, "ParticipantId", "OwnershipScope",
                    'fixture:' || "OwnershipScope",
-                   CASE WHEN "OwnershipScope"='admin-area-owned-records' THEN 'RETAIN' ELSE 'PURGE' END
+                   CASE WHEN "OwnershipScope"='admin-area-owned-records' THEN 'RETAIN' ELSE 'PURGE' END,
+                   '{expectedPayloadHash}',
+                   CASE WHEN "OwnershipScope"='admin-area-document-storage'
+                     THEN '{expectedDocumentHash}' ELSE NULL END
             FROM public."OrganisationLifecycleParticipants"
             WHERE "OperationId"='{operation.Id:D}'::uuid
               AND "CapabilityKey"='organisation.disposition-category';
             INSERT INTO life04a_fixture."Items"
             SELECT '{OrganisationB:D}'::uuid, "ParticipantId", "OwnershipScope",
-                   'fixture:' || "OwnershipScope", 'RETAIN'
+                   'fixture:' || "OwnershipScope", 'RETAIN', '{expectedPayloadHash}',
+                   CASE WHEN "OwnershipScope"='admin-area-document-storage'
+                     THEN '{expectedDocumentHash}' ELSE NULL END
             FROM public."OrganisationLifecycleParticipants"
             WHERE "OperationId"='{operation.Id:D}'::uuid
               AND "CapabilityKey"='organisation.disposition-category';
@@ -1314,6 +1323,49 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             WHERE "OrganisationId"='{OrganisationA:D}'::uuid
               AND "Category"='{retainedCommand.Category}';
             """));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            retainedOwner.ObserveAsync(retainedCommand, default));
+        await writeFence.WriteAsync(() => Execute(environment.AdministratorConnection, $"""
+            UPDATE life04a_fixture."Payloads" SET "SyntheticContent"='synthetic-fixture-content'
+            WHERE "OrganisationId"='{OrganisationA:D}'::uuid
+              AND "Category"='{retainedCommand.Category}';
+            """));
+        Assert.True((await retainedOwner.ObserveAsync(retainedCommand, default))
+            .PostconditionSatisfied);
+        // A retained document must match both its frozen metadata and its frozen bytes.
+        await writeFence.WriteAsync(async () =>
+        {
+            await Execute(environment.AdministratorConnection, $"""
+                UPDATE life04a_fixture."Items" SET "Disposition"='RETAIN'
+                WHERE "OrganisationId"='{OrganisationA:D}'::uuid
+                  AND "Category"='admin-area-document-storage';
+                INSERT INTO life04a_fixture."Payloads"
+                SELECT "OrganisationId", "ParticipantId", "Category", "ItemId",
+                       'synthetic-fixture-content'
+                FROM life04a_fixture."Items"
+                WHERE "OrganisationId"='{OrganisationA:D}'::uuid
+                  AND "Category"='admin-area-document-storage';
+                """);
+            await File.WriteAllTextAsync(documentPath, "synthetic-document-fixture");
+        });
+        var retainedDocument = documentVerify with { ExpectedDisposition = "RETAIN" };
+        Assert.True((await documentOwner.ObserveAsync(retainedDocument, default))
+            .PostconditionSatisfied);
+        await writeFence.WriteAsync(() => File.WriteAllTextAsync(documentPath, "replaced-document"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            documentOwner.ObserveAsync(retainedDocument, default));
+        await writeFence.WriteAsync(async () =>
+        {
+            File.Delete(documentPath);
+            await Execute(environment.AdministratorConnection, $"""
+                DELETE FROM life04a_fixture."Payloads"
+                WHERE "OrganisationId"='{OrganisationA:D}'::uuid
+                  AND "Category"='admin-area-document-storage';
+                UPDATE life04a_fixture."Items" SET "Disposition"='PURGE'
+                WHERE "OrganisationId"='{OrganisationA:D}'::uuid
+                  AND "Category"='admin-area-document-storage';
+                """);
+        });
         var wrongTenantDocument = new PgFixturePurgeVerifier(documentVerifierConnection,
             documentVerify.ParticipantId, verificationClock, tempRoot,
             Path.Combine(tempRoot, OrganisationB.ToString("N"), "wrong-tenant.bin"));
@@ -1417,6 +1469,12 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             Assert.Equal(VerificationStatus.Incomplete,
                 (await verificationStore.FinalizeAsync(operation.Id, OrganisationA,
                     expectedRevision, default, held)).Status);
+        // The logical clock has not advanced: a newer durable issue order, not
+        // timestamp or random MessageId ordering, must select the final challenge.
+        var firstSameTime = await verification.IssueCommandsAsync(operation.Id, OrganisationA);
+        var secondSameTime = await verification.IssueCommandsAsync(operation.Id, OrganisationA);
+        Assert.Equal(firstSameTime[0].RequestedAt, secondSameTime[0].RequestedAt);
+        Assert.NotEqual(firstSameTime[0].MessageId, secondSameTime[0].MessageId);
         Assert.Equal(VerificationStatus.Finalized,
             (await verification.ReobserveAndFinalizeAsync(operation.Id, OrganisationA,
                 expectedRevision)).Status);

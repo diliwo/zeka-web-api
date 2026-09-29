@@ -864,6 +864,12 @@ namespace AuthManager.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("IssuedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long>("IssueOrdinal")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("IssueOrdinal"));
+
                     b.Property<string>("ItemId")
                         .IsRequired()
                         .HasMaxLength(240)
@@ -885,7 +891,10 @@ namespace AuthManager.Infrastructure.Migrations
 
                     b.HasKey("MessageId");
 
-                    b.HasIndex("OperationId", "Category", "IssuedAt");
+                    b.HasIndex("IssueOrdinal")
+                        .IsUnique();
+
+                    b.HasIndex("OperationId", "Category", "IssueOrdinal");
 
                     b.HasIndex("PlanId", "OperationId", "OrganisationId");
 
