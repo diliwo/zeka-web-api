@@ -90,7 +90,10 @@ public sealed class LifecyclePurgeStore(DbContextOptions<AuthDbContext> options,
         CancellationToken cancellationToken)
     {
         fixtureScope.Demand(receipt.OrganisationId);
-        for (var attempt = 0; attempt < 3; attempt++)
+        var outcome = new PurgeReceiptResult(PurgeReceiptStatus.Unavailable,
+            receipt.TerminationOperationId, receipt.Category);
+        var completed = false;
+        for (var attempt = 0; attempt < 3 && !completed; attempt++)
         {
             await using var database = new AuthDbContext(options) { LifecycleOnly = true };
             try
@@ -103,14 +106,15 @@ public sealed class LifecyclePurgeStore(DbContextOptions<AuthDbContext> options,
                         cancellationToken);
                     var result = await RecordInTransaction(database, receipt, cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
-                    return result;
+                    outcome = result;
+                    completed = true;
                 }
                 finally { ResetContext(database); }
             }
             catch (DbUpdateConcurrencyException) { }
             catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.SerializationFailure) { }
         }
-        return new(PurgeReceiptStatus.Unavailable, receipt.TerminationOperationId, receipt.Category);
+        return outcome;
     }
 
     private async Task<PurgeReceiptResult> RecordInTransaction(AuthDbContext database,
@@ -177,7 +181,9 @@ public sealed class LifecyclePurgeStore(DbContextOptions<AuthDbContext> options,
             || request.ExpectedDecisionSetId == Guid.Empty
             || !Sha256(request.ExpectedDecisionSetHash))
             return Result(PurgeAdmissionStatus.Conflict, request);
-        for (var attempt = 0; attempt < 3; attempt++)
+        var outcome = Result(PurgeAdmissionStatus.Unavailable, request);
+        var completed = false;
+        for (var attempt = 0; attempt < 3 && !completed; attempt++)
         {
             await using var database = new AuthDbContext(options) { LifecycleOnly = true };
             try
@@ -190,7 +196,8 @@ public sealed class LifecyclePurgeStore(DbContextOptions<AuthDbContext> options,
                         cancellationToken);
                     var result = await AdmitInTransaction(database, request, cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
-                    return result;
+                    outcome = result;
+                    completed = true;
                 }
                 finally { ResetContext(database); }
             }
@@ -199,7 +206,7 @@ public sealed class LifecyclePurgeStore(DbContextOptions<AuthDbContext> options,
                 { SqlState: PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.SerializationFailure }) { }
             catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.SerializationFailure) { }
         }
-        return Result(PurgeAdmissionStatus.Unavailable, request);
+        return outcome;
     }
 
     private async Task<PurgeAdmissionResult> AdmitInTransaction(AuthDbContext database,

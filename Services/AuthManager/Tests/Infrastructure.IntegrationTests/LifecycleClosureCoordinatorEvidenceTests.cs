@@ -1066,6 +1066,13 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             .ExecuteAsync(destructive[0], default);
         Assert.False(File.Exists(documentPath));
         Assert.Equal(PurgeOutcomeV1.Purged, firstReceipt.State);
+        await File.WriteAllTextAsync(documentPath, "reappeared-synthetic-document");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => participants[destructive[0].ParticipantId]
+            .ExecuteAsync(destructive[0], default));
+        Assert.True(File.Exists(documentPath));
+        File.Delete(documentPath);
+        Assert.Equal(firstReceipt, await participants[destructive[0].ParticipantId]
+            .ExecuteAsync(destructive[0], default));
         Assert.Equal(PurgeReceiptStatus.Conflict,
             (await purgeCoordinator.RecordReceiptAsync(firstReceipt with { PlanHash = new string('b', 64) }, default)).Status);
         Assert.Equal(PurgeReceiptStatus.Conflict,

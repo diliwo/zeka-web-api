@@ -113,7 +113,7 @@ internal sealed class PgFixturePurgeParticipant(string connectionString, string 
                     throw new InvalidOperationException("Conflicting category command after local commit.");
                 await reader.CloseAsync();
                 await transaction.CommitAsync(cancellationToken);
-                if (json == "" && documentFixturePath is not null)
+                if (documentFixturePath is not null)
                     return await CompleteDocumentAsync(command, cancellationToken);
                 return JsonSerializer.Deserialize<PurgeParticipantReceiptV1>(json)
                     ?? throw new InvalidOperationException("Local receipt is unreadable.");
