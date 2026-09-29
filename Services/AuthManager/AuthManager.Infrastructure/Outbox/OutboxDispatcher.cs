@@ -152,7 +152,7 @@ internal sealed class OutboxDispatcher(
         command.Transaction = transaction;
         command.CommandText = """
             SELECT CASE
-              WHEN o."Status"=@archived THEN 2
+              WHEN o."Status" IN (@archived, @disposition_ready) THEN 2
               WHEN o."Status"=@closing AND EXISTS (
                 SELECT 1 FROM public."AuthClosureParticipantExecutions" e
                 WHERE e."OrganisationId"=o."Id") THEN 1
@@ -173,6 +173,10 @@ internal sealed class OutboxDispatcher(
         archived.ParameterName = "archived";
         archived.Value = (int)OrganisationStatus.Archived;
         command.Parameters.Add(archived);
+        var dispositionReady = command.CreateParameter();
+        dispositionReady.ParameterName = "disposition_ready";
+        dispositionReady.Value = (int)OrganisationStatus.DispositionReady;
+        command.Parameters.Add(dispositionReady);
         var value = await command.ExecuteScalarAsync(cancellationToken);
         return value is int state && Enum.IsDefined(typeof(OrganisationPublicationBoundary), state)
             ? (OrganisationPublicationBoundary)state

@@ -12,9 +12,12 @@ using Npgsql;
 namespace AuthManager.Infrastructure.Persistence.Lifecycle;
 
 /// <summary>Durable eligibility store; deliberately not registered as a production trigger.</summary>
-public sealed class LifecycleDispositionStore(DbContextOptions<AuthDbContext> options)
+public sealed class LifecycleDispositionStore(DbContextOptions<AuthDbContext> options,
+    TimeProvider timeProvider)
     : ILifecycleDispositionStore
 {
+    private readonly TimeProvider clock = timeProvider
+        ?? throw new ArgumentNullException(nameof(timeProvider));
     public async Task<RetentionEvaluationRequest?> ReadRequestAsync(Guid evaluationId,
         Guid operationId, Guid organisationId, DateTimeOffset evaluatedAt,
         CancellationToken cancellationToken)
@@ -65,16 +68,18 @@ public sealed class LifecycleDispositionStore(DbContextOptions<AuthDbContext> op
                 }
                 finally { ResetContext(database); }
             }
-            catch (DbUpdateConcurrencyException) { }
+            catch (DbUpdateConcurrencyException) { continue; }
             catch (DbUpdateException exception) when (exception.InnerException is PostgresException
-                { SqlState: PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.SerializationFailure }) { }
-            catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.SerializationFailure) { }
+                { SqlState: PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.SerializationFailure })
+            { continue; }
+            catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.SerializationFailure)
+            { continue; }
         }
         return new(DispositionEvaluationStatus.Unavailable, request.TerminationOperationId,
             request.OperationRevision);
     }
 
-    private static async Task<DispositionEvaluationResult> CommitInTransaction(AuthDbContext database,
+    private async Task<DispositionEvaluationResult> CommitInTransaction(AuthDbContext database,
         RetentionEvaluationRequest request, RetentionEvaluationResponse response,
         CancellationToken cancellationToken)
     {
@@ -87,7 +92,9 @@ public sealed class LifecycleDispositionStore(DbContextOptions<AuthDbContext> op
             || !Categories(operation).SequenceEqual(request.Categories))
             return Result(DispositionEvaluationStatus.Conflict, request);
 
-        if (!Validate(request, response, out var policyId, out var policyVersion))
+        // First validate the immutable request-time contents, so an exact historical
+        // replay remains identifiable even after its validity window has elapsed.
+        if (!Validate(request, response, request.EvaluatedAt, out var policyId, out var policyVersion))
             return Result(DispositionEvaluationStatus.Blocked, request);
         var setHash = Hash(request, response, policyId!, policyVersion!);
         var prior = await database.RetentionDecisionSets.AsNoTracking()
@@ -102,6 +109,9 @@ public sealed class LifecycleDispositionStore(DbContextOptions<AuthDbContext> op
 
         if (await database.RetentionDecisionSets.AsNoTracking()
                 .AnyAsync(x => x.OperationId == operation.Id, cancellationToken))
+            return Result(DispositionEvaluationStatus.Blocked, request);
+
+        if (!Validate(request, response, clock.GetUtcNow(), out _, out _))
             return Result(DispositionEvaluationStatus.Blocked, request);
 
         if (operation.State != LifecycleOperationState.Archived || !operation.IsActive
@@ -132,6 +142,12 @@ public sealed class LifecycleDispositionStore(DbContextOptions<AuthDbContext> op
                 return Result(DispositionEvaluationStatus.Conflict, request);
             operation.MarkDispositionReady(request.EvaluatedAt, setHash);
         }
+        // Recheck immediately before persistence: a slow policy call or database attempt
+        // cannot turn an expired decision into durable readiness evidence.
+        var preSaveAt = clock.GetUtcNow();
+        if (preSaveAt < request.EvaluatedAt
+            || response.Decisions.Any(x => x.ValidUntil < preSaveAt))
+            return Result(DispositionEvaluationStatus.Blocked, request);
         await database.SaveChangesAsync(cancellationToken);
         return Partition(new(ready ? DispositionEvaluationStatus.Ready : DispositionEvaluationStatus.Blocked,
             operation.Id, operation.Revision, setHash), response, request.EvaluatedAt);
@@ -169,11 +185,14 @@ public sealed class LifecycleDispositionStore(DbContextOptions<AuthDbContext> op
             .Select(x => new DispositionCategory(x.OwnershipScope, x.ParticipantId, x.ContractVersion));
 
     private static bool Validate(RetentionEvaluationRequest request,
-        RetentionEvaluationResponse response, out string? policyId, out string? policyVersion)
+        RetentionEvaluationResponse response, DateTimeOffset committedAt,
+        out string? policyId, out string? policyVersion)
     {
         policyId = null; policyVersion = null;
         if (request.EvaluationId == Guid.Empty || request.OperationRevision < 1
             || request.EvaluatedAt == default || request.EvaluatedAt.Offset != TimeSpan.Zero
+            || committedAt == default || committedAt.Offset != TimeSpan.Zero
+            || committedAt < request.EvaluatedAt
             || response.Decisions is null || response.Decisions.Count != request.Categories.Count
             || response.Decisions.Count == 0
             || response.Decisions.Select(x => x.Category).Distinct(StringComparer.Ordinal).Count()
@@ -189,7 +208,7 @@ public sealed class LifecycleDispositionStore(DbContextOptions<AuthDbContext> op
                 || decision.DecidedAt == default || decision.DecidedAt.Offset != TimeSpan.Zero
                 || decision.DecidedAt > request.EvaluatedAt
                 || decision.ValidUntil.Offset != TimeSpan.Zero
-                || decision.ValidUntil < request.EvaluatedAt
+                || decision.ValidUntil < committedAt
                 || !Enum.IsDefined(decision.Decision)
                 || !Stable(decision.ReasonCode)
                 || (decision.Decision == RetentionDecisionCode.Purge) != (decision.EligibleAt is not null)

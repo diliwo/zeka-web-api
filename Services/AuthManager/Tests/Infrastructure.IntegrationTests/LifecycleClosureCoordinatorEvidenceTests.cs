@@ -695,10 +695,12 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         var operationId = await Archive(OrganisationA, successor);
         var organisationBBefore = await OrganisationDigest(environment.AdministratorConnection, OrganisationB);
         var globalBefore = await GlobalReferenceDigest(environment.AdministratorConnection);
+        var pendingOrdinaryId = await StageOutbox(environment.RuntimeConnection,
+            "SyntheticPendingDispositionOrdinaryMessageV1", "{}", operationId, Now.AddMinutes(2));
         var outboxBefore = await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
             "SELECT count(*) FROM public.\"OutboxMessages\"");
-        var store = new LifecycleDispositionStore(Options(environment.RuntimeConnection));
-        var evaluationClock = new FixedClock(Now.AddMinutes(2));
+        var evaluationClock = new FixedClock(Now.AddMinutes(3));
+        var store = new LifecycleDispositionStore(Options(environment.RuntimeConnection), evaluationClock);
 
         Assert.Equal(DispositionEvaluationStatus.Blocked,
             (await new LifecycleDispositionCoordinator(store,
@@ -706,6 +708,22 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                     "Predecessor must not call a policy provider.")), evaluationClock)
                 .EvaluateAsync(Guid.NewGuid(), oldOperation, OrganisationB)).Status);
         Assert.Equal(0L, await RuntimeScalar(environment.RuntimeConnection, OrganisationB,
+            "SELECT count(*) FROM public.\"RetentionDecisionSets\""));
+
+        var delayedClock = new MutableClock(Now.AddMinutes(2));
+        var expired = await new LifecycleDispositionCoordinator(
+                new LifecycleDispositionStore(Options(environment.RuntimeConnection), delayedClock),
+                new FixtureRetentionPolicy(request =>
+                {
+                    delayedClock.Advance(TimeSpan.FromSeconds(2));
+                    return new RetentionEvaluationResponse(request.Categories.Select(category =>
+                        new RetentionCategoryDecision(category.Category, "fixture-policy", "1",
+                            request.EvaluatedAt, request.EvaluatedAt.AddSeconds(1),
+                            RetentionDecisionCode.Retain, null, null, "synthetic-decision")).ToArray());
+                }), delayedClock)
+            .EvaluateAsync(Guid.NewGuid(), operationId, OrganisationA);
+        Assert.Equal(DispositionEvaluationStatus.Blocked, expired.Status);
+        Assert.Equal(0L, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
             "SELECT count(*) FROM public.\"RetentionDecisionSets\""));
 
         RetentionEvaluationResponse Decisions(RetentionEvaluationRequest request,
@@ -763,6 +781,18 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             "SELECT count(*) FROM public.\"RetentionDecisionRecords\""));
         Assert.Equal(outboxBefore, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
             "SELECT count(*) FROM public.\"OutboxMessages\""));
+        var publisher = new BlockingPublisher();
+        await using (var provider = DispatcherProvider(environment.RuntimeConnection,
+                         evaluationClock, publisher))
+        await using (var scope = provider.CreateAsyncScope())
+            await scope.ServiceProvider.GetRequiredService<IOutboxDispatcher>()
+                .DispatchBatchAsync();
+        Assert.DoesNotContain(publisher.Messages, x => x.Id == pendingOrdinaryId);
+        Assert.Equal(1L, await ExecuteScalar(environment.AdministratorConnection, $"""
+            SELECT count(*) FROM public."OutboxMessages"
+            WHERE "Id"='{pendingOrdinaryId:D}'::uuid AND "ProcessedAtUtc" IS NULL
+              AND "DeadLetteredAtUtc" IS NOT NULL
+            """));
         Assert.Equal(organisationBBefore,
             await OrganisationDigest(environment.AdministratorConnection, OrganisationB));
         Assert.Equal(globalBefore, await GlobalReferenceDigest(environment.AdministratorConnection));
@@ -800,6 +830,7 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             .DispatchAsync(await ReadCloseCommands(environment.RuntimeConnection, OrganisationA));
 
         var evaluatedAt = Now.AddMinutes(2);
+        var evaluationClock = new MutableClock(evaluatedAt);
         var evaluation = Guid.NewGuid();
         var policy = new FixtureRetentionPolicy(request => new RetentionEvaluationResponse(
             request.Categories.Select((category, index) => new RetentionCategoryDecision(
@@ -810,14 +841,15 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                 index == 0 && firstCode == RetentionDecisionCode.Held ? "synthetic-hold" : null,
                 "synthetic-decision")).ToArray()));
         var coordinator = new LifecycleDispositionCoordinator(
-            new LifecycleDispositionStore(Options(environment.RuntimeConnection)),
-            policy, new FixedClock(evaluatedAt));
+            new LifecycleDispositionStore(Options(environment.RuntimeConnection), evaluationClock),
+            policy, evaluationClock);
         var blocked = await coordinator.EvaluateAsync(evaluation, operation.Id, OrganisationA);
         Assert.Equal(DispositionEvaluationStatus.Blocked, blocked.Status);
         Assert.Equal(64, blocked.DecisionSetHash?.Length);
         Assert.Equal(3, blocked.RetainedExceptions.Count);
         Assert.Equal(firstCode == RetentionDecisionCode.Purge ? 1 : 0,
             blocked.FuturePurgeCategories.Count);
+        evaluationClock.Advance(TimeSpan.FromDays(3));
         Assert.Equal(DispositionEvaluationStatus.Replay,
             (await coordinator.EvaluateAsync(evaluation, operation.Id, OrganisationA)).Status);
         Assert.Equal(DispositionEvaluationStatus.Blocked,
@@ -924,7 +956,8 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
                 """))!);
         Assert.Equal(DispositionEvaluationStatus.Blocked,
             (await new LifecycleDispositionCoordinator(
-                new LifecycleDispositionStore(Options(environment.RuntimeConnection)),
+                new LifecycleDispositionStore(Options(environment.RuntimeConnection),
+                    new FixedClock(Now.AddMinutes(2))),
                 new FixtureRetentionPolicy(_ => throw new InvalidOperationException("No policy call")),
                 new FixedClock(Now.AddMinutes(2)))
                 .EvaluateAsync(Guid.NewGuid(), operation.Id, OrganisationA)).Status);
@@ -1177,6 +1210,13 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private sealed class MutableClock(DateTimeOffset now) : TimeProvider
+    {
+        private DateTimeOffset current = now;
+        public override DateTimeOffset GetUtcNow() => current;
+        public void Advance(TimeSpan duration) => current = current.Add(duration);
     }
 
     private sealed class FixtureRetentionPolicy(
