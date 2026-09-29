@@ -8,5 +8,6 @@ public enum OrganisationStatus
     Closed = 4,
     Closing = 5,
     Archived = 6,
-    DispositionReady = 7
+    DispositionReady = 7,
+    PurgeInProgress = 8
 }

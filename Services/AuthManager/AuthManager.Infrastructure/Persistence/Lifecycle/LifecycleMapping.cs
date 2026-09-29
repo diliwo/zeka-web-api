@@ -39,6 +39,8 @@ internal static class LifecycleMapping
         operation.Property(x => x.FenceEvidenceHash).HasMaxLength(64);
         operation.Property(x => x.ClosureFenceEvidenceHash).HasMaxLength(64);
         operation.Property(x => x.RetentionDecisionSetHash).HasMaxLength(64);
+        operation.Property(x => x.PurgePlanHash).HasMaxLength(64);
+        operation.Property(x => x.PurgeBoundaryEvidenceHash).HasMaxLength(64);
         operation.Property(x => x.PackageSha256).HasMaxLength(64);
         operation.Property(x => x.PackageReference).HasMaxLength(500);
         operation.Property(x => x.FailureCode).HasMaxLength(200);
@@ -83,6 +85,66 @@ internal static class LifecycleMapping
         decision.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
         foreach (var property in decision.Metadata.GetProperties())
             property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+        var purgePlan = model.Entity<LifecyclePurgePlan>();
+        purgePlan.ToTable("LifecyclePurgePlans");
+        purgePlan.HasKey(x => x.Id);
+        purgePlan.HasAlternateKey(x => new { x.Id, x.OperationId, x.OrganisationId });
+        purgePlan.Property(x => x.InventoryHash).HasMaxLength(64);
+        purgePlan.Property(x => x.DispositionInventoryHash).HasMaxLength(64);
+        purgePlan.Property(x => x.DecisionSetHash).HasMaxLength(64);
+        purgePlan.Property(x => x.PlanHash).HasMaxLength(64);
+        purgePlan.Property(x => x.EntriesJson).HasColumnType("text");
+        purgePlan.Ignore(x => x.Entries);
+        purgePlan.HasIndex(x => x.OperationId).IsUnique();
+        purgePlan.HasOne<LifecycleOperation>().WithMany()
+            .HasForeignKey(x => new { x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
+        purgePlan.HasOne<RetentionDecisionSet>().WithMany()
+            .HasForeignKey(x => new { x.DecisionSetId, x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OperationId, x.OrganisationId })
+            .OnDelete(DeleteBehavior.Restrict);
+        purgePlan.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+        foreach (var property in purgePlan.Metadata.GetProperties())
+            property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+
+        var purgeOutbox = model.Entity<LifecyclePurgeOutboxMessage>();
+        purgeOutbox.ToTable("LifecyclePurgeOutbox");
+        purgeOutbox.HasKey(x => x.MessageId);
+        purgeOutbox.Property(x => x.ParticipantId).HasMaxLength(200);
+        purgeOutbox.Property(x => x.Category).HasMaxLength(200);
+        purgeOutbox.Property(x => x.PayloadJson).HasColumnType("text");
+        purgeOutbox.Property(x => x.PayloadHash).HasMaxLength(64);
+        purgeOutbox.HasIndex(x => new { x.OperationId, x.Kind, x.Category }).IsUnique();
+        purgeOutbox.HasOne<LifecyclePurgePlan>().WithMany()
+            .HasForeignKey(x => new { x.PlanId, x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OperationId, x.OrganisationId })
+            .OnDelete(DeleteBehavior.Restrict);
+        purgeOutbox.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+        foreach (var property in purgeOutbox.Metadata.GetProperties())
+            property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+
+        var purgeProgress = model.Entity<LifecyclePurgeParticipantProgress>();
+        purgeProgress.ToTable("LifecyclePurgeProgress");
+        purgeProgress.HasKey(x => new { x.OperationId, x.Category });
+        purgeProgress.Property(x => x.Category).HasMaxLength(200);
+        purgeProgress.Property(x => x.ItemId).HasMaxLength(300);
+        purgeProgress.Property(x => x.ParticipantId).HasMaxLength(200);
+        purgeProgress.Property(x => x.CommandHash).HasMaxLength(64);
+        purgeProgress.Property(x => x.EvidenceHash).HasMaxLength(64);
+        purgeProgress.Property(x => x.SafeFailureCode).HasMaxLength(200);
+        purgeProgress.HasOne<LifecyclePurgePlan>().WithMany()
+            .HasForeignKey(x => new { x.PlanId, x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OperationId, x.OrganisationId })
+            .OnDelete(DeleteBehavior.Restrict);
+        purgeProgress.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+        foreach (var property in purgeProgress.Metadata.GetProperties().Where(x => x.Name is not
+                     nameof(LifecyclePurgeParticipantProgress.State) and not
+                     nameof(LifecyclePurgeParticipantProgress.LastReceiptId) and not
+                     nameof(LifecyclePurgeParticipantProgress.EvidenceHash) and not
+                     nameof(LifecyclePurgeParticipantProgress.SafeFailureCode) and not
+                     nameof(LifecyclePurgeParticipantProgress.Attempts) and not
+                     nameof(LifecyclePurgeParticipantProgress.CompletedAt)))
+            property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
         var participant = model.Entity<LifecycleParticipant>();
         participant.ToTable("OrganisationLifecycleParticipants");
         participant.HasKey(x => new { x.OperationId, x.Family, x.CapabilityKey, x.OwnershipScope });
@@ -99,7 +161,12 @@ internal static class LifecycleMapping
             nameof(LifecycleOperation.ClosingAt), nameof(LifecycleOperation.ArchivedAt),
             nameof(LifecycleOperation.ClosureFenceEvidenceHash),
             nameof(LifecycleOperation.DispositionReadyAt),
-            nameof(LifecycleOperation.RetentionDecisionSetHash)
+            nameof(LifecycleOperation.RetentionDecisionSetHash),
+            nameof(LifecycleOperation.PurgePlanHash),
+            nameof(LifecycleOperation.PurgeBoundaryEvidenceHash),
+            nameof(LifecycleOperation.IrreversibleStartedAt),
+            nameof(LifecycleOperation.IrreversibleRevision),
+            nameof(LifecycleOperation.PurgeExecutionCompletedAt)
         };
         foreach (var property in operation.Metadata.GetProperties().Where(p => !mutableOperationProperties.Contains(p.Name)))
             property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);

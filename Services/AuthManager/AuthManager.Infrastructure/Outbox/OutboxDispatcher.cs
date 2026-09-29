@@ -152,7 +152,7 @@ internal sealed class OutboxDispatcher(
         command.Transaction = transaction;
         command.CommandText = """
             SELECT CASE
-              WHEN o."Status" IN (@archived, @disposition_ready) THEN 2
+              WHEN o."Status" IN (@archived, @disposition_ready, @purge_in_progress) THEN 2
               WHEN o."Status"=@closing AND EXISTS (
                 SELECT 1 FROM public."AuthClosureParticipantExecutions" e
                 WHERE e."OrganisationId"=o."Id") THEN 1
@@ -177,6 +177,10 @@ internal sealed class OutboxDispatcher(
         dispositionReady.ParameterName = "disposition_ready";
         dispositionReady.Value = (int)OrganisationStatus.DispositionReady;
         command.Parameters.Add(dispositionReady);
+        var purgeInProgress = command.CreateParameter();
+        purgeInProgress.ParameterName = "purge_in_progress";
+        purgeInProgress.Value = (int)OrganisationStatus.PurgeInProgress;
+        command.Parameters.Add(purgeInProgress);
         var value = await command.ExecuteScalarAsync(cancellationToken);
         return value is int state && Enum.IsDefined(typeof(OrganisationPublicationBoundary), state)
             ? (OrganisationPublicationBoundary)state

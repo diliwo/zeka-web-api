@@ -79,6 +79,10 @@ public sealed class Organisation
     public bool MarkDispositionReady(DateTimeOffset readyAtUtc) =>
         TransitionTo(OrganisationStatus.DispositionReady, readyAtUtc, OrganisationStatus.Archived);
 
+    public bool BeginPurge(DateTimeOffset irreversibleAtUtc) =>
+        TransitionTo(OrganisationStatus.PurgeInProgress, irreversibleAtUtc,
+            OrganisationStatus.DispositionReady);
+
     public bool RecoverClosure(DateTimeOffset recoveredAtUtc) =>
         TransitionTo(OrganisationStatus.Active, recoveredAtUtc, OrganisationStatus.Closing);
 

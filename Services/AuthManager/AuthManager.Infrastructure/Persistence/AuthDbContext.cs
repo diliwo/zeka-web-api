@@ -62,13 +62,19 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
                 or AuthManager.Core.Lifecycle.AuthClosureParticipantInboxReceipt
                 or AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage
                 or AuthManager.Core.Lifecycle.RetentionDecisionSet
-                or AuthManager.Core.Lifecycle.RetentionDecisionRecord)
+                or AuthManager.Core.Lifecycle.RetentionDecisionRecord
+                or AuthManager.Core.Lifecycle.LifecyclePurgePlan
+                or AuthManager.Core.Lifecycle.LifecyclePurgeOutboxMessage
+                or AuthManager.Core.Lifecycle.LifecyclePurgeParticipantProgress)
             {
                 var organisation = (Guid)entry.Property("OrganisationId").CurrentValue!;
                 if (!LifecycleOnly || LifecycleTransaction is null || organisation == Guid.Empty
                     || organisation != LifecycleOrganisationId || entry.State == EntityState.Deleted
                     || (entry.Entity is AuthManager.Core.Lifecycle.RetentionDecisionSet
-                        or AuthManager.Core.Lifecycle.RetentionDecisionRecord) && entry.State != EntityState.Added
+                        or AuthManager.Core.Lifecycle.RetentionDecisionRecord
+                        or AuthManager.Core.Lifecycle.LifecyclePurgePlan
+                        or AuthManager.Core.Lifecycle.LifecyclePurgeOutboxMessage)
+                        && entry.State != EntityState.Added
                     || entry.State == EntityState.Modified && (Guid)entry.Property("OrganisationId").OriginalValue! != organisation)
                     throw new InvalidOperationException("Lifecycle evidence write is outside its immutable organisation attempt.");
             }
@@ -95,6 +101,9 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage> AuthClosureParticipantOutboxMessages => Set<AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage>();
     public DbSet<AuthManager.Core.Lifecycle.RetentionDecisionSet> RetentionDecisionSets => Set<AuthManager.Core.Lifecycle.RetentionDecisionSet>();
     public DbSet<AuthManager.Core.Lifecycle.RetentionDecisionRecord> RetentionDecisionRecords => Set<AuthManager.Core.Lifecycle.RetentionDecisionRecord>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecyclePurgePlan> LifecyclePurgePlans => Set<AuthManager.Core.Lifecycle.LifecyclePurgePlan>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecyclePurgeOutboxMessage> LifecyclePurgeOutbox => Set<AuthManager.Core.Lifecycle.LifecyclePurgeOutboxMessage>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecyclePurgeParticipantProgress> LifecyclePurgeProgress => Set<AuthManager.Core.Lifecycle.LifecyclePurgeParticipantProgress>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
