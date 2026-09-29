@@ -201,7 +201,8 @@ BEGIN
     SELECT * FROM (VALUES
       ('OrganisationLifecycleOperations', ARRAY['State','Revision','SnapshotAt','FenceEvidenceHash',
         'PackageSha256','PackageReference','FailureCode','CompletedAt','IsActive','ClosingAt',
-        'ArchivedAt','ClosureFenceEvidenceHash']::text[], false),
+        'ArchivedAt','ClosureFenceEvidenceHash','DispositionReadyAt',
+        'RetentionDecisionSetHash']::text[], false),
       ('OrganisationLifecycleParticipants', ARRAY['State','FailureBoundaryDisposition','FailureCode',
         'FailureRetryable','FailedAt']::text[], false),
       ('LifecycleCoordinatorLeases', ARRAY['LeaseId','ExpiresAt','Version']::text[], false),
@@ -217,6 +218,8 @@ BEGIN
       ('AuthClosureParticipantExecutions', ARRAY[]::text[], true),
       ('AuthClosureParticipantInbox', ARRAY[]::text[], true),
       ('AuthClosureParticipantOutbox', ARRAY[]::text[], true),
+      ('RetentionDecisionSets', ARRAY[]::text[], false),
+      ('RetentionDecisionRecords', ARRAY[]::text[], false),
       ('MembershipPermissionGrants', ARRAY['RevokedByMembershipId','RevokedBySubjectId',
         'RevokedAtUtc','ConcurrencyVersion']::text[], false)
     ) AS inventory(name, update_columns, reconcile_owner)

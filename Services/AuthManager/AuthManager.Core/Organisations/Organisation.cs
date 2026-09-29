@@ -76,6 +76,9 @@ public sealed class Organisation
     public bool Archive(DateTimeOffset archivedAtUtc) =>
         TransitionTo(OrganisationStatus.Archived, archivedAtUtc, OrganisationStatus.Closing);
 
+    public bool MarkDispositionReady(DateTimeOffset readyAtUtc) =>
+        TransitionTo(OrganisationStatus.DispositionReady, readyAtUtc, OrganisationStatus.Archived);
+
     public bool RecoverClosure(DateTimeOffset recoveredAtUtc) =>
         TransitionTo(OrganisationStatus.Active, recoveredAtUtc, OrganisationStatus.Closing);
 

@@ -14,7 +14,9 @@ public enum LifecycleOperationState
     AssemblingPackage,
     ReleasingFence,
     Completed,
-    Failed
+    Failed,
+    Archived,
+    DispositionReady
 }
 
 public enum LifecycleParticipantState

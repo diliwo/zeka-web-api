@@ -19,12 +19,15 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
     public Guid IdempotencyId { get; private set; }
     public Guid RegistryRevision { get; private set; }
     public string InventoryHash { get; private set; } = "";
+    public string? DispositionInventoryHash { get; private set; }
     public string? ExportInventoryJson { get; private set; }
     public string? ExportInventoryHash { get; private set; }
     public DateTimeOffset RequestedAt { get; private set; }
     public DateTimeOffset? ClosingAt { get; private set; }
     public DateTimeOffset? ArchivedAt { get; private set; }
     public string? ClosureFenceEvidenceHash { get; private set; }
+    public DateTimeOffset? DispositionReadyAt { get; private set; }
+    public string? RetentionDecisionSetHash { get; private set; }
     public DateTimeOffset? SnapshotAt { get; private set; }
     public string? FenceEvidenceHash { get; private set; }
     public string? PackageSha256 { get; private set; }
@@ -61,6 +64,9 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
         // Freeze the complete reviewed inventory, including capabilities for other families.
         operation.participants.AddRange(registry.Inventory.Select(b =>
             new LifecycleParticipant(id, organisationId, b)));
+        if (family == LifecycleOperationFamily.Termination)
+            operation.DispositionInventoryHash =
+                ReviewedDispositionRegistryV1.FrozenCategoryHash(operation.participants);
         return operation;
     }
 
@@ -102,7 +108,7 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
         FindClosureParticipant(participantId).Fail(failureCode, retryable, failedAt, boundaryDisposition);
     }
 
-    public void CompleteTermination(DateTimeOffset archivedAt, string evidenceHash)
+    public void CompleteClosureArchive(DateTimeOffset archivedAt, string evidenceHash)
     {
         DemandTerminationState(LifecycleOperationState.EnteringFence);
         if (ClosureParticipants().Any(x => x.Mandatory && x.State != LifecycleParticipantState.Accepted))
@@ -111,9 +117,23 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
             throw new ArgumentException("ArchivedAt must be UTC and not precede ClosingAt.", nameof(archivedAt));
         ArchivedAt = archivedAt;
         ClosureFenceEvidenceHash = RequireSha256(evidenceHash, nameof(evidenceHash));
-        CompletedAt = archivedAt;
-        State = LifecycleOperationState.Completed;
-        IsActive = false;
+        // ArchivedAt and the fence hash are the durable closure-phase completion evidence.
+        // CompletedAt belongs to terminal completion of the overall termination operation.
+        State = LifecycleOperationState.Archived;
+        Revision++;
+    }
+
+    public void MarkDispositionReady(DateTimeOffset readyAt, string decisionSetHash)
+    {
+        DemandTerminationState(LifecycleOperationState.Archived);
+        if (ArchivedAt is null || ClosureFenceEvidenceHash is null
+            || DispositionInventoryHash is null || CompletedAt is not null)
+            throw new InvalidOperationException("Archived closure and frozen disposition inventory are required.");
+        if (readyAt == default || readyAt.Offset != TimeSpan.Zero || readyAt < ArchivedAt)
+            throw new ArgumentException("Readiness time must be UTC and follow archive.", nameof(readyAt));
+        RetentionDecisionSetHash = RequireSha256(decisionSetHash, nameof(decisionSetHash));
+        DispositionReadyAt = readyAt;
+        State = LifecycleOperationState.DispositionReady;
         Revision++;
     }
 

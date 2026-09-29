@@ -68,7 +68,8 @@ public static class RlsSecurityManifestVerifier
             || x.EndsWith("rls-manifest.v11.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v12.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v13.json", StringComparison.Ordinal)
-            || x.EndsWith("rls-manifest.v14.json", StringComparison.Ordinal));
+            || x.EndsWith("rls-manifest.v14.json", StringComparison.Ordinal)
+            || x.EndsWith("rls-manifest.v15.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -87,7 +88,7 @@ public static class RlsSecurityManifestVerifier
     public static async Task VerifyAsync(DbContext database, RlsSecurityManifest manifest,
         CancellationToken cancellationToken = default)
     {
-        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14) || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15) || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         var functionDefinitions = FunctionDefinitions(manifest);
         Equal(manifest.RuntimeFunctions, functionDefinitions.Keys,
@@ -656,6 +657,8 @@ public static class RlsSecurityManifestVerifier
                 : manifest.SchemaVersion >= 12
                 ? new[] { "MembershipPermissionGrants", "OrganisationLifecycleOperations", "OrganisationLifecycleParticipants" }
                 : new[] { "OrganisationLifecycleOperations", "OrganisationLifecycleParticipants" };
+            if (manifest.SchemaVersion >= 15)
+                surviving = [.. surviving, "RetentionDecisionRecords", "RetentionDecisionSets"];
             Equal(surviving.Select(name => ObjectKey("public", name)),
                 manifest.OrganisationScopedSurvivingControlTables.Select(ObjectKey), "surviving control classification");
             if (manifest.GlobalControlPlaneTables.Except(manifest.ExcludedTables).Any()
@@ -736,6 +739,12 @@ public static class RlsSecurityManifestVerifier
                     $"{ObjectKey(operation)}|State"
                 }
                 : new[] { $"{ObjectKey(operation)}|Revision", $"{ObjectKey(operation)}|State" };
+            if (manifest.SchemaVersion >= 15)
+                expectedColumns = [.. expectedColumns,
+                    $"{ObjectKey(operation)}|DispositionReadyAt",
+                    $"{ObjectKey(operation)}|RetentionDecisionSetHash"];
+            if (manifest.SchemaVersion >= 15)
+                expectedColumns = expectedColumns.Order(StringComparer.Ordinal).ToArray();
             if (!manifest.ColumnPrivileges.Select(state => $"{ObjectKey(state.Object)}|{state.Column}")
                     .SequenceEqual(expectedColumns, StringComparer.Ordinal)
                 || manifest.ColumnPrivileges.Any(state => state.Grantable
@@ -916,6 +925,13 @@ public static class RlsSecurityManifestVerifier
                 "AuthClosureParticipantInbox|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
                 "AuthClosureParticipantOutbox|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
                 "LifecycleClosureFenceReceipts|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false"
+            ]);
+        }
+        if (manifest.SchemaVersion >= 15)
+        {
+            expected.AddRange([
+                "RetentionDecisionSets|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "RetentionDecisionRecords|SetId,OperationId,OrganisationId|public|RetentionDecisionSets|Id,OperationId,OrganisationId|r|a|true|false"
             ]);
         }
         Equal(expected, rows.Select(row => string.Join('|', row)), "lifecycle foreign keys");

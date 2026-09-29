@@ -60,11 +60,15 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
                 or AuthManager.Core.Lifecycle.LifecycleClosureFenceReceipt
                 or AuthManager.Core.Lifecycle.AuthClosureParticipantExecution
                 or AuthManager.Core.Lifecycle.AuthClosureParticipantInboxReceipt
-                or AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage)
+                or AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage
+                or AuthManager.Core.Lifecycle.RetentionDecisionSet
+                or AuthManager.Core.Lifecycle.RetentionDecisionRecord)
             {
                 var organisation = (Guid)entry.Property("OrganisationId").CurrentValue!;
                 if (!LifecycleOnly || LifecycleTransaction is null || organisation == Guid.Empty
                     || organisation != LifecycleOrganisationId || entry.State == EntityState.Deleted
+                    || (entry.Entity is AuthManager.Core.Lifecycle.RetentionDecisionSet
+                        or AuthManager.Core.Lifecycle.RetentionDecisionRecord) && entry.State != EntityState.Added
                     || entry.State == EntityState.Modified && (Guid)entry.Property("OrganisationId").OriginalValue! != organisation)
                     throw new InvalidOperationException("Lifecycle evidence write is outside its immutable organisation attempt.");
             }
@@ -89,6 +93,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<AuthManager.Core.Lifecycle.AuthClosureParticipantExecution> AuthClosureParticipantExecutions => Set<AuthManager.Core.Lifecycle.AuthClosureParticipantExecution>();
     public DbSet<AuthManager.Core.Lifecycle.AuthClosureParticipantInboxReceipt> AuthClosureParticipantInboxReceipts => Set<AuthManager.Core.Lifecycle.AuthClosureParticipantInboxReceipt>();
     public DbSet<AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage> AuthClosureParticipantOutboxMessages => Set<AuthManager.Core.Lifecycle.AuthClosureParticipantOutboxMessage>();
+    public DbSet<AuthManager.Core.Lifecycle.RetentionDecisionSet> RetentionDecisionSets => Set<AuthManager.Core.Lifecycle.RetentionDecisionSet>();
+    public DbSet<AuthManager.Core.Lifecycle.RetentionDecisionRecord> RetentionDecisionRecords => Set<AuthManager.Core.Lifecycle.RetentionDecisionRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
