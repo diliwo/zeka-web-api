@@ -69,7 +69,8 @@ public static class RlsSecurityManifestVerifier
             || x.EndsWith("rls-manifest.v12.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v13.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v14.json", StringComparison.Ordinal)
-            || x.EndsWith("rls-manifest.v15.json", StringComparison.Ordinal));
+            || x.EndsWith("rls-manifest.v15.json", StringComparison.Ordinal)
+            || x.EndsWith("rls-manifest.v16.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -88,7 +89,7 @@ public static class RlsSecurityManifestVerifier
     public static async Task VerifyAsync(DbContext database, RlsSecurityManifest manifest,
         CancellationToken cancellationToken = default)
     {
-        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15) || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15 or 16) || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         var functionDefinitions = FunctionDefinitions(manifest);
         Equal(manifest.RuntimeFunctions, functionDefinitions.Keys,
@@ -659,6 +660,9 @@ public static class RlsSecurityManifestVerifier
                 : new[] { "OrganisationLifecycleOperations", "OrganisationLifecycleParticipants" };
             if (manifest.SchemaVersion >= 15)
                 surviving = [.. surviving, "RetentionDecisionRecords", "RetentionDecisionSets"];
+            if (manifest.SchemaVersion >= 16)
+                surviving = [.. surviving, "LifecyclePurgeOutbox", "LifecyclePurgePlans",
+                    "LifecyclePurgeProgress"];
             Equal(surviving.Select(name => ObjectKey("public", name)),
                 manifest.OrganisationScopedSurvivingControlTables.Select(ObjectKey), "surviving control classification");
             if (manifest.GlobalControlPlaneTables.Except(manifest.ExcludedTables).Any()
@@ -932,6 +936,15 @@ public static class RlsSecurityManifestVerifier
             expected.AddRange([
                 "RetentionDecisionSets|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
                 "RetentionDecisionRecords|SetId,OperationId,OrganisationId|public|RetentionDecisionSets|Id,OperationId,OrganisationId|r|a|true|false"
+            ]);
+        }
+        if (manifest.SchemaVersion >= 16)
+        {
+            expected.AddRange([
+                "LifecyclePurgePlans|OperationId,OrganisationId|public|OrganisationLifecycleOperations|Id,OrganisationId|r|a|true|false",
+                "LifecyclePurgePlans|DecisionSetId,OperationId,OrganisationId|public|RetentionDecisionSets|Id,OperationId,OrganisationId|r|a|true|false",
+                "LifecyclePurgeOutbox|PlanId,OperationId,OrganisationId|public|LifecyclePurgePlans|Id,OperationId,OrganisationId|r|a|true|false",
+                "LifecyclePurgeProgress|PlanId,OperationId,OrganisationId|public|LifecyclePurgePlans|Id,OperationId,OrganisationId|r|a|true|false"
             ]);
         }
         Equal(expected, rows.Select(row => string.Join('|', row)), "lifecycle foreign keys");

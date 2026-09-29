@@ -28,6 +28,11 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
     public string? ClosureFenceEvidenceHash { get; private set; }
     public DateTimeOffset? DispositionReadyAt { get; private set; }
     public string? RetentionDecisionSetHash { get; private set; }
+    public string? PurgePlanHash { get; private set; }
+    public string? PurgeBoundaryEvidenceHash { get; private set; }
+    public DateTimeOffset? IrreversibleStartedAt { get; private set; }
+    public long? IrreversibleRevision { get; private set; }
+    public DateTimeOffset? PurgeExecutionCompletedAt { get; private set; }
     public DateTimeOffset? SnapshotAt { get; private set; }
     public string? FenceEvidenceHash { get; private set; }
     public string? PackageSha256 { get; private set; }
@@ -135,6 +140,38 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
         DispositionReadyAt = readyAt;
         State = LifecycleOperationState.DispositionReady;
         Revision++;
+    }
+
+    public void BeginPurge(DateTimeOffset irreversibleAt, string decisionSetHash,
+        string planHash, string boundaryEvidenceHash)
+    {
+        DemandTerminationState(LifecycleOperationState.DispositionReady);
+        if (DispositionReadyAt is null || ArchivedAt is null || ClosureFenceEvidenceHash is null
+            || DispositionInventoryHash is null || CompletedAt is not null
+            || RetentionDecisionSetHash != RequireSha256(decisionSetHash, nameof(decisionSetHash)))
+            throw new InvalidOperationException("Purge requires the same ready termination operation and decision set.");
+        if (irreversibleAt == default || irreversibleAt.Offset != TimeSpan.Zero
+            || irreversibleAt < DispositionReadyAt)
+            throw new ArgumentException("Irreversible time must be UTC and follow readiness.", nameof(irreversibleAt));
+        PurgePlanHash = RequireSha256(planHash, nameof(planHash));
+        PurgeBoundaryEvidenceHash = RequireSha256(boundaryEvidenceHash, nameof(boundaryEvidenceHash));
+        IrreversibleStartedAt = irreversibleAt;
+        IrreversibleRevision = checked(Revision + 1);
+        State = LifecycleOperationState.PurgeInProgress;
+        Revision++;
+    }
+
+    public void MarkPurgeExecutionComplete(DateTimeOffset completedAt)
+    {
+        DemandTerminationState(LifecycleOperationState.PurgeInProgress);
+        if (IrreversibleStartedAt is null || PurgePlanHash is null || PurgeBoundaryEvidenceHash is null
+            || completedAt == default || completedAt.Offset != TimeSpan.Zero
+            || completedAt < IrreversibleStartedAt)
+            throw new InvalidOperationException("Purge execution completion evidence is invalid.");
+        PurgeExecutionCompletedAt = completedAt;
+        State = LifecycleOperationState.PurgeExecutionComplete;
+        Revision++;
+        // Completion of execution is not terminal verification. IsActive and CompletedAt remain unchanged.
     }
 
     public void BeginClosureRecovery()
@@ -262,6 +299,8 @@ public sealed class LifecycleOperation : ITenantOwnedEntity
     {
         if (!IsActive || State is LifecycleOperationState.Completed or LifecycleOperationState.Failed)
             throw new InvalidOperationException("Only an active lifecycle operation can fail.");
+        if (Family == LifecycleOperationFamily.Termination && IrreversibleStartedAt is not null)
+            throw new InvalidOperationException("Irreversible termination must recover forward under the same operation.");
         FailureCode = RequireStable(failureCode, nameof(failureCode), 200);
         State = LifecycleOperationState.Failed;
         IsActive = false;

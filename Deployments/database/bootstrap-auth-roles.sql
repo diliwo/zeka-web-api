@@ -268,6 +268,41 @@ BEGIN
       END IF;
     END IF;
   END LOOP;
+  -- LIFE-04A evidence tables are present in production schema but unavailable to the
+  -- ordinary runtime. Only isolated conformance setup may grant a fixture identity.
+  FOREACH object_name IN ARRAY ARRAY[
+    'LifecyclePurgePlans','LifecyclePurgeOutbox','LifecyclePurgeProgress'
+  ] LOOP
+    IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('ALTER TABLE public.%I OWNER TO zeka_auth_owner', object_name);
+      FOR table_grant IN
+        SELECT DISTINCT acl.grantee, pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
+        FROM pg_catalog.pg_class relation
+        CROSS JOIN LATERAL pg_catalog.aclexplode(relation.relacl) acl
+        WHERE relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
+          AND acl.grantee<>relation.relowner
+      LOOP
+        EXECUTE pg_catalog.format('REVOKE ALL ON TABLE public.%I FROM %s CASCADE',
+          object_name, CASE WHEN table_grant.grantee=0 THEN public_grantee
+            ELSE pg_catalog.quote_ident(table_grant.grantee_name) END);
+      END LOOP;
+      FOR column_grant IN
+        SELECT DISTINCT attribute.attname, acl.grantee,
+          pg_catalog.pg_get_userbyid(acl.grantee) AS grantee_name
+        FROM pg_catalog.pg_attribute attribute
+        JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+        CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+        WHERE relation.oid=pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name))
+          AND attribute.attnum>0 AND NOT attribute.attisdropped
+          AND acl.grantee<>relation.relowner
+      LOOP
+        EXECUTE pg_catalog.format('REVOKE ALL (%I) ON TABLE public.%I FROM %s CASCADE',
+          column_grant.attname, object_name,
+          CASE WHEN column_grant.grantee=0 THEN public_grantee
+            ELSE pg_catalog.quote_ident(column_grant.grantee_name) END);
+      END LOOP;
+    END IF;
+  END LOOP;
   IF pg_catalog.to_regprocedure('zeka.current_organisation_id()') IS NOT NULL THEN
     GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO zeka_auth_runtime;
   END IF;

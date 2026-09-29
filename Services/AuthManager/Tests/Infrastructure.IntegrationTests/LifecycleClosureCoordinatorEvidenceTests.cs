@@ -798,6 +798,333 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
         Assert.Equal(globalBefore, await GlobalReferenceDigest(environment.AdministratorConnection));
     }
 
+    [Fact]
+    public async Task Provider_real_LIFE04A_fixture_admission_is_atomic_and_runtime_cannot_admit()
+    {
+        var environment = await CreateEnvironmentAsync();
+        var successor = ReviewedDispositionRegistryV1.Create();
+        await using (var activation = new AuthDbContext(Options(environment.MigratorConnection)))
+        {
+            await activation.Database.OpenConnectionAsync();
+            await activation.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            Assert.True(await new ReviewedLifecycleRegistryActivation(activation)
+                .ActivateAsync(successor, 0, default));
+        }
+
+        var clock = new FixedClock(Now.AddMinutes(1));
+        var admission = await new LifecycleAdmission(new CurrentAccess(),
+                new LifecycleAdmissionStore(Options(environment.RuntimeConnection), clock,
+                    reviewedTerminationRegistry: successor))
+            .AdmitAsync(environment.OwnerUserId, OrganisationA,
+                LifecycleOperationFamily.Termination, Guid.NewGuid());
+        var operation = Assert.IsType<LifecycleOperation>(admission.Operation);
+        var closure = new LifecycleClosureCoordinator(
+            new LifecycleClosureStore(Options(environment.RuntimeConnection), clock));
+        Assert.Equal(ClosureProgressStatus.Progressed,
+            (await closure.BeginAsync(operation.Id, OrganisationA)).Status);
+        await new FixtureClosureContractDispatcher(environment.RuntimeConnection, clock, closure)
+            .DispatchAsync(await ReadCloseCommands(environment.RuntimeConnection, OrganisationA));
+
+        var evaluationClock = new FixedClock(Now.AddMinutes(3));
+        var disposition = await new LifecycleDispositionCoordinator(
+                new LifecycleDispositionStore(Options(environment.RuntimeConnection), evaluationClock),
+                new FixtureRetentionPolicy(request => new RetentionEvaluationResponse(
+                    request.Categories.Select((category, index) => new RetentionCategoryDecision(
+                        category.Category, "fixture-policy", "1", request.EvaluatedAt,
+                        request.EvaluatedAt.AddDays(1), index == 1
+                            ? RetentionDecisionCode.Retain : RetentionDecisionCode.Purge,
+                        index == 1 ? null : request.EvaluatedAt, null,
+                        "synthetic-decision")).ToArray())), evaluationClock)
+            .EvaluateAsync(Guid.NewGuid(), operation.Id, OrganisationA);
+        Assert.Equal(DispositionEvaluationStatus.Ready, disposition.Status);
+        var setId = Assert.IsType<Guid>(await RuntimeScalar(environment.RuntimeConnection,
+            OrganisationA, "SELECT \"Id\" FROM public.\"RetentionDecisionSets\""));
+        var request = new PurgeAdmissionRequest(Guid.NewGuid(), operation.Id, OrganisationA,
+            disposition.OperationRevision, setId, Assert.IsType<string>(disposition.DecisionSetHash));
+        var fixtureScope = new PurgeFixtureScope(OrganisationA, "Testing");
+        Assert.Equal(PostgresErrorCodes.ObjectNotInPrerequisiteState,
+            await RuntimeCommandError(environment.RuntimeConnection, OrganisationA,
+                "UPDATE public.\"Organisations\" SET \"Status\"=8 WHERE \"Id\"=current_setting('zeka.organisation_id')::uuid"));
+        await Assert.ThrowsAnyAsync<Exception>(() => RuntimeScalar(environment.RuntimeConnection,
+            OrganisationA, "SELECT count(*) FROM public.\"LifecyclePurgePlans\""));
+        await Assert.ThrowsAnyAsync<Exception>(async () => await new LifecyclePurgeStore(
+                Options(environment.RuntimeConnection), evaluationClock, fixtureScope)
+            .AdmitAsync(request, default));
+
+        const string fixtureRole = "zeka_auth_purge_fixture";
+        var password = Guid.NewGuid().ToString("N");
+        await Execute(environment.AdministratorConnection, $"""
+            CREATE ROLE {fixtureRole} LOGIN PASSWORD '{password}';
+            GRANT zeka_auth_runtime TO {fixtureRole};
+            GRANT SELECT, INSERT ON public."LifecyclePurgePlans",
+                public."LifecyclePurgeOutbox", public."LifecyclePurgeProgress" TO {fixtureRole};
+            GRANT UPDATE ("State", "Revision", "PurgePlanHash", "PurgeBoundaryEvidenceHash",
+                "IrreversibleStartedAt", "IrreversibleRevision", "PurgeExecutionCompletedAt")
+                ON public."OrganisationLifecycleOperations" TO {fixtureRole};
+            GRANT UPDATE ("State", "LastReceiptId", "EvidenceHash", "SafeFailureCode",
+                "Attempts", "CompletedAt") ON public."LifecyclePurgeProgress" TO {fixtureRole};
+            """);
+        const string participantRole = "zeka_life04a_participant_fixture";
+        var participantPassword = Guid.NewGuid().ToString("N");
+        await Execute(environment.AdministratorConnection, $"""
+            CREATE ROLE {participantRole} LOGIN PASSWORD '{participantPassword}';
+            DO $block$ BEGIN
+              EXECUTE format('GRANT CONNECT ON DATABASE %I TO {participantRole}', current_database());
+            END $block$;
+            CREATE SCHEMA life04a_fixture;
+            CREATE TABLE life04a_fixture."Items" (
+                "OrganisationId" uuid NOT NULL, "ParticipantId" text NOT NULL,
+                "Category" text NOT NULL, "ItemId" text NOT NULL,
+                "Disposition" text NOT NULL,
+                PRIMARY KEY ("OrganisationId", "ParticipantId", "Category"));
+            CREATE TABLE life04a_fixture."Payloads" (
+                "OrganisationId" uuid NOT NULL, "ParticipantId" text NOT NULL,
+                "Category" text NOT NULL, "ItemId" text NOT NULL,
+                "SyntheticContent" text NOT NULL,
+                PRIMARY KEY ("OrganisationId", "ParticipantId", "Category"));
+            CREATE TABLE life04a_fixture."Starts" (
+                "OrganisationId" uuid NOT NULL, "ParticipantId" text NOT NULL,
+                "OperationId" uuid NOT NULL, "Revision" bigint NOT NULL,
+                "RegistryRevision" uuid NOT NULL, "PlanId" uuid NOT NULL,
+                "PlanHash" text NOT NULL, "DecisionSetId" uuid NOT NULL,
+                "DecisionSetHash" text NOT NULL, "StartHash" text NOT NULL,
+                PRIMARY KEY ("OrganisationId", "ParticipantId", "OperationId"));
+            CREATE TABLE life04a_fixture."Inbox" (
+                "OrganisationId" uuid NOT NULL, "ParticipantId" text NOT NULL,
+                "OperationId" uuid NOT NULL, "Category" text NOT NULL,
+                "ItemId" text NOT NULL,
+                "MessageId" uuid NOT NULL UNIQUE, "CommandHash" text NOT NULL,
+                "ReceiptJson" text NOT NULL, "Outcome" integer NOT NULL,
+                "FileAttempts" integer NOT NULL DEFAULT 0, "LastFailure" text NULL,
+                PRIMARY KEY ("OrganisationId", "ParticipantId", "OperationId", "Category"));
+            ALTER TABLE life04a_fixture."Items" ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE life04a_fixture."Items" FORCE ROW LEVEL SECURITY;
+            ALTER TABLE life04a_fixture."Payloads" ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE life04a_fixture."Payloads" FORCE ROW LEVEL SECURITY;
+            ALTER TABLE life04a_fixture."Starts" ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE life04a_fixture."Starts" FORCE ROW LEVEL SECURITY;
+            ALTER TABLE life04a_fixture."Inbox" ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE life04a_fixture."Inbox" FORCE ROW LEVEL SECURITY;
+            CREATE POLICY tenant_items ON life04a_fixture."Items" TO {participantRole}
+              USING ("OrganisationId"=zeka.current_organisation_id())
+              WITH CHECK ("OrganisationId"=zeka.current_organisation_id());
+            CREATE POLICY tenant_payloads ON life04a_fixture."Payloads" TO {participantRole}
+              USING ("OrganisationId"=zeka.current_organisation_id())
+              WITH CHECK ("OrganisationId"=zeka.current_organisation_id());
+            CREATE POLICY tenant_starts ON life04a_fixture."Starts" TO {participantRole}
+              USING ("OrganisationId"=zeka.current_organisation_id())
+              WITH CHECK ("OrganisationId"=zeka.current_organisation_id());
+            CREATE POLICY tenant_inbox ON life04a_fixture."Inbox" TO {participantRole}
+              USING ("OrganisationId"=zeka.current_organisation_id())
+              WITH CHECK ("OrganisationId"=zeka.current_organisation_id());
+            GRANT USAGE ON SCHEMA life04a_fixture TO {participantRole};
+            GRANT USAGE ON SCHEMA zeka TO {participantRole};
+            GRANT EXECUTE ON FUNCTION zeka.current_organisation_id() TO {participantRole};
+            GRANT SELECT ON life04a_fixture."Items" TO {participantRole};
+            GRANT SELECT, DELETE ON life04a_fixture."Payloads" TO {participantRole};
+            GRANT SELECT, INSERT ON life04a_fixture."Starts", life04a_fixture."Inbox"
+              TO {participantRole};
+            GRANT UPDATE ("ReceiptJson", "FileAttempts", "LastFailure")
+              ON life04a_fixture."Inbox" TO {participantRole};
+            INSERT INTO life04a_fixture."Items"
+            SELECT '{OrganisationA:D}'::uuid, "ParticipantId", "OwnershipScope",
+                   'fixture:' || "OwnershipScope",
+                   CASE WHEN "OwnershipScope"='admin-area-owned-records' THEN 'RETAIN' ELSE 'PURGE' END
+            FROM public."OrganisationLifecycleParticipants"
+            WHERE "OperationId"='{operation.Id:D}'::uuid
+              AND "CapabilityKey"='organisation.disposition-category';
+            INSERT INTO life04a_fixture."Items"
+            SELECT '{OrganisationB:D}'::uuid, "ParticipantId", "OwnershipScope",
+                   'fixture:' || "OwnershipScope", 'RETAIN'
+            FROM public."OrganisationLifecycleParticipants"
+            WHERE "OperationId"='{operation.Id:D}'::uuid
+              AND "CapabilityKey"='organisation.disposition-category';
+            INSERT INTO life04a_fixture."Payloads"
+            SELECT "OrganisationId", "ParticipantId", "Category", "ItemId",
+                   'synthetic-fixture-content'
+            FROM life04a_fixture."Items"
+            WHERE "OrganisationId"='{OrganisationB:D}'::uuid
+               OR "Category"<>'client-management-owned-records';
+            """);
+        var fixtureConnection = Connection(environment.AdministratorConnection, fixtureRole, password);
+        var participantConnection = Connection(environment.AdministratorConnection,
+            participantRole, participantPassword);
+        await Assert.ThrowsAnyAsync<Exception>(() => RuntimeScalar(fixtureConnection,
+            OrganisationA, "SELECT count(*) FROM life04a_fixture.\"Payloads\""));
+        await Assert.ThrowsAnyAsync<Exception>(() => RuntimeScalar(participantConnection,
+            OrganisationA, "SELECT count(*) FROM public.\"LifecyclePurgePlans\""));
+        Assert.Equal(0L, await RuntimeScalar(participantConnection, OrganisationA,
+            $"SELECT count(*) FROM life04a_fixture.\"Payloads\" WHERE \"OrganisationId\"='{OrganisationB:D}'::uuid"));
+        var organisationBBefore = await OrganisationDigest(environment.AdministratorConnection, OrganisationB);
+        var globalBefore = await GlobalReferenceDigest(environment.AdministratorConnection);
+        var store = new LifecyclePurgeStore(Options(fixtureConnection), evaluationClock, fixtureScope);
+        var purgeCoordinator = new LifecyclePurgeCoordinator(store, fixtureScope);
+        Assert.Equal(PurgeAdmissionStatus.Blocked,
+            (await store.AdmitAsync(request with { ExpectedDecisionSetId = Guid.NewGuid() }, default)).Status);
+        Assert.Equal(PurgeAdmissionStatus.Conflict,
+            (await store.AdmitAsync(request with { ExpectedOperationRevision = request.ExpectedOperationRevision - 1 }, default)).Status);
+        var expiringStore = new LifecyclePurgeStore(Options(fixtureConnection),
+            new AdvancingClock(Now.AddMinutes(3), TimeSpan.FromDays(2)), fixtureScope);
+        Assert.Equal(PurgeAdmissionStatus.Blocked,
+            (await expiringStore.AdmitAsync(request, default)).Status);
+        await Execute(environment.AdministratorConnection,
+            "REVOKE INSERT ON public.\"LifecyclePurgeOutbox\" FROM zeka_auth_purge_fixture");
+        await Assert.ThrowsAnyAsync<Exception>(() => store.AdmitAsync(request, default));
+        Assert.Equal(0L, await ExecuteScalar(environment.AdministratorConnection,
+            "SELECT count(*) FROM public.\"LifecyclePurgePlans\""));
+        Assert.Equal($"{(int)OrganisationStatus.DispositionReady}|{(int)LifecycleOperationState.DispositionReady}",
+            await RuntimeScalar(environment.RuntimeConnection, OrganisationA, """
+                SELECT org."Status"::text || '|' || op."State"::text
+                FROM public."Organisations" org JOIN public."OrganisationLifecycleOperations" op
+                  ON op."OrganisationId"=org."Id" WHERE op."Family"=1
+                """));
+        await Execute(environment.AdministratorConnection,
+            "GRANT INSERT ON public.\"LifecyclePurgeOutbox\" TO zeka_auth_purge_fixture");
+        var result = await store.AdmitAsync(request, default);
+        Assert.Equal(PurgeAdmissionStatus.Admitted, result.Status);
+        Assert.Equal(PurgeAdmissionStatus.Replay, (await store.AdmitAsync(request, default)).Status);
+        Assert.Equal(1L, await RuntimeScalar(fixtureConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"LifecyclePurgePlans\""));
+        Assert.Equal(3L, await RuntimeScalar(fixtureConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"LifecyclePurgeProgress\""));
+        Assert.Equal(3L, await RuntimeScalar(fixtureConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"LifecyclePurgeProgress\" WHERE \"ItemId\"='fixture:' || \"Category\""));
+        Assert.Equal(4L, await RuntimeScalar(fixtureConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"LifecyclePurgeOutbox\""));
+        Assert.Equal($"{(int)OrganisationStatus.PurgeInProgress}|{(int)LifecycleOperationState.PurgeInProgress}|true|",
+            await RuntimeScalar(environment.RuntimeConnection, OrganisationA, """
+                SELECT org."Status"::text || '|' || op."State"::text || '|' || op."IsActive"::text
+                       || '|' || coalesce(op."CompletedAt"::text, '')
+                FROM public."Organisations" org JOIN public."OrganisationLifecycleOperations" op
+                  ON op."OrganisationId"=org."Id" WHERE op."Family"=1
+                """));
+        Assert.Equal(0L, await RuntimeScalar(fixtureConnection, OrganisationB,
+            "SELECT count(*) FROM public.\"LifecyclePurgePlans\""));
+        var commands = new List<(string Category, string Participant, Guid MessageId)>();
+        for (var index = 0; index < 3; index++)
+        {
+            var row = Assert.IsType<string>(await RuntimeScalar(fixtureConnection, OrganisationA,
+                $"""
+                 SELECT "Category" || '|' || "ParticipantId" || '|' || "CommandMessageId"::text
+                 FROM public."LifecyclePurgeProgress" ORDER BY "Category" LIMIT 1 OFFSET {index}
+                 """));
+            var fields = row.Split('|');
+            commands.Add((fields[0], fields[1], Guid.Parse(fields[2])));
+        }
+        var messages = await purgeCoordinator.ReadAdmittedMessagesAsync(operation.Id, OrganisationA);
+        var startFact = Assert.Single(messages, x => x.Kind == PurgeCommandKindV1.IrreversibleStarted);
+        var destructive = messages.Where(x => x.Kind == PurgeCommandKindV1.ParticipantPurge)
+            .OrderBy(x => x.Category, StringComparer.Ordinal).ToArray();
+        Assert.Equal(3, destructive.Length);
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"zeka-life04a-{Guid.NewGuid():N}");
+        var documentPath = Path.Combine(tempRoot, OrganisationA.ToString("N"),
+            "synthetic-document.bin");
+        Directory.CreateDirectory(Path.GetDirectoryName(documentPath)!);
+        await File.WriteAllTextAsync(documentPath, "synthetic-document-fixture");
+        var participants = destructive.Select(x => x.ParticipantId).Distinct(StringComparer.Ordinal)
+            .ToDictionary(x => x, x => new PgFixturePurgeParticipant(participantConnection, x,
+                    x == "admin-area-documents" ? documentPath : null),
+                StringComparer.Ordinal);
+        await Assert.ThrowsAnyAsync<Exception>(() => participants[destructive[0].ParticipantId]
+            .ExecuteAsync(destructive[0], default));
+        foreach (var participant in participants.Values)
+            await participant.AcceptStartAsync(startFact, default);
+        await participants[destructive[0].ParticipantId].AcceptStartAsync(startFact, default);
+        await Assert.ThrowsAnyAsync<Exception>(() => participants[destructive[0].ParticipantId]
+            .AcceptStartAsync(startFact with { PlanHash = new string('b', 64) }, default));
+        var wrongCommand = destructive[0] with { PlanHash = new string('b', 64) };
+        await Assert.ThrowsAnyAsync<Exception>(() => participants[wrongCommand.ParticipantId]
+            .ExecuteAsync(wrongCommand, default));
+        await Assert.ThrowsAnyAsync<Exception>(() => participants[destructive[0].ParticipantId]
+            .ExecuteAsync(destructive[0] with { ItemId = "fixture:wrong-item" }, default));
+        await Assert.ThrowsAnyAsync<Exception>(() => participants[destructive[0].ParticipantId]
+            .ExecuteAsync(destructive[0] with { MessageId = Guid.NewGuid() }, default));
+        participants[destructive[0].ParticipantId].CrashBeforeLocalCommit = true;
+        await Assert.ThrowsAnyAsync<Exception>(() => participants[destructive[0].ParticipantId]
+            .ExecuteAsync(destructive[0], default));
+        Assert.Equal(2L, await RuntimeScalar(participantConnection, OrganisationA,
+            "SELECT count(*) FROM life04a_fixture.\"Payloads\" WHERE \"Category\" IN (SELECT \"Category\" FROM life04a_fixture.\"Items\" WHERE \"Disposition\"='PURGE')"));
+        participants[destructive[0].ParticipantId].FailFileDeletion = true;
+        var retryableDocument = await participants[destructive[0].ParticipantId]
+            .ExecuteAsync(destructive[0], default);
+        Assert.Equal(PurgeOutcomeV1.FailedRetryable, retryableDocument.State);
+        Assert.Equal(PurgeReceiptStatus.Recorded,
+            (await purgeCoordinator.RecordReceiptAsync(retryableDocument, default)).Status);
+        Assert.True(File.Exists(documentPath));
+        Assert.Equal($"{(int)LifecycleOperationState.PurgeInProgress}|{(int)PurgeProgressState.FailedRetryable}",
+            await RuntimeScalar(fixtureConnection, OrganisationA, """
+                SELECT op."State"::text || '|' || progress."State"::text
+                FROM public."OrganisationLifecycleOperations" op
+                JOIN public."LifecyclePurgeProgress" progress
+                  ON progress."OperationId"=op."Id"
+                WHERE progress."Category"='admin-area-document-storage'
+                """));
+        Assert.Equal(0L, await RuntimeScalar(participantConnection, OrganisationA,
+            "SELECT count(*) FROM life04a_fixture.\"Payloads\" WHERE \"Category\"='admin-area-document-storage'"));
+        var firstReceipt = await new PgFixturePurgeParticipant(participantConnection,
+                destructive[0].ParticipantId, documentPath)
+            .ExecuteAsync(destructive[0], default);
+        Assert.False(File.Exists(documentPath));
+        Assert.Equal(PurgeOutcomeV1.Purged, firstReceipt.State);
+        Assert.Equal(PurgeReceiptStatus.Conflict,
+            (await purgeCoordinator.RecordReceiptAsync(firstReceipt with { PlanHash = new string('b', 64) }, default)).Status);
+        Assert.Equal(PurgeReceiptStatus.Conflict,
+            (await purgeCoordinator.RecordReceiptAsync(firstReceipt with { ItemId = "fixture:wrong-item" }, default)).Status);
+        Assert.Equal(PurgeReceiptStatus.Conflict,
+            (await purgeCoordinator.RecordReceiptAsync(firstReceipt with { ContractVersion = 2 }, default)).Status);
+        Assert.Equal(PurgeReceiptStatus.Recorded,
+            (await purgeCoordinator.RecordReceiptAsync(firstReceipt, default)).Status);
+        Assert.Equal(PurgeReceiptStatus.Replay,
+            (await purgeCoordinator.RecordReceiptAsync(firstReceipt, default)).Status);
+        Assert.Equal(PurgeReceiptStatus.Conflict,
+            (await purgeCoordinator.RecordReceiptAsync(firstReceipt with { SafeFailureCode = "changed" }, default)).Status);
+        participants[destructive[1].ParticipantId].CrashAfterLocalCommit = true;
+        await Assert.ThrowsAnyAsync<Exception>(() => participants[destructive[1].ParticipantId]
+            .ExecuteAsync(destructive[1], default));
+        var restarted = new PgFixturePurgeParticipant(participantConnection,
+            destructive[1].ParticipantId);
+        var secondReceipt = await restarted.ExecuteAsync(destructive[1], default);
+        Assert.Equal(PurgeOutcomeV1.Purged, secondReceipt.State);
+        Assert.Equal(PurgeReceiptStatus.Recorded,
+            (await purgeCoordinator.RecordReceiptAsync(secondReceipt, default)).Status);
+        Assert.Equal($"{(int)LifecycleOperationState.PurgeInProgress}|1",
+            await RuntimeScalar(fixtureConnection, OrganisationA, """
+                SELECT op."State"::text || '|' ||
+                       (SELECT count(*) FROM public."LifecyclePurgeProgress" p
+                        WHERE p."OperationId"=op."Id" AND p."State"=1)::text
+                FROM public."OrganisationLifecycleOperations" op WHERE op."Family"=1
+                """));
+        var final = await purgeCoordinator.RecordReceiptAsync(await participants[destructive[2].ParticipantId]
+            .ExecuteAsync(destructive[2], default), default);
+        Assert.Equal(PurgeReceiptStatus.Recorded, final.Status);
+        Assert.True(final.ExecutionComplete);
+        Assert.Equal(1L, await RuntimeScalar(fixtureConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"LifecyclePurgeProgress\" WHERE \"State\"=3"));
+        Assert.Equal(0L, await RuntimeScalar(participantConnection, OrganisationA,
+            "SELECT count(*) FROM life04a_fixture.\"Payloads\" WHERE \"Category\" IN (SELECT \"Category\" FROM life04a_fixture.\"Items\" WHERE \"Disposition\"='PURGE')"));
+        Assert.Equal(1L, await RuntimeScalar(participantConnection, OrganisationA,
+            "SELECT count(*) FROM life04a_fixture.\"Payloads\" WHERE \"Category\" IN (SELECT \"Category\" FROM life04a_fixture.\"Items\" WHERE \"Disposition\"='RETAIN')"));
+        Assert.Equal(4L, await RuntimeScalar(participantConnection, OrganisationB,
+            "SELECT count(*) FROM life04a_fixture.\"Payloads\""));
+        Assert.Equal(1L, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"RetentionDecisionSets\""));
+        Assert.Equal(4L, await RuntimeScalar(environment.RuntimeConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"RetentionDecisionRecords\""));
+        Assert.Equal(3L, await RuntimeScalar(fixtureConnection, OrganisationA,
+            "SELECT count(*) FROM public.\"LifecyclePurgeProgress\""));
+        Assert.Equal($"{(int)OrganisationStatus.PurgeInProgress}|{(int)LifecycleOperationState.PurgeExecutionComplete}|true|",
+            await RuntimeScalar(environment.RuntimeConnection, OrganisationA, """
+                SELECT org."Status"::text || '|' || op."State"::text || '|' || op."IsActive"::text
+                       || '|' || coalesce(op."CompletedAt"::text, '')
+                FROM public."Organisations" org JOIN public."OrganisationLifecycleOperations" op
+                  ON op."OrganisationId"=org."Id" WHERE op."Family"=1
+                """));
+        Assert.Equal(organisationBBefore,
+            await OrganisationDigest(environment.AdministratorConnection, OrganisationB));
+        Assert.Equal(globalBefore, await GlobalReferenceDigest(environment.AdministratorConnection));
+        Directory.Delete(tempRoot, recursive: true);
+    }
+
     [Theory]
     [InlineData(RetentionDecisionCode.Held)]
     [InlineData(RetentionDecisionCode.Unknown)]
@@ -898,13 +1225,22 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
             FROM public."OrganisationLifecycleOperations" WHERE "Id"='{operation.Id:D}'::uuid
             """))!;
 
-        // Reconstruct the exact pre-LIFE-03 schema and successful LIFE-02 row in an isolated
-        // disposable database, then run the real migration instead of copying its SQL.
+        // Remove the later fixture-only LIFE-04A schema first, then reconstruct the exact
+        // pre-LIFE-03 schema in this disposable database and rerun both real migrations.
         await Execute(environment.AdministratorConnection, $"""
             UPDATE public."OrganisationLifecycleOperations"
                SET "State"=6, "IsActive"=false, "CompletedAt"="ArchivedAt",
                    "Revision"="Revision"-1
              WHERE "Id"='{operation.Id:D}'::uuid;
+            DROP TABLE public."LifecyclePurgeOutbox";
+            DROP TABLE public."LifecyclePurgeProgress";
+            DROP TABLE public."LifecyclePurgePlans";
+            ALTER TABLE public."OrganisationLifecycleOperations"
+              DROP COLUMN "PurgePlanHash",
+              DROP COLUMN "PurgeBoundaryEvidenceHash",
+              DROP COLUMN "IrreversibleStartedAt",
+              DROP COLUMN "IrreversibleRevision",
+              DROP COLUMN "PurgeExecutionCompletedAt";
             DROP TABLE public."RetentionDecisionRecords";
             DROP TABLE public."RetentionDecisionSets";
             ALTER TABLE public."OrganisationLifecycleOperations"
@@ -912,7 +1248,8 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
               DROP COLUMN "DispositionReadyAt",
               DROP COLUMN "DispositionInventoryHash";
             DELETE FROM public."__EFMigrationsHistory"
-             WHERE "MigrationId"='20260929175544_LifecycleRetentionEligibilityV1';
+             WHERE "MigrationId" IN ('20260929175544_LifecycleRetentionEligibilityV1',
+                 '20260929195328_Life04aPurgeProtocolV1');
             """);
         if (missingReceipt)
             await Execute(environment.AdministratorConnection, $"""
@@ -1210,6 +1547,13 @@ public sealed class LifecycleClosureCoordinatorEvidenceTests(PostgreSqlFixture f
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private sealed class AdvancingClock(DateTimeOffset now, TimeSpan advance) : TimeProvider
+    {
+        private int reads;
+        public override DateTimeOffset GetUtcNow() =>
+            Interlocked.Increment(ref reads) == 1 ? now : now.Add(advance);
     }
 
     private sealed class MutableClock(DateTimeOffset now) : TimeProvider
