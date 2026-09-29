@@ -188,6 +188,10 @@
     {
       "schema": "public",
       "name": "AspNetUserClaims_Id_seq"
+    },
+    {
+      "schema": "public",
+      "name": "LifecycleVerificationCommands_IssueOrdinal_seq"
     }
   ],
   "tablePrivileges": [
@@ -600,6 +604,13 @@
         "SELECT",
         "USAGE"
       ]
+    },
+    {
+      "object": {
+        "schema": "public",
+        "name": "LifecycleVerificationCommands_IssueOrdinal_seq"
+      },
+      "privileges": []
     }
   ],
   "runtimeFunctions": [
