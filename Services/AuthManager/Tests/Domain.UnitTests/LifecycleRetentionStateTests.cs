@@ -144,6 +144,7 @@ public sealed class LifecycleRetentionStateTests
         Assert.Single(plan.Entries.Where(x => x.Decision == RetentionDecisionCode.Retain));
         Assert.Equal(3, plan.Entries.Count(x => x.Decision == RetentionDecisionCode.Purge));
         Assert.Equal(64, plan.PlanHash.Length);
+        Assert.True(plan.HasValidFrozenIdentity());
         Assert.Equal(64, plan.BoundaryEvidenceHash(Now.AddSeconds(4)).Length);
         Assert.Throws<InvalidOperationException>(() => LifecyclePurgePlan.Create(Guid.NewGuid(),
             operation, set, records, Now.AddMinutes(2)));
@@ -203,5 +204,14 @@ public sealed class LifecycleRetentionStateTests
         Assert.Throws<InvalidOperationException>(() => progress.Record(
             Failure('d', PurgeProgressState.Purged) with { SafeFailureCode = null },
             plan, command.OperationRevision, Now.AddSeconds(8)));
+        var frozenEntriesJson = plan.EntriesJson;
+        typeof(LifecyclePurgePlan).GetProperty(nameof(LifecyclePurgePlan.EntriesJson))!
+            .SetValue(plan, "[]");
+        Assert.False(plan.HasValidFrozenIdentity());
+        typeof(LifecyclePurgePlan).GetProperty(nameof(LifecyclePurgePlan.EntriesJson))!
+            .SetValue(plan, frozenEntriesJson);
+        typeof(LifecyclePurgePlan).GetProperty(nameof(LifecyclePurgePlan.PlanHash))!
+            .SetValue(plan, new string('f', 64));
+        Assert.False(plan.HasValidFrozenIdentity());
     }
 }

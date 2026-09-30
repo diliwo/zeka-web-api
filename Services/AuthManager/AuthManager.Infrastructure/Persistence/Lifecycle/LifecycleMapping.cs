@@ -41,6 +41,7 @@ internal static class LifecycleMapping
         operation.Property(x => x.RetentionDecisionSetHash).HasMaxLength(64);
         operation.Property(x => x.PurgePlanHash).HasMaxLength(64);
         operation.Property(x => x.PurgeBoundaryEvidenceHash).HasMaxLength(64);
+        operation.Property(x => x.VerificationEvidenceHash).HasMaxLength(64);
         operation.Property(x => x.PackageSha256).HasMaxLength(64);
         operation.Property(x => x.PackageReference).HasMaxLength(500);
         operation.Property(x => x.FailureCode).HasMaxLength(200);
@@ -145,6 +146,44 @@ internal static class LifecycleMapping
                      nameof(LifecyclePurgeParticipantProgress.Attempts) and not
                      nameof(LifecyclePurgeParticipantProgress.CompletedAt)))
             property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+        var verification = model.Entity<LifecycleVerificationEvidence>();
+        verification.ToTable("LifecycleVerificationEvidence");
+        verification.HasKey(x => new { x.OperationId, x.Category });
+        verification.Property(x => x.Category).HasMaxLength(200);
+        verification.Property(x => x.ParticipantId).HasMaxLength(200);
+        verification.Property(x => x.CommandHash).HasMaxLength(64);
+        verification.Property(x => x.ReceiptHash).HasMaxLength(64);
+        verification.Property(x => x.EvidenceHash).HasMaxLength(64);
+        verification.Property(x => x.VerifierVersion).HasMaxLength(100);
+        verification.HasOne<LifecyclePurgePlan>().WithMany()
+            .HasForeignKey(x => new { x.PlanId, x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OperationId, x.OrganisationId })
+            .OnDelete(DeleteBehavior.Restrict);
+        verification.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+        var verificationCommand = model.Entity<LifecycleVerificationCommand>();
+        verificationCommand.ToTable("LifecycleVerificationCommands");
+        verificationCommand.HasKey(x => x.MessageId);
+        verificationCommand.Property(x => x.ParticipantId).HasMaxLength(200);
+        verificationCommand.Property(x => x.Category).HasMaxLength(200);
+        verificationCommand.Property(x => x.ItemId).HasMaxLength(240);
+        verificationCommand.Property(x => x.CommandHash).HasMaxLength(64);
+        verificationCommand.Property(x => x.IssueOrdinal).UseIdentityByDefaultColumn();
+        verificationCommand.HasIndex(x => x.IssueOrdinal).IsUnique();
+        verificationCommand.HasIndex(x => new { x.OperationId, x.Category, x.IssueOrdinal });
+        verificationCommand.HasOne<LifecyclePurgePlan>().WithMany()
+            .HasForeignKey(x => new { x.PlanId, x.OperationId, x.OrganisationId })
+            .HasPrincipalKey(x => new { x.Id, x.OperationId, x.OrganisationId })
+            .OnDelete(DeleteBehavior.Restrict);
+        verificationCommand.HasQueryFilter(x => x.OrganisationId == context.LifecycleOrganisationId);
+        foreach (var property in verificationCommand.Metadata.GetProperties())
+            property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+        foreach (var property in verification.Metadata.GetProperties().Where(x => x.Name is
+                     nameof(LifecycleVerificationEvidence.OperationId) or
+                     nameof(LifecycleVerificationEvidence.OrganisationId) or
+                     nameof(LifecycleVerificationEvidence.PlanId) or
+                     nameof(LifecycleVerificationEvidence.Category) or
+                     nameof(LifecycleVerificationEvidence.ParticipantId)))
+            property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
         var participant = model.Entity<LifecycleParticipant>();
         participant.ToTable("OrganisationLifecycleParticipants");
         participant.HasKey(x => new { x.OperationId, x.Family, x.CapabilityKey, x.OwnershipScope });
@@ -167,6 +206,7 @@ internal static class LifecycleMapping
             nameof(LifecycleOperation.IrreversibleStartedAt),
             nameof(LifecycleOperation.IrreversibleRevision),
             nameof(LifecycleOperation.PurgeExecutionCompletedAt)
+            ,nameof(LifecycleOperation.VerificationEvidenceHash)
         };
         foreach (var property in operation.Metadata.GetProperties().Where(p => !mutableOperationProperties.Contains(p.Name)))
             property.SetAfterSaveBehavior(PropertySaveBehavior.Throw);

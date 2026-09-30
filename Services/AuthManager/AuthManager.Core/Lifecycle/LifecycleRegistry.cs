@@ -18,7 +18,8 @@ public enum LifecycleOperationState
     Archived,
     DispositionReady,
     PurgeInProgress,
-    PurgeExecutionComplete
+    PurgeExecutionComplete,
+    VerifiedPurged
 }
 
 public enum LifecycleParticipantState

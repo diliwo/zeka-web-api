@@ -11,7 +11,7 @@ namespace Infrastructure.IntegrationTests;
 /// category fixture cannot be used as evidence that real owner tables or files are disposable.
 /// </summary>
 internal sealed class PgFixturePurgeParticipant(string connectionString, string participantId,
-    string? documentFixturePath = null)
+    string? documentFixturePath = null, SyntheticFixtureWriteFence? writeFence = null)
     : INonProductionPurgeParticipant
 {
     public string ParticipantId => participantId;
@@ -21,6 +21,8 @@ internal sealed class PgFixturePurgeParticipant(string connectionString, string 
 
     public async Task AcceptStartAsync(PurgeCommandV1 start, CancellationToken cancellationToken)
     {
+        await using var writerLease = writeFence is null ? null
+            : await writeFence.HoldWriteAsync(cancellationToken);
         if (start.Kind != PurgeCommandKindV1.IrreversibleStarted || start.ParticipantId != ""
             || start.CapabilityKey != "organisation.purge-started" || start.Category != ""
             || start.ItemId != ""
@@ -71,6 +73,8 @@ internal sealed class PgFixturePurgeParticipant(string connectionString, string 
     public async Task<PurgeParticipantReceiptV1> ExecuteAsync(PurgeCommandV1 command,
         CancellationToken cancellationToken)
     {
+        await using var writerLease = writeFence is null ? null
+            : await writeFence.HoldWriteAsync(cancellationToken);
         if (command.Kind != PurgeCommandKindV1.ParticipantPurge
             || command.ParticipantId != participantId
             || command.CapabilityKey != "organisation.disposition-category"

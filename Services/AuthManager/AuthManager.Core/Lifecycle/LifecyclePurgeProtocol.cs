@@ -27,6 +27,17 @@ public sealed class LifecyclePurgePlan : ITenantOwnedEntity
     public IReadOnlyList<PurgePlanEntry> Entries =>
         JsonSerializer.Deserialize<PurgePlanEntry[]>(EntriesJson) ?? [];
 
+    /// <summary>Reject a modified frozen plan before issuing or accepting verification evidence.</summary>
+    public bool HasValidFrozenIdentity()
+    {
+        var entries = Entries;
+        return EntriesJson == JsonSerializer.Serialize(entries)
+            && PlanHash == Hash("zeka-purge-plan-v1", Id, OperationId, OrganisationId,
+                AdmittedOperationRevision, RegistryRevision, InventoryHash,
+                DispositionInventoryHash, DecisionSetId, DecisionSetHash,
+                PlannedAt, EntriesJson);
+    }
+
     public static LifecyclePurgePlan Create(Guid id, LifecycleOperation operation,
         RetentionDecisionSet set, IReadOnlyCollection<RetentionDecisionRecord> decisions,
         DateTimeOffset plannedAt)

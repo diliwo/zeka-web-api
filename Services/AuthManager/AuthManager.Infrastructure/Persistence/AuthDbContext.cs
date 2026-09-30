@@ -65,7 +65,9 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
                 or AuthManager.Core.Lifecycle.RetentionDecisionRecord
                 or AuthManager.Core.Lifecycle.LifecyclePurgePlan
                 or AuthManager.Core.Lifecycle.LifecyclePurgeOutboxMessage
-                or AuthManager.Core.Lifecycle.LifecyclePurgeParticipantProgress)
+                or AuthManager.Core.Lifecycle.LifecyclePurgeParticipantProgress
+                or AuthManager.Core.Lifecycle.LifecycleVerificationCommand
+                or AuthManager.Core.Lifecycle.LifecycleVerificationEvidence)
             {
                 var organisation = (Guid)entry.Property("OrganisationId").CurrentValue!;
                 if (!LifecycleOnly || LifecycleTransaction is null || organisation == Guid.Empty
@@ -104,6 +106,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<AuthManager.Core.Lifecycle.LifecyclePurgePlan> LifecyclePurgePlans => Set<AuthManager.Core.Lifecycle.LifecyclePurgePlan>();
     public DbSet<AuthManager.Core.Lifecycle.LifecyclePurgeOutboxMessage> LifecyclePurgeOutbox => Set<AuthManager.Core.Lifecycle.LifecyclePurgeOutboxMessage>();
     public DbSet<AuthManager.Core.Lifecycle.LifecyclePurgeParticipantProgress> LifecyclePurgeProgress => Set<AuthManager.Core.Lifecycle.LifecyclePurgeParticipantProgress>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleVerificationEvidence> LifecycleVerificationEvidence => Set<AuthManager.Core.Lifecycle.LifecycleVerificationEvidence>();
+    public DbSet<AuthManager.Core.Lifecycle.LifecycleVerificationCommand> LifecycleVerificationCommands => Set<AuthManager.Core.Lifecycle.LifecycleVerificationCommand>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
