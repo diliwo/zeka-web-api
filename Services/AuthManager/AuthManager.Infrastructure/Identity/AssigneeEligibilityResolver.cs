@@ -69,13 +69,8 @@ public sealed class AssigneeEligibilityResolver(AuthDbContext database, TimeProv
 
         // The current explicit-grant catalogue permits only Organisations.Export for Admin.
         // A malformed or unknown active grant makes this authority observation invalid.
-        var grants = await database.MembershipPermissionGrants.AsNoTracking()
-            .Where(g => g.OrganisationId == request.OrganisationId && g.RevokedAtUtc == null
-                && (g.OrganisationMembershipId == actors[0].MembershipId
-                    || g.OrganisationMembershipId == targets[0].MembershipId))
-            .Select(g => new { g.OrganisationMembershipId, g.PermissionKey }).ToListAsync(cancellationToken);
-        if (grants.Any(g => !IsAllowedGrant(g.OrganisationMembershipId, g.PermissionKey,
-                actors[0], targets[0]))) return null;
+        if (!await HasOnlyAllowedActiveGrantsAsync(
+                request.OrganisationId, actors[0], targets[0], cancellationToken)) return null;
 
         await transaction.CommitAsync(cancellationToken);
         return new AssigneeEligibilityDecision(
@@ -103,6 +98,18 @@ public sealed class AssigneeEligibilityResolver(AuthDbContext database, TimeProv
         MembershipObservation actor, MembershipObservation target) =>
         TenantPermissions.IsExplicitGrantAllowed(
             membershipId == actor.MembershipId ? actor.RoleCode : target.RoleCode, permissionKey);
+
+    private async Task<bool> HasOnlyAllowedActiveGrantsAsync(Guid organisationId,
+        MembershipObservation actor, MembershipObservation target, CancellationToken cancellationToken)
+    {
+        var grants = await database.MembershipPermissionGrants.AsNoTracking()
+            .Where(g => g.OrganisationId == organisationId && g.RevokedAtUtc == null
+                && (g.OrganisationMembershipId == actor.MembershipId
+                    || g.OrganisationMembershipId == target.MembershipId))
+            .Select(g => new { g.OrganisationMembershipId, g.PermissionKey }).ToListAsync(cancellationToken);
+        return !grants.Any(g => !IsAllowedGrant(g.OrganisationMembershipId, g.PermissionKey,
+            actor, target));
+    }
 
     private static bool IsCurrent(MembershipObservation membership, DateTimeOffset now) =>
         membership.Status == MembershipStatus.Active && membership.UserStatus == UserStatus.Active
