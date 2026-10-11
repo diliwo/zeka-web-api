@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using AuthManager.Application.Authorization;
 using Microsoft.AspNetCore.Authorization;
@@ -26,9 +27,7 @@ public static class AssigneeEligibilityEndpoint
             var decisionVersion = "none";
             try
             {
-                if (request is null || request.ContractVersion != 1 || request.OrganisationId == Guid.Empty
-                    || request.ActorSubjectId == Guid.Empty || request.ActorMembershipId == Guid.Empty
-                    || request.TargetMembershipId == Guid.Empty)
+                if (!IsValidRequest(request))
                     return Results.BadRequest();
 
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(http.RequestAborted);
@@ -40,10 +39,7 @@ public static class AssigneeEligibilityEndpoint
                     return Results.Ok(new { contractVersion = 1, eligible = false });
                 }
                 var age = clock.GetUtcNow() - decision.ObservedAtUtc;
-                if (decision.TargetViewScope is not ("All" or "Assigned")
-                    || string.IsNullOrWhiteSpace(decision.DecisionVersion)
-                    || decision.DecisionVersion.Length > 256 || decision.ObservedAtUtc.Offset != TimeSpan.Zero
-                    || age < TimeSpan.FromSeconds(-30) || age > TimeSpan.FromSeconds(2))
+                if (!IsValidDecision(decision, age))
                 {
                     outcome = "unavailable";
                     return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -80,4 +76,15 @@ public static class AssigneeEligibilityEndpoint
             }
         }).RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = AssigneeServiceAuthentication.Scheme });
     }
+
+    private static bool IsValidRequest([NotNullWhen(true)] AssigneeEligibilityRequest? request) =>
+        request is not null && request.ContractVersion == 1 && request.OrganisationId != Guid.Empty
+        && request.ActorSubjectId != Guid.Empty && request.ActorMembershipId != Guid.Empty
+        && request.TargetMembershipId != Guid.Empty;
+
+    private static bool IsValidDecision(AssigneeEligibilityDecision decision, TimeSpan age) =>
+        decision.TargetViewScope is "All" or "Assigned"
+        && !string.IsNullOrWhiteSpace(decision.DecisionVersion)
+        && decision.DecisionVersion.Length <= 256 && decision.ObservedAtUtc.Offset == TimeSpan.Zero
+        && age >= TimeSpan.FromSeconds(-30) && age <= TimeSpan.FromSeconds(2);
 }

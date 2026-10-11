@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics.CodeAnalysis;
 using AuthManager.Application.Authorization;
 using AuthManager.Core.Enums;
 using AuthManager.Core.Organisations;
@@ -13,9 +14,7 @@ public sealed class AssigneeEligibilityResolver(AuthDbContext database, TimeProv
     public async Task<AssigneeEligibilityDecision?> ResolveAsync(
         AssigneeEligibilityRequest request, CancellationToken cancellationToken)
     {
-        if (request.ContractVersion != 1 || request.OrganisationId == Guid.Empty
-            || request.ActorSubjectId == Guid.Empty || request.ActorMembershipId == Guid.Empty
-            || request.TargetMembershipId == Guid.Empty)
+        if (!IsValidRequest(request))
             return null;
 
         var observedAt = clock.GetUtcNow();
@@ -45,7 +44,7 @@ public sealed class AssigneeEligibilityResolver(AuthDbContext database, TimeProv
                 membership.ConcurrencyVersion, user.Status, user.EmailConfirmed,
                 user.LockoutEnabled, user.LockoutEnd, role.Code, role.IsSystem))
             .Take(2).ToListAsync(cancellationToken);
-        if (actors.Count != 1 || !IsCurrent(actors[0], observedAt)) return null;
+        if (!HasOneCurrentMembership(actors, observedAt)) return null;
 
         var targets = await (
             from membership in database.OrganisationMemberships.AsNoTracking()
@@ -57,7 +56,7 @@ public sealed class AssigneeEligibilityResolver(AuthDbContext database, TimeProv
                 membership.ConcurrencyVersion, user.Status, user.EmailConfirmed,
                 user.LockoutEnabled, user.LockoutEnd, role.Code, role.IsSystem))
             .Take(2).ToListAsync(cancellationToken);
-        if (targets.Count != 1 || !IsCurrent(targets[0], observedAt)) return null;
+        if (!HasOneCurrentMembership(targets, observedAt)) return null;
         var targetMembershipCount = await database.OrganisationMemberships.AsNoTracking()
             .Where(m => m.OrganisationId == request.OrganisationId && m.UserId == targets[0].UserId)
             .Take(2).CountAsync(cancellationToken);
@@ -65,9 +64,7 @@ public sealed class AssigneeEligibilityResolver(AuthDbContext database, TimeProv
 
         var actorPermissions = TenantPermissions.Resolve(actors[0].RoleCode);
         var targetPermissions = TenantPermissions.Resolve(targets[0].RoleCode);
-        if (actorPermissions is null || targetPermissions is null
-            || !actorPermissions.Contains("Clients.EditAll") && !actorPermissions.Contains("Clients.EditAssigned")
-            || !targetPermissions.Contains("Clients.ViewAll") && !targetPermissions.Contains("Clients.ViewAssigned"))
+        if (!HasRequiredPermissions(actorPermissions, targetPermissions))
             return null;
 
         // The current explicit-grant catalogue permits only Organisations.Export for Admin.
@@ -77,9 +74,8 @@ public sealed class AssigneeEligibilityResolver(AuthDbContext database, TimeProv
                 && (g.OrganisationMembershipId == actors[0].MembershipId
                     || g.OrganisationMembershipId == targets[0].MembershipId))
             .Select(g => new { g.OrganisationMembershipId, g.PermissionKey }).ToListAsync(cancellationToken);
-        if (grants.Any(g => !TenantPermissions.IsExplicitGrantAllowed(
-                g.OrganisationMembershipId == actors[0].MembershipId ? actors[0].RoleCode : targets[0].RoleCode,
-                g.PermissionKey))) return null;
+        if (grants.Any(g => !IsAllowedGrant(g.OrganisationMembershipId, g.PermissionKey,
+                actors[0], targets[0]))) return null;
 
         await transaction.CommitAsync(cancellationToken);
         return new AssigneeEligibilityDecision(
@@ -87,6 +83,26 @@ public sealed class AssigneeEligibilityResolver(AuthDbContext database, TimeProv
             $"v1:{organisation.ConcurrencyVersion}:{actors[0].Version}:{targets[0].Version}:{actors[0].RoleCode}:{targets[0].RoleCode}",
             observedAt);
     }
+
+    private static bool IsValidRequest(AssigneeEligibilityRequest request) =>
+        request.ContractVersion == 1 && request.OrganisationId != Guid.Empty
+        && request.ActorSubjectId != Guid.Empty && request.ActorMembershipId != Guid.Empty
+        && request.TargetMembershipId != Guid.Empty;
+
+    private static bool HasOneCurrentMembership(IReadOnlyList<MembershipObservation> memberships,
+        DateTimeOffset observedAt) =>
+        memberships.Count == 1 && IsCurrent(memberships[0], observedAt);
+
+    private static bool HasRequiredPermissions(IReadOnlySet<string>? actorPermissions,
+        [NotNullWhen(true)] IReadOnlySet<string>? targetPermissions) =>
+        actorPermissions is not null && targetPermissions is not null
+        && (actorPermissions.Contains("Clients.EditAll") || actorPermissions.Contains("Clients.EditAssigned"))
+        && (targetPermissions.Contains("Clients.ViewAll") || targetPermissions.Contains("Clients.ViewAssigned"));
+
+    private static bool IsAllowedGrant(Guid membershipId, string permissionKey,
+        MembershipObservation actor, MembershipObservation target) =>
+        TenantPermissions.IsExplicitGrantAllowed(
+            membershipId == actor.MembershipId ? actor.RoleCode : target.RoleCode, permissionKey);
 
     private static bool IsCurrent(MembershipObservation membership, DateTimeOffset now) =>
         membership.Status == MembershipStatus.Active && membership.UserStatus == UserStatus.Active
