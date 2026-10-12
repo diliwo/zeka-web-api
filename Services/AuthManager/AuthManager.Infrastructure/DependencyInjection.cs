@@ -46,6 +46,7 @@ public static class DependencyInjection
 
         services.AddOnboardingPersistenceFoundations(configuration);
         services.AddScoped<AuthManager.Application.Authorization.ICurrentTenantAccess, CurrentTenantAccessResolver>();
+        services.AddScoped<AuthManager.Application.Authorization.IAssigneeEligibility, AssigneeEligibilityResolver>();
         services.AddScoped<AuthManager.Application.Lifecycle.LifecycleAdmission>();
         services.AddScoped<AuthManager.Application.Lifecycle.ILifecycleAdmissionStore, Persistence.Lifecycle.LifecycleAdmissionStore>();
         services.AddScoped<AuthManager.Application.Lifecycle.ILifecycleRegistryReader, Persistence.Lifecycle.LifecycleRegistryReader>();
