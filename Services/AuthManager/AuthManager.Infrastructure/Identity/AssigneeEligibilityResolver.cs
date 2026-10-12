@@ -17,6 +17,24 @@ public sealed class AssigneeEligibilityResolver(AuthDbContext database, TimeProv
         if (!IsValidRequest(request))
             return null;
 
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(2));
+        var attempts = 0;
+        var decision = await database.Database.CreateExecutionStrategy().ExecuteAsync(async attemptToken =>
+        {
+            // The runtime strategy permits more retries for other operations; this decision permits two reads.
+            if (++attempts > 2)
+                throw new InvalidOperationException("Assignee eligibility retry budget exceeded.");
+            return await ResolveOneObservationAsync(request, attemptToken);
+        }, deadline.Token);
+        deadline.Token.ThrowIfCancellationRequested();
+        return decision;
+    }
+
+    private async Task<AssigneeEligibilityDecision?> ResolveOneObservationAsync(
+        AssigneeEligibilityRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         var observedAt = clock.GetUtcNow();
         await using var transaction = await database.Database.BeginTransactionAsync(
             IsolationLevel.RepeatableRead, cancellationToken);

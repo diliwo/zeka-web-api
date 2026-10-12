@@ -1,3 +1,5 @@
+using System.Data.Common;
+using System.Diagnostics;
 using AuthManager.Application.Authorization;
 using AuthManager.Core.Enums;
 using AuthManager.Core.Organisations;
@@ -5,6 +7,8 @@ using AuthManager.Infrastructure.Identity;
 using AuthManager.Infrastructure.Identity.Models;
 using AuthManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Npgsql;
 
 namespace Infrastructure.IntegrationTests;
 
@@ -12,6 +16,75 @@ namespace Infrastructure.IntegrationTests;
 [Collection(PostgreSqlCollection.CollectionName)]
 public sealed class AssigneeEligibilityResolverTests(PostgreSqlFixture postgres)
 {
+    [Fact]
+    public async Task Production_retry_strategy_reads_current_authority_inside_its_transaction()
+    {
+        await using var state = await State.CreateAsync(postgres, enableRetries: true);
+        Assert.Equal("Assigned", (await state.ResolveAsync())?.TargetViewScope);
+
+        state.TargetMembership.Suspend(DateTimeOffset.UtcNow.AddSeconds(1));
+        await state.Database.SaveChangesAsync();
+        Assert.Null(await state.ResolveAsync());
+    }
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    public async Task Transient_authority_failure_replays_a_fresh_observation_at_most_once(
+        int transientFailures, bool shouldSucceed)
+    {
+        var failures = new SyntheticTransientFailure(transientFailures);
+        await using var state = await State.CreateAsync(postgres, enableRetries: true, failures);
+        failures.Arm();
+
+        if (shouldSucceed)
+            Assert.Equal("Assigned", (await state.ResolveAsync())?.TargetViewScope);
+        else
+            await Assert.ThrowsAsync<InvalidOperationException>(state.ResolveAsync);
+
+        Assert.Equal(transientFailures, failures.Faults);
+    }
+
+    [Fact]
+    public async Task Retry_enabled_observation_honours_one_total_two_second_deadline()
+    {
+        var delayedRead = new DelayedAuthorityRead();
+        await using var state = await State.CreateAsync(postgres, enableRetries: true, delayedRead);
+        delayedRead.Arm();
+
+        var watch = Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(state.ResolveAsync);
+        watch.Stop();
+        Assert.InRange(watch.Elapsed.TotalSeconds, 1.8, 3.0);
+        Assert.Equal(1, delayedRead.Attempts);
+    }
+
+    [Fact]
+    public async Task Transient_retry_and_second_attempt_share_the_total_deadline()
+    {
+        var failures = new SyntheticTransientFailure(1, delayAfterFailures: true);
+        await using var state = await State.CreateAsync(postgres, enableRetries: true, failures);
+        failures.Arm();
+
+        var watch = Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(state.ResolveAsync);
+        watch.Stop();
+        Assert.InRange(watch.Elapsed.TotalSeconds, 1.8, 3.0);
+        Assert.Equal(1, failures.Faults);
+        Assert.Equal(2, failures.Reads);
+    }
+
+    [Fact]
+    public async Task Revocation_between_retry_attempts_is_observed_not_reused()
+    {
+        var revoke = new RevokeOnTransientGrantRead();
+        await using var state = await State.CreateAsync(postgres, enableRetries: true, revoke);
+        revoke.Arm(state.TargetMembership.Id, state.Database.Database.GetConnectionString()!);
+
+        Assert.Null(await state.ResolveAsync());
+        Assert.Equal(1, revoke.Faults);
+    }
+
     [Fact]
     public async Task Live_authority_changes_view_scope_and_revocation_denies_without_a_positive_cache()
     {
@@ -139,10 +212,18 @@ public sealed class AssigneeEligibilityResolverTests(PostgreSqlFixture postgres)
             Request = new(1, organisation.Id, actorUser.Id, actorMembership.Id, targetMembership.Id);
         }
 
-        public static async Task<State> CreateAsync(PostgreSqlFixture postgres)
+        public static async Task<State> CreateAsync(PostgreSqlFixture postgres, bool enableRetries = false,
+            DbCommandInterceptor? interceptor = null)
         {
             var connection = await postgres.CreateDatabaseAsync();
-            var options = new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connection).Options;
+            var builder = new DbContextOptionsBuilder<AuthDbContext>()
+                .UseNpgsql(connection, npgsql =>
+                {
+                    if (enableRetries)
+                        npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(40), ["0"]);
+                });
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            var options = builder.Options;
             var database = new AuthDbContext(options);
             await database.Database.EnsureCreatedAsync();
             var now = DateTimeOffset.UtcNow;
@@ -171,5 +252,79 @@ public sealed class AssigneeEligibilityResolverTests(PostgreSqlFixture postgres)
             new AssigneeEligibilityResolver(Database, TimeProvider.System).ResolveAsync(Request, CancellationToken.None);
 
         public ValueTask DisposeAsync() => Database.DisposeAsync();
+    }
+
+    private sealed class SyntheticTransientFailure(int failuresToInject, bool delayAfterFailures = false) : DbCommandInterceptor
+    {
+        private bool armed;
+        public int Faults { get; private set; }
+        public int Reads { get; private set; }
+        public void Arm() => armed = true;
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (armed && command.CommandText.Contains("Organisations", StringComparison.Ordinal))
+            {
+                Reads++;
+                if (Faults < failuresToInject)
+                {
+                    Faults++;
+                    throw new NpgsqlException("Synthetic transient authority read failure", new TimeoutException());
+                }
+                if (delayAfterFailures)
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            return await base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed class DelayedAuthorityRead : DbCommandInterceptor
+    {
+        private bool armed;
+        public int Attempts { get; private set; }
+        public void Arm() => armed = true;
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (armed && command.CommandText.Contains("Organisations", StringComparison.Ordinal))
+            {
+                Attempts++;
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            return await base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed class RevokeOnTransientGrantRead : DbCommandInterceptor
+    {
+        private Guid targetMembershipId;
+        private string connectionString = "";
+        public int Faults { get; private set; }
+        public void Arm(Guid targetId, string databaseConnectionString)
+        { targetMembershipId = targetId; connectionString = databaseConnectionString; }
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (targetMembershipId != Guid.Empty && Faults == 0
+                && command.CommandText.Contains("MembershipPermissionGrants", StringComparison.Ordinal))
+            {
+                // A separate authoritative write commits after attempt one's membership reads.
+                await using var writer = new NpgsqlConnection(connectionString);
+                await writer.OpenAsync(cancellationToken);
+                await using var revoke = new NpgsqlCommand(
+                    "delete from \"OrganisationMemberships\" where \"Id\" = @id", writer);
+                revoke.Parameters.AddWithValue("id", targetMembershipId);
+                Assert.Equal(1, await revoke.ExecuteNonQueryAsync(cancellationToken));
+                Faults++;
+                throw new NpgsqlException("Synthetic transient grant read failure", new TimeoutException());
+            }
+            return await base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 }
