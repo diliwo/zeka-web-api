@@ -190,6 +190,54 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
     }
 
     [Fact]
+    public async Task Multilingual_valid_purpose_fits_durable_receipt()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var seed = await Seed(organisation, actor);
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true);
+        var purpose = new string('é', 500);
+        var result = await Send(provider, new RecordInteractionCommand(seed.ClientId, seed.CaseId,
+            DateTime.UtcNow, "Synthetic multilingual contact", "multilingual-1",
+            new FollowUpActionInput(purpose, DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor)));
+        Assert.NotNull(result.FollowUpActionId);
+        Assert.Equal(1, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    public async Task Parent_lock_discards_prelock_tracked_case_before_legacy_update()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var seed = await Seed(organisation, actor);
+        await using var provider = Provider(organisation, actor);
+        await using var scope = provider.CreateAsyncScope();
+        await Establish(scope.ServiceProvider);
+        var executor = scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
+        var repository = scope.ServiceProvider.GetRequiredService<IRepositoryManager>();
+        await executor.ExecuteOrdinaryOnceAsync(token =>
+        {
+            Assert.Equal("legacy note", repository.Support.Get(seed.CaseId)!.Note);
+            return Task.FromResult(true);
+        }, default);
+        // The same scoped DbContext retains the earlier tracked row while another writer commits.
+        await SetCaseNote(organisation, seed.CaseId, "committed concurrent note");
+        await executor.ExecuteOrdinaryOnceAsync(async token =>
+        {
+            await scope.ServiceProvider.GetRequiredService<IClientParentLock>()
+                .LockAsync(seed.ClientId, token);
+            var current = repository.Support.Get(seed.CaseId)!;
+            current.ReasonOfClosure = "Synthetic close";
+            repository.Support.Persist(current);
+            await repository.SaveAsync();
+            return true;
+        }, default);
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(database.AdministratorConnectionString).Options;
+        await using var verify = new ApplicationDbContext(options, TenantEnforcementTests.Scope(organisation));
+        Assert.Equal("committed concurrent note", (await verify.SocialCases
+            .SingleAsync(x => x.Id == seed.CaseId)).Note);
+    }
+
+    [Fact]
     public async Task Failed_receipt_insert_rolls_back_interaction_and_two_connection_parent_lock_serializes_support()
     {
         var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
@@ -438,6 +486,21 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
             "UPDATE public.\"SocialCases\" SET \"EndDate\" = @end WHERE \"SchoolRegistrationId\" = @id",
             connection, transaction);
         command.Parameters.AddWithValue("end", endDate);
+        command.Parameters.AddWithValue("id", caseId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
+    }
+
+    private async Task SetCaseNote(Guid organisation, int caseId, string note)
+    {
+        await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetTenant(connection, transaction, organisation);
+        await using var command = new NpgsqlCommand(
+            "UPDATE public.\"SocialCases\" SET \"Note\" = @note WHERE \"SchoolRegistrationId\" = @id",
+            connection, transaction);
+        command.Parameters.AddWithValue("note", note);
         command.Parameters.AddWithValue("id", caseId);
         Assert.Equal(1, await command.ExecuteNonQueryAsync());
         await transaction.CommitAsync();

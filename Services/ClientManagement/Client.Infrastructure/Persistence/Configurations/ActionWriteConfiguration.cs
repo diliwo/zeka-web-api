@@ -72,6 +72,7 @@ public sealed class IdempotencyReceiptConfiguration : IEntityTypeConfiguration<I
             .HasPrincipalKey(x => new { x.Id, x.OrganisationId }).OnDelete(DeleteBehavior.Restrict);
         b.Property(x => x.Operation).HasMaxLength(64).IsRequired();
         b.Property(x => x.ClientKey).HasMaxLength(128).IsRequired();
-        b.Property(x => x.CanonicalMetadata).HasMaxLength(1000).IsRequired();
+        // A 500 UTF-16-code-unit purpose can occupy 3,000 JSON escape characters.
+        b.Property(x => x.CanonicalMetadata).HasMaxLength(4096).IsRequired();
     }
 }

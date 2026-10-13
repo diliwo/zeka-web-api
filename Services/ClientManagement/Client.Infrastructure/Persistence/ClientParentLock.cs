@@ -27,6 +27,11 @@ internal sealed class ClientParentLock(ApplicationDbContext database, ITenantCon
                 "SELECT \"Id\" FROM public.\"Clients\" WHERE \"OrganisationId\" = @organisation AND \"Id\" = @id AND NOT \"Softdelete\" FOR UPDATE",
                 clientId, cancellationToken) != clientId)
             throw new TenantAccessException(AccessFailure.Denied);
+        // Validators and authorization may have tracked SocialCases before waiting for this lock.
+        // Never merge a pre-lock snapshot into a newer committed case row.
+        if (database.ChangeTracker.HasChanges())
+            throw new InvalidOperationException("Client parent lock must precede pending entity changes.");
+        database.ChangeTracker.Clear();
     }
 
     public async Task LockWorkerAsync(int socialWorkerId, CancellationToken cancellationToken)

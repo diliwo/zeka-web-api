@@ -477,8 +477,8 @@ namespace ClientManagement.Infrastructure.Migrations
 
                     b.Property<string>("CanonicalMetadata")
                         .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
 
                     b.Property<int>("ClientId")
                         .HasColumnType("integer");

@@ -145,7 +145,7 @@ namespace ClientManagement.Infrastructure.Migrations
                     Operation = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     ClientKey = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
                     ClientId = table.Column<int>(type: "integer", nullable: false),
-                    CanonicalMetadata = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: false),
+                    CanonicalMetadata = table.Column<string>(type: "character varying(4096)", maxLength: 4096, nullable: false),
                     InteractionId = table.Column<int>(type: "integer", nullable: true),
                     FollowUpActionId = table.Column<int>(type: "integer", nullable: true),
                     ActionChangeId = table.Column<int>(type: "integer", nullable: true),
