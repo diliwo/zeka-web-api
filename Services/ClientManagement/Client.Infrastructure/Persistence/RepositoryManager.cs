@@ -27,6 +27,7 @@ public sealed class RepositoryManager : IRepositoryManager
     {
         _applicationDbContext = applicationDbContext;
         _clientRepository = new Lazy<IClientRepository>(() => new ClientRepository(applicationDbContext));
+        _supportRepository = new Lazy<ISupportRepository>(() => new SupportRepository(applicationDbContext));
         _schoolRegistrationRepository =
             new Lazy<ISchoolRegistrationRepository>(() => new SchoolRegistrationRepository(applicationDbContext));
         _professionAssessmentRepository =

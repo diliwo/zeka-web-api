@@ -1,4 +1,5 @@
 using ClientManagement.Application.Common.Models;
+using ClientManagement.API.Filters;
 using ClientManagement.Application.Supports.Commands.CloseTrack;
 using ClientManagement.Application.Supports.Commands.DeleteSupport;
 using ClientManagement.Application.Supports.Commands.UpsertSupport;
@@ -30,6 +31,7 @@ namespace ClientManagement.API.Controllers
 
 
         [HttpPost]
+        [ApiExceptionFilter]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
         [ClientManagement.API.Services.TenantRequestPolicy(typeof(UpsertSupportCommand))]

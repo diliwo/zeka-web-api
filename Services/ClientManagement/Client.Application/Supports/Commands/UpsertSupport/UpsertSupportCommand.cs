@@ -1,6 +1,7 @@
 using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
+using FluentValidation.Results;
 using MediatR;
 
 namespace ClientManagement.Application.Supports.Commands.UpsertSupport
@@ -34,12 +35,27 @@ namespace ClientManagement.Application.Supports.Commands.UpsertSupport
 
                 if (request.SupportId.HasValue)
                 {
-                    DateTime start = request.StartDate.ToLocalTime();
-
                     entity = _repository.Support.Get(request.SupportId.Value);
-                    entity.StartDate = start;
+                    if (entity is null)
+                        throw new NotFoundException(nameof(SocialCase), request.SupportId.Value);
+
+                    // An ordinary update cannot transfer a case or reassign its worker. Check the
+                    // persisted resource before validating dates or changing any tracked fields.
+                    if (entity.ClientId != request.ClientId || entity.SocialWorkerId != request.SocialWorkerId)
+                        throw new ValidationException(new[]
+                        {
+                            new ValidationFailure("Identity", "Support identity cannot be changed by an ordinary update.")
+                        });
+
+                    if (await _repository.Support.DateIsEarlierThanExistingDates(
+                            entity.ClientId, request.StartDate, entity.Id))
+                        throw new ValidationException(new[]
+                        {
+                            new ValidationFailure("Property", "Action impossible, la date doit être postérieure au dernier suivi !")
+                        });
+
+                    entity.StartDate = request.StartDate.ToLocalTime();
                     entity.EndDate = request.EndDate;
-                    entity.ClientId = request.SocialWorkerId;
                     entity.Note = request.Note;
                 }
                 else

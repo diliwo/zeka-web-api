@@ -1,8 +1,11 @@
 using ClientManagement.Application.Common.Authorization;
+using ClientManagement.Application.Common.Exceptions;
+using ClientManagement.Application.Supports.Commands.UpsertSupport;
 using ClientManagement.Core.Entities;
 using ClientManagement.Infrastructure.Persistence;
 using ClientManagement.Tests.Common;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Xunit;
 using Zeka.Extensions.MultiTenancy.Abstractions;
 
@@ -12,6 +15,172 @@ public sealed class CurrentAssignmentTests(TenantDatabase fixture) : IClassFixtu
 {
     private DbContextOptions<ApplicationDbContext> Options => new DbContextOptionsBuilder<ApplicationDbContext>()
         .UseNpgsql(fixture.ConnectionString).Options;
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Support_update_preserves_identity_even_when_worker_id_matches_another_client(bool all)
+    {
+        // The class fixture is shared by other tests. A fresh database makes the
+        // two independently generated identity sequences deterministic here.
+        var collisionDatabase = new TenantDatabase();
+        await collisionDatabase.InitializeAsync();
+        try
+        {
+        var collisionOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(collisionDatabase.ConnectionString).Options;
+        var organisation = Guid.NewGuid(); var membership = Guid.NewGuid();
+        int supportId; int clientId; int otherClientId; int workerId;
+        var start = DateTime.Today.AddDays(-4);
+        await using (var seed = new ApplicationDbContext(collisionOptions, TenantEnforcementTests.Scope(organisation)))
+        {
+            var client = SyntheticClient.Create(SyntheticClient.Niss(sequence: 81));
+            var otherClient = SyntheticClient.Create(SyntheticClient.Niss(sequence: 82));
+            otherClient.ReferenceNumber = "other-reference";
+            var otherWorker = Worker(Guid.NewGuid(), "other");
+            var worker = Worker(membership, "assigned");
+            seed.AddRange(client, otherClient, otherWorker, worker);
+            await seed.SaveChangesAsync();
+            Assert.Equal(otherClient.Id, worker.Id); // Independent integer sequences collide.
+            var earlier = new SocialCase(client, DateTime.Today.AddDays(-10), worker, "earlier")
+                { EndDate = DateTime.Today.AddDays(-5) };
+            seed.Add(earlier); await seed.SaveChangesAsync();
+            var support = new SocialCase(client, start, worker, "original");
+            seed.Add(support); await seed.SaveChangesAsync();
+            supportId = support.Id; clientId = client.Id; otherClientId = otherClient.Id; workerId = worker.Id;
+        }
+
+        var scope = new TenantContextScope();
+        var operation = await Operation(organisation, membership, all, scope);
+        await using (var database = new ApplicationDbContext(collisionOptions, scope, operation))
+        {
+            var repository = new RepositoryManager(database);
+            var handler = new UpsertSupportCommand.UpsertSupportCommandHandler(repository, null!);
+            var date = DateTime.Today.AddDays(-3);
+            var matching = new UpsertSupportCommand { SupportId = supportId, ClientId = clientId,
+                SocialWorkerId = workerId, StartDate = date, Note = "updated" };
+            Assert.Equal(supportId, await handler.Handle(matching, default));
+            database.ChangeTracker.Clear();
+
+            var invalidDate = new UpsertSupportCommand { SupportId = supportId, ClientId = clientId,
+                SocialWorkerId = workerId, StartDate = DateTime.Today.AddDays(-6), Note = "invalid-date" };
+            await Assert.ThrowsAsync<ValidationException>(() => handler.Handle(invalidDate, default));
+            Assert.False(database.ChangeTracker.HasChanges());
+
+            foreach (var mismatch in new[]
+            {
+                new UpsertSupportCommand { SupportId = supportId, ClientId = otherClientId,
+                    SocialWorkerId = workerId, StartDate = date.AddDays(1), Note = "forged-client" },
+                new UpsertSupportCommand { SupportId = supportId, ClientId = clientId,
+                    SocialWorkerId = workerId + 1, StartDate = date.AddDays(1), Note = "forged-worker" }
+            })
+            {
+                await Assert.ThrowsAsync<ValidationException>(() => handler.Handle(mismatch, default));
+                Assert.False(database.ChangeTracker.HasChanges());
+            }
+        }
+
+        await using var verify = new ApplicationDbContext(collisionOptions, TenantEnforcementTests.Scope(organisation));
+        var saved = await verify.SocialCases.SingleAsync(s => s.Id == supportId);
+        Assert.Equal(clientId, saved.ClientId);
+        Assert.Equal(workerId, saved.SocialWorkerId);
+        Assert.Equal(organisation, saved.OrganisationId);
+        Assert.Equal("updated", saved.Note);
+        Assert.Equal(0, await verify.SocialCases.CountAsync(s => s.ClientId == otherClientId));
+        }
+        finally { await collisionDatabase.DisposeAsync(); }
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Hidden_or_missing_support_cannot_be_updated_or_disclosed(bool all)
+    {
+        var ownOrganisation = Guid.NewGuid(); var otherOrganisation = Guid.NewGuid(); var membership = Guid.NewGuid();
+        int hiddenId; int hiddenClientId; int hiddenWorkerId;
+        await using (var seed = new ApplicationDbContext(Options, TenantEnforcementTests.Scope(otherOrganisation)))
+        {
+            var hidden = new SocialCase(SyntheticClient.Create(SyntheticClient.Niss(sequence: 83)),
+                DateTime.Today.AddDays(-2), Worker(Guid.NewGuid(), "hidden"), "original");
+            seed.Add(hidden); await seed.SaveChangesAsync();
+            hiddenId = hidden.Id; hiddenClientId = hidden.ClientId; hiddenWorkerId = hidden.SocialWorkerId;
+        }
+        var scope = new TenantContextScope();
+        var operation = await Operation(ownOrganisation, membership, all, scope);
+        await using (var database = new ApplicationDbContext(Options, scope, operation))
+        {
+            var handler = new UpsertSupportCommand.UpsertSupportCommandHandler(new RepositoryManager(database), null!);
+            foreach (var id in new[] { hiddenId, int.MaxValue })
+            {
+                var command = new UpsertSupportCommand { SupportId = id, ClientId = hiddenClientId,
+                    SocialWorkerId = hiddenWorkerId, StartDate = DateTime.Today, Note = "forged" };
+                var error = await Assert.ThrowsAsync<NotFoundException>(() => handler.Handle(command, default));
+                Assert.Contains("SocialCase", error.Message);
+                Assert.False(database.ChangeTracker.HasChanges());
+            }
+        }
+        await using var verify = new ApplicationDbContext(Options, TenantEnforcementTests.Scope(otherOrganisation));
+        Assert.Equal("original", (await verify.SocialCases.SingleAsync(s => s.Id == hiddenId)).Note);
+    }
+
+    [Fact]
+    public async Task PostgreSql_failure_rolls_back_support_update_without_partial_mutation()
+    {
+        var organisation = Guid.NewGuid(); var membership = Guid.NewGuid();
+        int supportId; int clientId; int workerId;
+        await using (var seed = new ApplicationDbContext(Options, TenantEnforcementTests.Scope(organisation)))
+        {
+            var support = new SocialCase(SyntheticClient.Create(SyntheticClient.Niss(sequence: 84)),
+                DateTime.Today.AddDays(-4), Worker(membership, "assigned"), "original");
+            seed.Add(support);
+            await seed.SaveChangesAsync();
+            supportId = support.Id; clientId = support.ClientId; workerId = support.SocialWorkerId;
+        }
+
+        var suffix = Guid.NewGuid().ToString("N");
+        var function = $"issue74_fail_{suffix}";
+        var trigger = $"issue74_fail_{suffix}";
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using (var install = new NpgsqlCommand($"""
+            CREATE FUNCTION "{function}"() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+              IF NEW."SchoolRegistrationId" = {supportId} THEN
+                RAISE EXCEPTION 'synthetic persistence failure';
+              END IF;
+              RETURN NEW;
+            END $$;
+            CREATE TRIGGER "{trigger}" BEFORE UPDATE ON "SocialCases"
+              FOR EACH ROW EXECUTE FUNCTION "{function}"();
+            """, connection))
+            await install.ExecuteNonQueryAsync();
+
+        try
+        {
+            var scope = new TenantContextScope();
+            var operation = await Operation(organisation, membership, true, scope);
+            await using var database = new ApplicationDbContext(Options, scope, operation);
+            var command = new UpsertSupportCommand { SupportId = supportId, ClientId = clientId,
+                SocialWorkerId = workerId, StartDate = DateTime.Today.AddDays(-2), Note = "should-rollback" };
+            await Assert.ThrowsAsync<DbUpdateException>(() =>
+                new UpsertSupportCommand.UpsertSupportCommandHandler(new RepositoryManager(database), null!)
+                    .Handle(command, default));
+        }
+        finally
+        {
+            await using var remove = new NpgsqlCommand($"""
+                DROP TRIGGER "{trigger}" ON "SocialCases";
+                DROP FUNCTION "{function}"();
+                """, connection);
+            await remove.ExecuteNonQueryAsync();
+        }
+
+        await using var verify = new ApplicationDbContext(Options, TenantEnforcementTests.Scope(organisation));
+        var saved = await verify.SocialCases.SingleAsync(s => s.Id == supportId);
+        Assert.Equal(clientId, saved.ClientId);
+        Assert.Equal(workerId, saved.SocialWorkerId);
+        Assert.Equal(DateTime.Today.AddDays(-4), saved.StartDate.Date);
+        Assert.Equal("original", saved.Note);
+        Assert.Equal(1, await verify.SocialCases.CountAsync());
+    }
 
     [Theory]
     [InlineData("open", true)] [InlineData("future-end", true)] [InlineData("future-start", false)]
