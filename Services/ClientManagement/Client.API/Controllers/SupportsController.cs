@@ -1,4 +1,5 @@
 using ClientManagement.Application.Common.Models;
+using ClientManagement.API.Filters;
 using ClientManagement.Application.Supports.Commands.CloseTrack;
 using ClientManagement.Application.Supports.Commands.DeleteSupport;
 using ClientManagement.Application.Supports.Commands.UpsertSupport;
@@ -11,6 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ClientManagement.API.Controllers
 {
+    [ApiExceptionFilter]
     public class SupportsController : ApiControllerBase
     {
         [HttpGet]

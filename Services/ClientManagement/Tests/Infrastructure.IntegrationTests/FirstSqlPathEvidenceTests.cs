@@ -4,8 +4,10 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using ClientManagement.API.Services;
 using ClientManagement.Application.Clients.Commands.AddClient;
+using ClientManagement.Application.Supports.Commands.UpsertSupport;
 using ClientManagement.Application.Common.Authorization;
 using ClientManagement.Core.Enums;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using ClientManagement.Core.ValueObjects;
 using ClientManagement.Infrastructure.Messaging;
@@ -74,6 +76,120 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfWrite, 1);
     }
 
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Supports_http_mediatr_enforces_tenant_and_resource_authorization(bool all)
+    {
+        var ownOrganisation = Guid.NewGuid();
+        var otherOrganisation = Guid.NewGuid();
+        var membership = Guid.NewGuid();
+        int ownSupportId; int ownClientId; int ownWorkerId;
+        int unassignedSupportId; int unassignedClientId; int unassignedWorkerId;
+        int hiddenSupportId; int hiddenClientId; int hiddenWorkerId;
+        var seedOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(database.AdministratorConnectionString).Options;
+        await using (var connection = new NpgsqlConnection(database.AdministratorConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await SetSeedTenantAsync(connection, transaction, ownOrganisation);
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(connection).Options;
+            await using var seed = new ApplicationDbContext(options, TenantEnforcementTests.Scope(ownOrganisation));
+            await seed.Database.UseTransactionAsync(transaction);
+            var own = new SocialCase(ClientManagement.Tests.Common.SyntheticClient.Create(
+                ClientManagement.Tests.Common.SyntheticClient.Niss(sequence: 85)),
+                DateTime.Today.AddDays(-4), NewWorker(membership), "own-original");
+            var unassigned = new SocialCase(ClientManagement.Tests.Common.SyntheticClient.Create(
+                ClientManagement.Tests.Common.SyntheticClient.Niss(sequence: 86)),
+                DateTime.Today.AddDays(-4), NewWorker(Guid.NewGuid()), "unassigned-original");
+            unassigned.Client.ReferenceNumber = "unassigned-reference";
+            seed.AddRange(own, unassigned);
+            await seed.SaveChangesAsync();
+            await transaction.CommitAsync();
+            ownSupportId = own.Id; ownClientId = own.ClientId; ownWorkerId = own.SocialWorkerId;
+            unassignedSupportId = unassigned.Id; unassignedClientId = unassigned.ClientId;
+            unassignedWorkerId = unassigned.SocialWorkerId;
+        }
+        await using (var connection = new NpgsqlConnection(database.AdministratorConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await SetSeedTenantAsync(connection, transaction, otherOrganisation);
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(connection).Options;
+            await using var seed = new ApplicationDbContext(options, TenantEnforcementTests.Scope(otherOrganisation));
+            await seed.Database.UseTransactionAsync(transaction);
+            var hidden = new SocialCase(ClientManagement.Tests.Common.SyntheticClient.Create(
+                ClientManagement.Tests.Common.SyntheticClient.Niss(sequence: 87)),
+                DateTime.Today.AddDays(-4), NewWorker(Guid.NewGuid()), "hidden-original");
+            seed.Add(hidden);
+            await seed.SaveChangesAsync();
+            await transaction.CommitAsync();
+            hiddenSupportId = hidden.Id; hiddenClientId = hidden.ClientId; hiddenWorkerId = hidden.SocialWorkerId;
+        }
+
+        await using var app = await StartHttpApplicationAsync(ownOrganisation,
+            new TenantAttemptEvidenceCollector(), membership, all);
+        using var client = app.GetTestClient();
+        SetTenantHeaders(client, ownOrganisation);
+        UpsertSupportCommand Command(int id, int clientId, int workerId, string note) => new()
+        {
+            SupportId = id, ClientId = clientId, SocialWorkerId = workerId,
+            StartDate = DateTime.Today.AddDays(-2), Note = note
+        };
+
+        var allowed = await client.PostAsJsonAsync("/api/Supports",
+            Command(ownSupportId, ownClientId, ownWorkerId, "own-updated"));
+        Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+
+        var hiddenResponse = await client.PostAsJsonAsync("/api/Supports",
+            Command(hiddenSupportId, hiddenClientId, hiddenWorkerId, "hidden-forged"));
+        var missing = await client.PostAsJsonAsync("/api/Supports",
+            Command(int.MaxValue, hiddenClientId, hiddenWorkerId, "missing-forged"));
+        Assert.Equal(HttpStatusCode.NotFound, hiddenResponse.StatusCode);
+        Assert.Equal(missing.StatusCode, hiddenResponse.StatusCode);
+
+        var forgedIdentity = await client.PostAsJsonAsync("/api/Supports",
+            Command(ownSupportId, hiddenClientId, ownWorkerId, "cross-tenant-reparent"));
+        Assert.Equal(HttpStatusCode.BadRequest, forgedIdentity.StatusCode);
+
+        var unassignedResponse = await client.PostAsJsonAsync("/api/Supports",
+            Command(unassignedSupportId, unassignedClientId, unassignedWorkerId, "unassigned-update"));
+        Assert.Equal(all ? HttpStatusCode.OK : HttpStatusCode.NotFound, unassignedResponse.StatusCode);
+        if (!all) Assert.Equal(missing.StatusCode, unassignedResponse.StatusCode);
+
+        client.DefaultRequestHeaders.Remove("X-Organisation-Id");
+        client.DefaultRequestHeaders.Add("X-Organisation-Id", otherOrganisation.ToString());
+        var wrongSelection = await client.PostAsJsonAsync("/api/Supports",
+            Command(hiddenSupportId, hiddenClientId, hiddenWorkerId, "selected-other"));
+        Assert.Equal(HttpStatusCode.Forbidden, wrongSelection.StatusCode);
+
+        await using var verifyOwn = new ApplicationDbContext(seedOptions, TenantEnforcementTests.Scope(ownOrganisation));
+        Assert.Equal("own-updated", (await verifyOwn.SocialCases.SingleAsync(x => x.Id == ownSupportId)).Note);
+        Assert.Equal(all ? "unassigned-update" : "unassigned-original",
+            (await verifyOwn.SocialCases.SingleAsync(x => x.Id == unassignedSupportId)).Note);
+        Assert.Equal(2, await verifyOwn.SocialCases.CountAsync());
+        await using var verifyOther = new ApplicationDbContext(seedOptions, TenantEnforcementTests.Scope(otherOrganisation));
+        Assert.Equal("hidden-original", (await verifyOther.SocialCases.SingleAsync(x => x.Id == hiddenSupportId)).Note);
+        Assert.Equal(1, await verifyOther.SocialCases.CountAsync());
+    }
+
+    private static SocialWorker NewWorker(Guid membership)
+    {
+        var worker = new SocialWorker();
+        worker.ApplyProjection(membership, 1, Guid.NewGuid(), true, "Synthetic", "Worker",
+            membership.ToString("N"), "Team", "T");
+        return worker;
+    }
+
+    private static async Task SetSeedTenantAsync(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, Guid organisation)
+    {
+        await using var context = new NpgsqlCommand(
+            "SELECT set_config('zeka.organisation_id', @organisation, true)", connection, transaction);
+        context.Parameters.AddWithValue("organisation", organisation.ToString());
+        await context.ExecuteNonQueryAsync();
+    }
+
     [Fact]
     public async Task Client_consumer_proves_first_sql_order_on_restricted_runtime()
     {
@@ -100,7 +216,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
     }
 
     private async Task<WebApplication> StartHttpApplicationAsync(Guid organisation,
-        TenantAttemptEvidenceCollector evidence)
+        TenantAttemptEvidenceCollector evidence, Guid? membership = null, bool? all = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.WebHost.UseTestServer();
@@ -123,8 +239,9 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         builder.Services.RemoveAll<ITenantAttemptOrderObserver>();
         builder.Services.AddSingleton<ITenantAttemptOrderObserver>(evidence);
         builder.Services.RemoveAll<ICurrentTenantAccess>();
-        builder.Services.AddScoped<ICurrentTenantAccess>(_ => new Access(organisation));
-        builder.Services.AddControllers().AddApplicationPart(typeof(ClientManagement.API.Controllers.ClientsController).Assembly);
+        builder.Services.AddScoped<ICurrentTenantAccess>(_ => new Access(organisation, membership, all));
+        builder.Services.AddControllers()
+            .AddApplicationPart(typeof(ClientManagement.API.Controllers.ClientsController).Assembly);
         var app = builder.Build();
         app.UseAuthentication();
         app.UseMiddleware<TenantAccessMiddleware>();
@@ -159,11 +276,15 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         client.DefaultRequestHeaders.Add("X-Organisation-Id", organisation.ToString());
     }
 
-    private sealed class Access(Guid organisation) : ICurrentTenantAccess
+    private sealed class Access(Guid organisation, Guid? membership, bool? all) : ICurrentTenantAccess
     {
         public Task<TenantAccessDecision> ResolveAsync(string authenticatedSubjectId, Guid selectedOrganisationId,
             CancellationToken cancellationToken) => Task.FromResult(new TenantAccessDecision(TenantAccessOutcome.Authorized,
-            new(organisation, Guid.NewGuid(), ["Clients.ViewAll", "Clients.Create"], "test", DateTimeOffset.UtcNow)));
+            new(organisation, membership ?? Guid.NewGuid(),
+                all.HasValue
+                    ? ["Clients.ViewAll", "Clients.Create", all.Value ? "Clients.EditAll" : "Clients.EditAssigned"]
+                    : ["Clients.ViewAll", "Clients.Create"],
+                "test", DateTimeOffset.UtcNow)));
     }
 
     private sealed class TestAuthenticationHandler(IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -212,6 +333,7 @@ public sealed class PostgreSqlClientRuntimeDatabase : IAsyncLifetime
     private const string RuntimePassword = "test-runtime-password";
     private const string RecoveryPassword = "test-recovery-password";
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    public string AdministratorConnectionString => postgres.GetConnectionString();
     public string RuntimeConnectionString => Connection("zeka_client_runtime", RuntimePassword);
     public string RecoveryConnectionString =>
         Connection("zeka_client_closure_recovery_test", RecoveryPassword);
