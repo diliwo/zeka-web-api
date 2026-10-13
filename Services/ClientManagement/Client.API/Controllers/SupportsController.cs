@@ -12,7 +12,6 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ClientManagement.API.Controllers
 {
-    [ApiExceptionFilter]
     public class SupportsController : ApiControllerBase
     {
         [HttpGet]
@@ -32,6 +31,7 @@ namespace ClientManagement.API.Controllers
 
 
         [HttpPost]
+        [ApiExceptionFilter]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesDefaultResponseType]
         [ClientManagement.API.Services.TenantRequestPolicy(typeof(UpsertSupportCommand))]
