@@ -3,6 +3,7 @@ using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using FluentValidation.Results;
 using MediatR;
+using ClientManagement.Application.Common.Authorization;
 
 namespace ClientManagement.Application.Supports.Commands.UpsertSupport
 {
@@ -20,13 +21,15 @@ namespace ClientManagement.Application.Supports.Commands.UpsertSupport
         {
             private readonly IRepositoryManager _repository;
             private readonly IMediator _mediator;
+            private readonly IClientParentLock _locks;
 
             public UpsertSupportCommandHandler(
                 IRepositoryManager repository,
-                IMediator mediator)
+                IMediator mediator, IClientParentLock locks)
             {
                 _repository = repository;
                 _mediator = mediator;
+                _locks = locks;
             }
 
             public async Task<int> Handle(UpsertSupportCommand request, CancellationToken cancellationToken)
@@ -35,6 +38,10 @@ namespace ClientManagement.Application.Supports.Commands.UpsertSupport
 
                 if (request.SupportId.HasValue)
                 {
+                    var persistedClientId = await _locks.ResolveCaseClientAsync(request.SupportId.Value, cancellationToken);
+                    if (persistedClientId is null)
+                        throw new NotFoundException(nameof(SocialCase), request.SupportId.Value);
+                    await _locks.LockAsync(persistedClientId.Value, cancellationToken);
                     entity = _repository.Support.Get(request.SupportId.Value);
                     if (entity is null)
                         throw new NotFoundException(nameof(SocialCase), request.SupportId.Value);
@@ -46,6 +53,8 @@ namespace ClientManagement.Application.Supports.Commands.UpsertSupport
                         {
                             new ValidationFailure("Identity", "Support identity cannot be changed by an ordinary update.")
                         });
+
+                    await _locks.LockWorkerAsync(entity.SocialWorkerId, cancellationToken);
 
                     if (await _repository.Support.DateIsEarlierThanExistingDates(
                             entity.ClientId, request.StartDate, entity.Id))
@@ -60,13 +69,23 @@ namespace ClientManagement.Application.Supports.Commands.UpsertSupport
                 }
                 else
                 {
+                    try { await _locks.LockAsync(request.ClientId, cancellationToken); }
+                    catch (TenantAccessException error) when (error.Failure == AccessFailure.Denied)
+                    { throw new NotFoundException(nameof(ClientManagement.Core.Entities.Client), request.ClientId); }
+                    if (await _repository.Support.DateIsEarlierThanExistingDates(request.ClientId, request.StartDate))
+                        throw new ValidationException(new[]
+                        {
+                            new ValidationFailure("Property", "Action impossible, la date doit être postérieure au dernier suivi !")
+                        });
+                    await _locks.LockWorkerAsync(request.SocialWorkerId, cancellationToken);
                     var Client = await _repository.Client.GetAsync(request.ClientId, true);
                     if(Client == null)
                     {
                         throw new NotFoundException(nameof(Client), request.ClientId);
                     }
 
-                    var SocialWorker = _repository.SocialWorker.Get(request.SocialWorkerId);
+                    // Keep the existing worker attached; adding a new SocialCase must not re-insert it.
+                    var SocialWorker = _repository.SocialWorker.Get(request.SocialWorkerId, true);
                     if (SocialWorker == null)
                     {
                         throw new NotFoundException(nameof(entity), request.SupportId);

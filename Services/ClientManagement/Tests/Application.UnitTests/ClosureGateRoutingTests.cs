@@ -1,5 +1,6 @@
 using ClientManagement.Application.Common.Authorization;
 using ClientManagement.Application.Common.Behaviours;
+using ClientManagement.Application.ActionWrites;
 using ClientManagement.Application.Clients.Commands.AddClient;
 using ClientManagement.Application.AssessmentDocument.Commands.GenerateAssessmentDocumentCommand;
 using MediatR;
@@ -21,6 +22,16 @@ public sealed class ClosureGateRoutingTests
     }
 
     [Fact]
+    public async Task Action_write_contracts_use_the_non_replaying_ordinary_path()
+    {
+        var executor = new RecordingExecutor();
+        await Behavior<RecordInteractionCommand, RecordInteractionResult>(executor).Handle(
+            new RecordInteractionCommand(1, 1, DateTime.UtcNow, "synthetic", "key"),
+            () => Task.FromResult(new RecordInteractionResult(1, 1, null)), default);
+        Assert.Equal(ActivityPath.OrdinaryOnce, executor.Path);
+    }
+
+    [Fact]
     public void Every_application_command_handler_has_an_explicit_activity_classification()
     {
         var discovered = typeof(AddClientCommand).Assembly.GetTypes()
@@ -30,7 +41,8 @@ public sealed class ClosureGateRoutingTests
                 && (contract.GetGenericTypeDefinition() == typeof(IRequestHandler<,>)
                     || contract.GetGenericTypeDefinition() == typeof(IRequestHandler<>)))
             .Select(contract => contract.GetGenericArguments()[0])
-            .Where(request => request.Namespace?.Contains(".Commands.", StringComparison.Ordinal) is true)
+            .Where(request => request.Namespace?.Contains(".Commands.", StringComparison.Ordinal) is true
+                || request.Namespace?.Contains(".ActionWrites", StringComparison.Ordinal) is true)
             .Select(request => request.FullName!)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -74,7 +86,8 @@ public sealed class ClosureGateRoutingTests
             "life-02-test",
             DateTimeOffset.UtcNow));
         return new AuthorizationBehaviour<TRequest, TResponse>(
-            new TenantOperation(access, new Identity(organisation), context, context), executor);
+            new TenantOperation(access, new Identity(organisation), context, context), executor,
+            new PostCommitNotifications(), new UnusedActionStore());
     }
 
     [RequiresTenantPermission("Clients.ViewAll")]
@@ -95,7 +108,19 @@ public sealed class ClosureGateRoutingTests
                 new TenantAccessDecision(TenantAccessOutcome.Authorized, membership));
     }
 
-    private enum ActivityPath { None, Neutral, Ordinary, Lifecycle }
+    private enum ActivityPath { None, Neutral, Ordinary, OrdinaryOnce, Lifecycle }
+
+    private sealed class UnusedActionStore : IActionWriteStore
+    {
+        public Task<RecordInteractionResult> RecordAsync(RecordInteractionCommand request, Guid actor,
+            CancellationToken token) => throw new NotSupportedException();
+        public Task<ActionChangeResult> ChangeAsync(ActionChangeCommand request, Guid actor,
+            CancellationToken token) => throw new NotSupportedException();
+        public Task<RecordInteractionResult?> ReconcileAsync(RecordInteractionCommand request, Guid actor,
+            CancellationToken token) => throw new NotSupportedException();
+        public Task<ActionChangeResult?> ReconcileAsync(ActionChangeCommand request, Guid actor,
+            CancellationToken token) => throw new NotSupportedException();
+    }
 
     private sealed class RecordingExecutor : ITenantTransactionExecutor
     {
@@ -143,5 +168,12 @@ public sealed class ClosureGateRoutingTests
 
         public Task<T> ExecuteOnceAsync<T>(Func<CancellationToken, Task<T>> work,
             CancellationToken cancellationToken) => work(cancellationToken);
+
+        public Task<T> ExecuteOrdinaryOnceAsync<T>(Func<CancellationToken, Task<T>> work,
+            CancellationToken cancellationToken)
+        {
+            Path = ActivityPath.OrdinaryOnce;
+            return work(cancellationToken);
+        }
     }
 }

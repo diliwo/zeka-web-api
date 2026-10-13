@@ -34,6 +34,11 @@ public class ApplicationDbContext : TenantDbContext
         var clients = AssignedClients().Select(c => c.Id);
         if (typeof(T) == typeof(Client)) return (IQueryable<T>)AssignedClients();
         if (typeof(T) == typeof(SocialCase)) return (IQueryable<T>)SocialCases.Where(x => clients.Contains(x.ClientId));
+        if (typeof(T) == typeof(Interaction)) return (IQueryable<T>)Interactions.Where(x => clients.Contains(x.ClientId));
+        if (typeof(T) == typeof(FollowUpAction)) return (IQueryable<T>)FollowUpActions.Where(x => clients.Contains(x.ClientId));
+        if (typeof(T) == typeof(IdempotencyReceipt)) return (IQueryable<T>)IdempotencyReceipts.Where(x => clients.Contains(x.ClientId));
+        if (typeof(T) == typeof(ActionChange)) return (IQueryable<T>)ActionChanges.Where(x =>
+            FollowUpActions.Any(a => a.Id == x.FollowUpActionId && clients.Contains(a.ClientId)));
         if (typeof(T) == typeof(SchoolRegistration)) return (IQueryable<T>)SchoolRegistrations.Where(x => clients.Contains(x.ClientId));
         if (typeof(T) == typeof(MonitoringReport)) return (IQueryable<T>)MonitoringReports.Where(x => clients.Contains(x.ClientId));
         if (typeof(T) == typeof(Assessment)) return (IQueryable<T>)Assessments.Where(x => x.ClientId != null && clients.Contains(x.ClientId.Value));
@@ -69,6 +74,11 @@ public class ApplicationDbContext : TenantDbContext
             {
                 Client client => client.Id,
                 SocialCase support => support.ClientId,
+                Interaction interaction => interaction.ClientId,
+                FollowUpAction action => action.ClientId,
+                IdempotencyReceipt receipt => receipt.ClientId,
+                ActionChange change => FollowUpActions.Where(a => a.Id == change.FollowUpActionId)
+                    .Select(a => (int?)a.ClientId).SingleOrDefault(),
                 SchoolRegistration school => school.ClientId,
                 MonitoringReport report => report.ClientId,
                 ProfessionnalExperience experience => experience.ClientId,
@@ -85,6 +95,10 @@ public class ApplicationDbContext : TenantDbContext
                 {
                     Client => Visible<Client>().Any(x => x.Id == id),
                     SocialCase => Visible<SocialCase>().Any(x => x.Id == id),
+                    Interaction => Visible<Interaction>().Any(x => x.Id == id),
+                    FollowUpAction => Visible<FollowUpAction>().Any(x => x.Id == id),
+                    IdempotencyReceipt => Visible<IdempotencyReceipt>().Any(x => x.Id == id),
+                    ActionChange => Visible<ActionChange>().Any(x => x.Id == id),
                     SchoolRegistration => Visible<SchoolRegistration>().Any(x => x.Id == id),
                     MonitoringReport => Visible<MonitoringReport>().Any(x => x.Id == id),
                     ProfessionnalExperience => Visible<ProfessionnalExperience>().Any(x => x.Id == id),
@@ -111,6 +125,10 @@ public class ApplicationDbContext : TenantDbContext
 
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<SocialCase> SocialCases => Set<SocialCase>();
+    public DbSet<Interaction> Interactions => Set<Interaction>();
+    public DbSet<FollowUpAction> FollowUpActions => Set<FollowUpAction>();
+    public DbSet<ActionChange> ActionChanges => Set<ActionChange>();
+    public DbSet<IdempotencyReceipt> IdempotencyReceipts => Set<IdempotencyReceipt>();
     public DbSet<SchoolRegistration> SchoolRegistrations => Set<SchoolRegistration>();
     public DbSet<Assessment> Assessments => Set<Assessment>();
     public DbSet<MonitoringReport> MonitoringReports => Set<MonitoringReport>();
@@ -142,7 +160,9 @@ public class ApplicationDbContext : TenantDbContext
             if (property.GetColumnType() != "date")
             {
                 property.SetColumnType("timestamp without time zone");
-                var audit = property.Name is nameof(Entity.Created) or nameof(Entity.LastModified);
+                var audit = property.Name is nameof(Entity.Created) or nameof(Entity.LastModified)
+                    or nameof(Interaction.OccurredAtUtc) or nameof(ActionChange.ChangedAtUtc)
+                    or nameof(IdempotencyReceipt.RetainUntilUtc);
                 property.SetValueConverter(new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTime, DateTime>(
                     value => DateTime.SpecifyKind(value, DateTimeKind.Unspecified),
                     value => DateTime.SpecifyKind(value, audit ? DateTimeKind.Utc : DateTimeKind.Unspecified)));
@@ -168,6 +188,10 @@ public sealed class DeploymentDbContext(DbContextOptions<DeploymentDbContext> op
 {
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<SocialCase> SocialCases => Set<SocialCase>();
+    public DbSet<Interaction> Interactions => Set<Interaction>();
+    public DbSet<FollowUpAction> FollowUpActions => Set<FollowUpAction>();
+    public DbSet<ActionChange> ActionChanges => Set<ActionChange>();
+    public DbSet<IdempotencyReceipt> IdempotencyReceipts => Set<IdempotencyReceipt>();
     public DbSet<SchoolRegistration> SchoolRegistrations => Set<SchoolRegistration>();
     public DbSet<Assessment> Assessments => Set<Assessment>();
     public DbSet<MonitoringReport> MonitoringReports => Set<MonitoringReport>();

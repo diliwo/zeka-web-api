@@ -30,7 +30,13 @@ public static class ClientRequestActivityClassifier
         "ClientManagement.Application.Supports.Commands.CloseTrack.CloseSupportCommand",
         "ClientManagement.Application.Supports.Commands.DeleteSupport.DeleteSupportCommand",
         "ClientManagement.Application.Supports.Commands.UpsertSupport.UpsertSupportCommand"
+        ,"ClientManagement.Application.ActionWrites.RecordInteractionCommand"
+        ,"ClientManagement.Application.ActionWrites.ActionChangeCommand"
     };
+
+    public static bool RequiresNonReplayingOrdinary(Type requestType) =>
+        requestType == typeof(ClientManagement.Application.ActionWrites.RecordInteractionCommand)
+        || requestType == typeof(ClientManagement.Application.ActionWrites.ActionChangeCommand);
 
     private static readonly HashSet<string> NonMutatingCommandTypeNames = new(StringComparer.Ordinal)
     {
