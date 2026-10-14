@@ -71,7 +71,8 @@ public static class RlsSecurityManifestVerifier
             || x.EndsWith("rls-manifest.v14.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v15.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v16.json", StringComparison.Ordinal)
-            || x.EndsWith("rls-manifest.v17.json", StringComparison.Ordinal));
+            || x.EndsWith("rls-manifest.v17.json", StringComparison.Ordinal)
+            || x.EndsWith("rls-manifest.v18.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -90,7 +91,7 @@ public static class RlsSecurityManifestVerifier
     public static async Task VerifyAsync(DbContext database, RlsSecurityManifest manifest,
         CancellationToken cancellationToken = default)
     {
-        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15 or 16 or 17) || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18) || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         var functionDefinitions = FunctionDefinitions(manifest);
         Equal(manifest.RuntimeFunctions, functionDefinitions.Keys,
@@ -750,13 +751,27 @@ public static class RlsSecurityManifestVerifier
                 expectedColumns = [.. expectedColumns,
                     $"{ObjectKey(operation)}|DispositionReadyAt",
                     $"{ObjectKey(operation)}|RetentionDecisionSetHash"];
+            if (manifest.SchemaVersion >= 18)
+                expectedColumns = [.. expectedColumns,
+                    .. new[] { "Id", "DisplayName", "OwnerUserId", "Status", "Slug",
+                        "CreatedAtUtc", "UpdatedAtUtc", "ConcurrencyVersion" }
+                        .Select(column => $"{ObjectKey("public", "Organisations")}|{column}")];
             if (manifest.SchemaVersion >= 15)
                 expectedColumns = expectedColumns.Order(StringComparer.Ordinal).ToArray();
             if (!manifest.ColumnPrivileges.Select(state => $"{ObjectKey(state.Object)}|{state.Column}")
                     .SequenceEqual(expectedColumns, StringComparer.Ordinal)
                 || manifest.ColumnPrivileges.Any(state => state.Grantable
-                    || !state.Privileges.SequenceEqual(new[] { "UPDATE" }, StringComparer.Ordinal)))
+                    || !state.Privileges.SequenceEqual(
+                        manifest.SchemaVersion >= 18 && state.Object == new ManagedObjectIdentity("public", "Organisations")
+                            ? new[] { "INSERT", "UPDATE" } : new[] { "UPDATE" }, StringComparer.Ordinal)))
                 throw new InvalidOperationException("Lifecycle column privilege inventory is invalid.");
+            if (manifest.SchemaVersion >= 18)
+            {
+                var organisationGrants = manifest.TablePrivileges
+                    .Single(state => state.Object == new ManagedObjectIdentity("public", "Organisations"));
+                if (!organisationGrants.Privileges.SequenceEqual(new[] { "DELETE", "SELECT" }))
+                    throw new InvalidOperationException("Organisation table privileges are invalid.");
+            }
             var operationGrants = manifest.TablePrivileges.Where(state => state.Object == operation).ToArray();
             if (operationGrants.Length != 1 || !operationGrants[0].Privileges.SequenceEqual(new[] { "INSERT", "SELECT" }))
                 throw new InvalidOperationException("Lifecycle operation table privileges are invalid.");
@@ -861,12 +876,16 @@ public static class RlsSecurityManifestVerifier
                 throw new InvalidOperationException("The column privilege inventory is invalid.");
             foreach (var state in states)
             {
+                var isOrganisation = manifest.Service == "AuthManagement" && manifest.SchemaVersion >= 18
+                    && state.Object == new ManagedObjectIdentity("public", "Organisations");
                 if (!objects.Contains(ObjectKey(state.Object)) || !ValidIdentifier(state.Column)
-                    || state.Grantable || !state.Privileges.SequenceEqual(["UPDATE"], StringComparer.Ordinal))
+                    || state.Grantable || !state.Privileges.SequenceEqual(
+                        isOrganisation ? ["INSERT", "UPDATE"] : ["UPDATE"], StringComparer.Ordinal))
                     throw new InvalidOperationException("The column privilege inventory is invalid.");
                 var table = manifest.TablePrivileges.Single(candidate => candidate.Object == state.Object);
                 if (table.Privileges.Contains("UPDATE", StringComparer.Ordinal)
-                    || table.Privileges.Contains("DELETE", StringComparer.Ordinal))
+                    || (isOrganisation && table.Privileges.Contains("INSERT", StringComparer.Ordinal))
+                    || (!isOrganisation && table.Privileges.Contains("DELETE", StringComparer.Ordinal)))
                     throw new InvalidOperationException(
                         "Column-scoped mutation cannot coexist with table-level UPDATE or DELETE.");
             }

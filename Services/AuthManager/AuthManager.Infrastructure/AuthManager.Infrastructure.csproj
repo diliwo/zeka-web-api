@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="NodaTime" Version="3.3.5" />
     <ProjectReference Include="..\AuthManager.Application\AuthManager.Application.csproj" />
     <ProjectReference Include="..\AuthManager.Core\AuthManager.Core.csproj" />
     <ProjectReference Include="..\..\..\Shared\Zeka.Lifecycle.Contracts\Zeka.Lifecycle.Contracts.csproj" />
@@ -20,7 +21,7 @@
 
   <ItemGroup><ProjectReference Include="../../../Shared/Zeka.Authentication/Zeka.Authentication.csproj" /></ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Security/rls-manifest.v17.json" />
+    <EmbeddedResource Include="Security/rls-manifest.v18.json" />
     <Compile Include="../../../Shared/RlsSecurityManifestVerifier.cs" Link="Security/RlsSecurityManifestVerifier.cs" />
     <Compile Include="../../../Shared/RuntimeDatabaseIdentityValidator.cs" Link="Security/RuntimeDatabaseIdentityValidator.cs" />
   </ItemGroup>

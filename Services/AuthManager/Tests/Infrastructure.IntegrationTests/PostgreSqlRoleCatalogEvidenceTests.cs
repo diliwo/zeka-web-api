@@ -299,9 +299,11 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
           FROM unnest(ARRAY[
             'AspNetRoleClaims','AspNetRoles','AspNetUserClaims','AspNetUserLogins','AspNetUserRoles',
             'AspNetUserTokens','AspNetUsers','AuditEntries','IdempotencyRecords','OrganisationMemberships',
-            'Organisations','OutboxMessages','PermissionSets'
+            'OutboxMessages','PermissionSets'
           ]) table_name
           CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) privilege
+          UNION ALL SELECT 'Organisations', 'zeka_auth_runtime', privilege, false
+          FROM unnest(ARRAY['SELECT','DELETE']) privilege
           UNION ALL VALUES
             ('__EFMigrationsHistory','zeka_auth_migrator','SELECT',false),
             ('__EFMigrationsHistory','zeka_auth_migrator','INSERT',false),
@@ -380,6 +382,11 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
               'RevokedAtUtc','ConcurrencyVersion']::text[])
           ) inventory(table_name, update_columns)
           CROSS JOIN LATERAL pg_catalog.unnest(inventory.update_columns) column_name
+          UNION ALL
+          SELECT 'Organisations', column_name, 'zeka_auth_runtime', privilege, false
+          FROM pg_catalog.unnest(ARRAY['Id','DisplayName','OwnerUserId','Status','Slug',
+            'CreatedAtUtc','UpdatedAtUtc','ConcurrencyVersion']) column_name
+          CROSS JOIN pg_catalog.unnest(ARRAY['INSERT','UPDATE']) privilege
         ), actual(table_name, column_name, grantee, privilege, is_grantable) AS (
           SELECT relation.relname, attribute.attname, COALESCE(grantee.rolname, 'PUBLIC'),
             acl.privilege_type, acl.is_grantable

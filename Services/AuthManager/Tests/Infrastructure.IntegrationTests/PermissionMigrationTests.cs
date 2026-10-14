@@ -25,7 +25,15 @@ public sealed class PermissionMigrationTests : IAsyncLifetime
         var user = User.Create("synthetic@example.invalid", "synthetic", "Test", "User", now);
         var organisation = Organisation.Create(Guid.NewGuid(), "Synthetic", user.Id, now);
         var membership = OrganisationMembership.Create(Guid.NewGuid(), organisation.Id, user.Id, PermissionSet.MemberId, now);
-        database.AddRange(user, organisation, membership); await database.SaveChangesAsync();
+        database.Add(user); await database.SaveChangesAsync();
+        await database.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "Organisations" ("Id", "DisplayName", "OwnerUserId", "Status", "Slug",
+              "CreatedAtUtc", "UpdatedAtUtc", "ConcurrencyVersion")
+            VALUES ({organisation.Id}, {organisation.DisplayName}, {organisation.OwnerUserId},
+              {(int)organisation.Status}, {organisation.Slug}, {organisation.CreatedAtUtc},
+              {organisation.UpdatedAtUtc}, {(long)organisation.ConcurrencyVersion})
+            """);
+        database.Add(membership); await database.SaveChangesAsync();
         var missing = await Assert.ThrowsAsync<PostgresException>(() =>
             migrator.MigrateAsync("20260910165430_TenantPermissionCatalogue"));
         Assert.Contains("__MembershipRoleMap", missing.MessageText);
@@ -46,4 +54,5 @@ public sealed class PermissionMigrationTests : IAsyncLifetime
         var rollback = await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync("20260902192150_OrganisationMembershipDomain"));
         Assert.Contains("Automatic rollback is disabled", rollback.MessageText);
     }
+
 }

@@ -33,6 +33,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
                 throw new InvalidOperationException("Registry revisions and bindings are immutable.");
             if (entry.Entity is MembershipPermissionGrant && entry.State == EntityState.Deleted)
                 throw new InvalidOperationException("Membership permission grant history is append-preserving.");
+            if (entry.Entity is TimeZoneConfigurationAudit && entry.State != EntityState.Added)
+                throw new InvalidOperationException("Time zone approval evidence is append-only.");
             if (entry.Entity is MembershipPermissionGrant && entry.State == EntityState.Modified
                 && (entry.Property(nameof(MembershipPermissionGrant.OrganisationId)).IsModified
                     || entry.Property(nameof(MembershipPermissionGrant.OrganisationMembershipId)).IsModified
@@ -86,6 +88,7 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<Organisation> Organisations => Set<Organisation>();
+    public DbSet<TimeZoneConfigurationAudit> TimeZoneConfigurationAudits => Set<TimeZoneConfigurationAudit>();
     public DbSet<OrganisationMembership> OrganisationMemberships => Set<OrganisationMembership>();
     public DbSet<PermissionSet> PermissionSets => Set<PermissionSet>();
     public DbSet<MembershipPermissionGrant> MembershipPermissionGrants => Set<MembershipPermissionGrant>();
@@ -118,6 +121,7 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
         modelBuilder.ApplyConfiguration(new AuditEntryConfiguration());
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
         modelBuilder.ApplyConfiguration(new OrganisationConfiguration());
+        modelBuilder.ApplyConfiguration(new TimeZoneConfigurationAuditConfiguration());
         modelBuilder.ApplyConfiguration(new OrganisationMembershipConfiguration());
         modelBuilder.ApplyConfiguration(new PermissionSetConfiguration());
         modelBuilder.ApplyConfiguration(new MembershipPermissionGrantConfiguration());

@@ -21,6 +21,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapTenantAccess();
 app.MapAssigneeEligibility();
+app.MapOrganisationTimeZone();
+app.MapDisabledConfigureTimeZone();
 app.MapIssuerEndpoints();
 
 //if (app.Environment.IsDevelopment())

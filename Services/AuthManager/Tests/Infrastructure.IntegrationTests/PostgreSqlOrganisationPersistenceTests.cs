@@ -63,8 +63,15 @@ public sealed class PostgreSqlOrganisationPersistenceTests(PostgreSqlFixture fix
             var owner = User.Create("owner@example.org", "owner", "Ada", "Lovelace", Now);
             userId = owner.Id;
             arrangeContext.Add(owner);
-            arrangeContext.Organisations.Add(Organisation.Create(organisationId, "Example", userId, Now));
             await arrangeContext.SaveChangesAsync();
+            var organisation = Organisation.Create(organisationId, "Example", userId, Now);
+            await arrangeContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "Organisations" ("Id", "DisplayName", "OwnerUserId", "Status", "Slug",
+                  "CreatedAtUtc", "UpdatedAtUtc", "ConcurrencyVersion")
+                VALUES ({organisation.Id}, {organisation.DisplayName}, {organisation.OwnerUserId},
+                  {(int)organisation.Status}, {organisation.Slug}, {organisation.CreatedAtUtc},
+                  {organisation.UpdatedAtUtc}, {(long)organisation.ConcurrencyVersion})
+                """);
         }
 
         await using var firstContext = CreateDbContext(connectionString);

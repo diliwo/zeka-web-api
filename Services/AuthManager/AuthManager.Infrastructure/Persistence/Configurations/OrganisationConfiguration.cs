@@ -18,6 +18,9 @@ public sealed class OrganisationConfiguration : IEntityTypeConfiguration<Organis
         builder.Property(organisation => organisation.CreatedAtUtc).IsRequired();
         builder.Property(organisation => organisation.UpdatedAtUtc).IsRequired();
         builder.Property(organisation => organisation.ConcurrencyVersion).IsConcurrencyToken().IsRequired();
+        builder.Property(organisation => organisation.TimeZoneId).HasMaxLength(128)
+            .ValueGeneratedOnAdd();
+        builder.Property(organisation => organisation.TimeZoneConfigVersion).HasDefaultValue(0L).IsRequired();
 
         builder.HasOne<User>()
             .WithMany()
