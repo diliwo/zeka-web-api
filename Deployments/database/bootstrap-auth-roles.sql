@@ -165,7 +165,7 @@ BEGIN
   FOREACH object_name IN ARRAY ARRAY[
     'AspNetRoleClaims','AspNetRoles','AspNetUserClaims','AspNetUserLogins','AspNetUserRoles',
     'AspNetUserTokens','AspNetUsers','AuditEntries','IdempotencyRecords','OrganisationMemberships',
-    'Organisations','OutboxMessages','PermissionSets'
+    'OutboxMessages','PermissionSets'
   ] LOOP
     IF pg_catalog.to_regclass(pg_catalog.format('public.%I', object_name)) IS NOT NULL THEN
       EXECUTE pg_catalog.format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO zeka_auth_runtime', object_name);
@@ -177,6 +177,38 @@ BEGIN
     END IF;
   END LOOP;
 END $existing_objects$;
+-- Organisation configuration is owner-controlled. Reconcile the ordinary runtime to
+-- the pre-timezone column inventory, including after a repeated bootstrap run.
+DO $organisation_runtime_columns$
+DECLARE column_grant record;
+        grantee_name text;
+BEGIN
+  IF pg_catalog.to_regclass('public."Organisations"') IS NOT NULL THEN
+    REVOKE ALL ON TABLE public."Organisations" FROM PUBLIC, zeka_auth_runtime;
+    FOR column_grant IN
+      SELECT DISTINCT attribute.attname, acl.grantee,
+        pg_catalog.pg_get_userbyid(acl.grantee) AS role_name
+      FROM pg_catalog.pg_attribute attribute
+      JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
+      CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) acl
+      WHERE attribute.attrelid='public."Organisations"'::regclass
+        AND attribute.attnum>0 AND NOT attribute.attisdropped
+        AND acl.grantee<>relation.relowner
+    LOOP
+      grantee_name := CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+        ELSE pg_catalog.quote_ident(column_grant.role_name) END;
+      EXECUTE pg_catalog.format('REVOKE ALL (%I) ON TABLE public."Organisations" FROM %s CASCADE',
+        column_grant.attname, grantee_name);
+    END LOOP;
+    GRANT SELECT, DELETE ON TABLE public."Organisations" TO zeka_auth_runtime;
+    GRANT INSERT ("Id", "DisplayName", "OwnerUserId", "Status", "Slug",
+      "CreatedAtUtc", "UpdatedAtUtc", "ConcurrencyVersion")
+      ON TABLE public."Organisations" TO zeka_auth_runtime;
+    GRANT UPDATE ("Id", "DisplayName", "OwnerUserId", "Status", "Slug",
+      "CreatedAtUtc", "UpdatedAtUtc", "ConcurrencyVersion")
+      ON TABLE public."Organisations" TO zeka_auth_runtime;
+  END IF;
+END $organisation_runtime_columns$;
 DO $lifecycle_objects$
 DECLARE object_name text;
         lifecycle_object record;

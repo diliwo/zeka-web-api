@@ -22,6 +22,11 @@ public sealed class Organisation
 
     public uint ConcurrencyVersion { get; private set; }
 
+    // Unset until one exact owner-approved configuration is committed.
+    public string? TimeZoneId { get; private set; }
+
+    public long TimeZoneConfigVersion { get; private set; }
+
     public static Organisation Create(
         Guid id,
         string displayName,
