@@ -44,6 +44,9 @@ public static class DependencyInjection
         services.TryAddScoped<PostCommitNotifications>();
         services.AddScoped<IClientParentLock, ClientParentLock>();
         services.AddScoped<ClientManagement.Application.ActionWrites.IActionWriteStore, Persistence.ActionWriteStore>();
+        services.AddScoped<ClientManagement.Application.BeneficiaryB1.IBeneficiaryB1Store,
+            Persistence.BeneficiaryB1Store>();
+        services.AddScoped<ClientManagement.Application.BeneficiaryB1.BeneficiaryB1Service>();
         services.AddSingleton<ClientManagement.Application.ActionWrites.IActionWriteActivationGate,
             ClientManagement.Application.ActionWrites.ClosedActionWriteActivationGate>();
         services.AddDbContext<ApplicationDbContext>((provider, options) =>
