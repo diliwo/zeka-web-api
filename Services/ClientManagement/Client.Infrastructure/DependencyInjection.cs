@@ -31,6 +31,14 @@ public static class DependencyInjection
         services.AddSingleton<IHostedService>(_ => new RuntimeDatabaseIdentityValidator(
             runtimeConnection, "zeka_client_runtime"));
         services.AddScoped<TenantTransactionAttemptState>();
+        services.AddScoped<ClientManagement.Application.ActionWrites.ActionWriteAuthorityScope>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<Authorization.IActionAuthorityServiceCredential,
+            Authorization.UnprovisionedActionAuthorityCredential>();
+        services.AddHttpClient("ActionAuthority").ConfigurePrimaryHttpMessageHandler(() =>
+            new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
+        services.AddScoped<ClientManagement.Application.ActionWrites.IActionAuthorityReads,
+            Authorization.ActionAuthorityClient>();
         services.AddScoped<TenantCommandGuard>();
         services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
         services.TryAddScoped<PostCommitNotifications>();

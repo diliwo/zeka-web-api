@@ -15,11 +15,13 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using System.Reflection;
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
+using Zeka.PersistenceSecurity;
 using Xunit;
 using Zeka.Extensions.MultiTenancy.AspNetCore;
 
@@ -77,6 +79,385 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
     }
 
     [Fact]
+    [Trait("Issue", "81")]
+    public async Task Integrated_assignee_ineligible_after_dossier_preflight_writes_nothing()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            syntheticEligible: false);
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "ineligible", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        var denied = await Assert.ThrowsAsync<ActionWriteConflictException>(() => Send(provider, command));
+        Assert.Equal("INVALID_ASSIGNEE", denied.Code);
+        Assert.Equal(0, await Count<Interaction>(organisation));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Integrated_assignee_hidden_dossier_is_not_exposed_as_invalid_target()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var hidden = await Seed(Guid.NewGuid(), Guid.NewGuid());
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            syntheticEligible: false);
+        var command = new RecordInteractionCommand(hidden.ClientId, hidden.CaseId, DateTime.UtcNow,
+            "Synthetic action", "hidden-target", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider, command));
+        Assert.Equal(0, await Count<Interaction>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Integrated_assigned_target_must_match_final_locked_worker_link()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            targetScope: "Assigned");
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "wrong-target", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), Guid.NewGuid()));
+        var denied = await Assert.ThrowsAsync<ActionWriteConflictException>(() => Send(provider, command));
+        Assert.Equal("INVALID_ASSIGNEE", denied.Code);
+        Assert.Equal(0, await Count<Interaction>(organisation));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Integrated_assigned_editor_and_assigned_target_match_current_case()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            all: false, targetScope: "Assigned");
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "assigned-target", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        var result = await Send(provider, command);
+        Assert.NotNull(result.FollowUpActionId);
+        Assert.Equal(result, await Send(provider, command));
+        Assert.Equal(1, await Count<FollowUpAction>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task EditAll_exact_saved_action_retry_survives_case_closure_and_authority_loss_but_mismatch_does_not()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        var configured = true;
+        var targetActive = true;
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            zoneAvailable: () => configured, activeTarget: () => targetActive);
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic saved action", "saved-after-close", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        var first = await Send(provider, command);
+        await SetCaseEndDate(organisation, own.CaseId, DateTime.Today.AddDays(-1));
+        configured = false;
+        targetActive = false;
+        Assert.Equal(first, await Send(provider, command));
+        var conflict = await Assert.ThrowsAsync<ActionWriteConflictException>(() => Send(provider,
+            command with { Note = "Different saved note" }));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", conflict.Code);
+        Assert.Equal(1, await Count<Interaction>(organisation));
+        Assert.Equal(1, await Count<FollowUpAction>(organisation));
+        Assert.Equal(1, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Assigned_editor_cannot_read_saved_action_when_timezone_or_current_dossier_visibility_is_lost()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        var configured = true;
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            all: false, targetScope: "Assigned", zoneAvailable: () => configured);
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic assigned action", "assigned-saved-after-close", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        await Send(provider, command);
+        configured = false;
+        var unavailable = await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider, command));
+        Assert.Equal(AccessFailure.Unavailable, unavailable.Failure);
+        configured = true;
+        await SetCaseEndDate(organisation, own.CaseId, DateTime.Today.AddDays(-1));
+        await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider, command));
+        Assert.Equal(1, await Count<Interaction>(organisation));
+        Assert.Equal(1, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task PostgreSQL_action_predicates_use_Brussels_day_when_host_day_differs()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        // 23:30 UTC is tomorrow in Brussels in both winter and summer. A future instant
+        // deliberately makes the final real-PostgreSQL day check roll back after DML.
+        var fakeUtc = new DateTimeOffset(DateTime.SpecifyKind(
+            DateTime.Today.AddDays(10).AddHours(23).AddMinutes(30), DateTimeKind.Utc));
+        var localDay = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(fakeUtc,
+            TimeZoneInfo.FindSystemTimeZoneById("Europe/Brussels")).DateTime);
+        Assert.True(localDay > DateOnly.FromDateTime(DateTime.Today));
+        await SetCaseStartDate(organisation, own.CaseId, localDay.ToDateTime(TimeOnly.MinValue));
+        var evidence = new ActionAttemptEvidence();
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            all: false, targetScope: "Assigned", clock: new FixedTimeProvider(fakeUtc),
+            attemptEvidence: evidence);
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic Brussels-boundary action", "brussels-day", new FollowUpActionInput("Follow up",
+                localDay.AddDays(2), actor));
+        var denied = await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider, command));
+        Assert.Equal(AccessFailure.Unavailable, denied.Failure); // Real PG day differs; final guard rolls back.
+        Assert.Contains(evidence.Events, item => item.Category == TenantAttemptCommandCategory.EfWrite);
+        Assert.Contains(evidence.Events, item => item.Category == TenantAttemptCommandCategory.Rollback);
+        Assert.Equal(0, await Count<Interaction>(organisation));
+        Assert.Equal(0, await Count<FollowUpAction>(organisation));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Integrated_gate_keeps_complete_and_due_change_closed_without_writes()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            integratedGate: true);
+        await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider,
+            new ActionChangeCommand(1, 1, "closed-complete", ActionChangeKind.Complete)));
+        await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider,
+            new ActionChangeCommand(1, 1, "closed-due", ActionChangeKind.ChangeDueDate,
+                NewDueLocalDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)))));
+        Assert.Equal(0, await Count<ActionChange>(organisation));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Integrated_stale_observation_rolls_back_all_rows_after_dml()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            observationAge: TimeSpan.FromSeconds(3));
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "stale-target", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider, command));
+        Assert.Equal(0, await Count<Interaction>(organisation));
+        Assert.Equal(0, await Count<FollowUpAction>(organisation));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Integrated_client_lock_wait_makes_final_PostgreSQL_observation_stale()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true);
+        var locked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holder = HoldRowLock(organisation, "Clients", "Id", own.ClientId, locked, release);
+        await locked.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "stale-lock", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        var writing = Send(provider, command);
+        await Task.Delay(TimeSpan.FromMilliseconds(2250));
+        release.SetResult();
+        await holder;
+        var denied = await Assert.ThrowsAsync<TenantAccessException>(() => writing);
+        Assert.Equal(AccessFailure.Unavailable, denied.Failure);
+        Assert.Equal(0, await Count<Interaction>(organisation));
+        Assert.Equal(0, await Count<FollowUpAction>(organisation));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Integrated_combined_remote_authority_latency_is_measured_separately_from_database()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        var measured = new List<double>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, active) =>
+        {
+            if (instrument.Name == "action_authority.combined_remote_duration_ms")
+                active.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((_, value, _, _) =>
+        { lock (measured) measured.Add(value); });
+        listener.Start();
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            remoteDelay: TimeSpan.FromMilliseconds(35));
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "measured-remote", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        await Send(provider, command);
+        lock (measured)
+        {
+            Assert.Contains(measured, value => value >= 65 && value < 2000);
+            Console.WriteLine($"Issue81 combined caller+timezone+assignee remote latency: {measured[^1]:F1} ms");
+        }
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Integrated_preflight_case_closed_on_second_connection_before_write_is_rechecked()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            onEligibility: () => SetCaseEndDate(organisation, own.CaseId, DateTime.Today.AddDays(-1)));
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "closed-after-preflight", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        var conflict = await Assert.ThrowsAsync<ActionWriteConflictException>(() => Send(provider, command));
+        Assert.Equal("CONTEXT_REQUIRED", conflict.Code);
+        Assert.Equal(0, await Count<Interaction>(organisation));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Theory]
+    [Trait("Issue", "81")]
+    [InlineData("insert")]
+    [InlineData("delete")]
+    [InlineData("restore")]
+    [InlineData("worker-link")]
+    public async Task Integrated_second_connection_context_changes_after_observation_are_rechecked(string change)
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        int restoredCaseId = 0;
+        if (change == "restore")
+        {
+            restoredCaseId = await AddOverlappingCase(organisation, own);
+            await SetCaseSoftDelete(organisation, restoredCaseId, true);
+        }
+        async Task Mutate()
+        {
+            switch (change)
+            {
+                case "insert": await AddOverlappingCase(organisation, own); break;
+                case "delete": await SetCaseSoftDelete(organisation, own.CaseId, true); break;
+                case "restore": await SetCaseSoftDelete(organisation, restoredCaseId, false); break;
+                case "worker-link": await SetWorkerMembership(organisation, own.WorkerId, Guid.NewGuid()); break;
+            }
+        }
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            targetScope: "Assigned", onEligibility: Mutate);
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", $"changed-{change}", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        var denied = await Record.ExceptionAsync(() => Send(provider, command));
+        Assert.True(denied is ActionWriteConflictException or TenantAccessException);
+        Assert.Equal(0, await Count<Interaction>(organisation));
+        Assert.Equal(0, await Count<FollowUpAction>(organisation));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Target_revocation_after_observation_allows_one_residual_then_next_operation_denies()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        var targetActive = true;
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            activeTarget: () => targetActive,
+            onEligibility: () => { targetActive = false; return Task.CompletedTask; });
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "one-residual", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        Assert.NotNull((await Send(provider, command)).FollowUpActionId);
+        var denied = await Assert.ThrowsAsync<ActionWriteConflictException>(() => Send(provider,
+            command with { IdempotencyKey = "after-revocation" }));
+        Assert.Equal("INVALID_ASSIGNEE", denied.Code);
+        Assert.Equal(1, await Count<Interaction>(organisation));
+        Assert.Equal(1, await Count<FollowUpAction>(organisation));
+        Assert.Equal(1, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Eligibility_authority_outage_after_preflight_creates_no_rows()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<double>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, active) =>
+        {
+            if (instrument.Name == "action_authority.combined_remote_duration_ms")
+                active.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
+        {
+            foreach (var tag in tags)
+                if (tag.Key == "outcome" && Equals(tag.Value, "eligibility_failure"))
+                    failures.Enqueue(value);
+        });
+        listener.Start();
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            authorityUnavailable: true, remoteDelay: TimeSpan.FromMilliseconds(25));
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "authority-outage", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        var denied = await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider, command));
+        Assert.Equal(AccessFailure.Unavailable, denied.Failure);
+        Assert.Equal(0, await Count<Interaction>(organisation));
+        Assert.Equal(0, await Count<FollowUpAction>(organisation));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+        Assert.Contains(failures, elapsed => elapsed >= 45 && elapsed < 2000);
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Next_action_observes_timezone_configuration_loss_without_positive_cache()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        var configured = true;
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<double>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, active) =>
+        {
+            if (instrument.Name == "action_authority.combined_remote_duration_ms")
+                active.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
+        {
+            foreach (var tag in tags)
+                if (tag.Key == "outcome" && Equals(tag.Value, "timezone_failure"))
+                    failures.Enqueue(value);
+        });
+        listener.Start();
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            zoneAvailable: () => configured, remoteDelay: TimeSpan.FromMilliseconds(25));
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic action", "zone-first", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        Assert.NotNull((await Send(provider, command)).FollowUpActionId);
+        configured = false;
+        var denied = await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider,
+            command with { IdempotencyKey = "zone-after-change" }));
+        Assert.Equal(AccessFailure.Unavailable, denied.Failure);
+        Assert.Equal(1, await Count<Interaction>(organisation));
+        Assert.Equal(1, await Count<FollowUpAction>(organisation));
+        Assert.Equal(1, await Count<IdempotencyReceipt>(organisation));
+        Assert.Contains(failures, elapsed => elapsed >= 20 && elapsed < 2000);
+    }
+
+    [Fact]
     public void Production_api_exposes_no_interaction_or_follow_up_action_route()
     {
         var assembly = typeof(ClientManagement.API.Controllers.SupportsController).Assembly;
@@ -116,6 +497,35 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         Assert.Equal(expected, result);
         Assert.Equal(1, handlerCalls);
         Assert.Equal(2, executor.Attempts); // Mutation attempt, then guarded receipt read.
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Aged_ambiguous_action_commit_reconciles_receipt_without_second_freshness_guard()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var tenant = new Zeka.Extensions.MultiTenancy.Abstractions.TenantContextScope();
+        var authorityScope = new ActionWriteAuthorityScope();
+        var operation = new TenantOperation(new Access(organisation, actor, true),
+            new Identity(organisation, actor), tenant, tenant, authorityScope);
+        var expected = new RecordInteractionResult(47, 1, 73);
+        var executor = new UncertainOnceExecutor(authorityScope);
+        var behavior = new AuthorizationBehaviour<RecordInteractionCommand, RecordInteractionResult>(
+            operation, executor, new PostCommitNotifications(), new ReconciledReceiptStore(expected),
+            new ReceiptAuthority(), new SyntheticActionGate(), authorityScope);
+        var command = new RecordInteractionCommand(1, 1, DateTime.UtcNow, "Synthetic note", "uncertain-action",
+            new FollowUpActionInput("Follow up", DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        var handlerCalls = 0;
+        var result = await behavior.Handle(command, () =>
+        {
+            handlerCalls++;
+            return Task.FromResult(expected);
+        }, default);
+        Assert.Equal(expected, result);
+        Assert.Equal(1, handlerCalls);
+        Assert.Equal(3, executor.Attempts); // Closure-fenced receipt probe, mutation, reconciliation.
+        Assert.Equal(1, executor.GuardedAttempts);
+        Assert.Throws<TenantAccessException>(() => authorityScope.ValidateFinal(DateTimeOffset.UtcNow.AddSeconds(3)));
     }
 
     [Fact]
@@ -491,6 +901,21 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         await transaction.CommitAsync();
     }
 
+    private async Task SetCaseStartDate(Guid organisation, int caseId, DateTime startDate)
+    {
+        await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetTenant(connection, transaction, organisation);
+        await using var command = new NpgsqlCommand(
+            "UPDATE public.\"SocialCases\" SET \"StartDate\" = @start WHERE \"SchoolRegistrationId\" = @id",
+            connection, transaction);
+        command.Parameters.AddWithValue("start", startDate);
+        command.Parameters.AddWithValue("id", caseId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
+    }
+
     private async Task SetCaseNote(Guid organisation, int caseId, string note)
     {
         await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
@@ -521,7 +946,7 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         await transaction.CommitAsync();
     }
 
-    private async Task AddOverlappingCase(Guid organisation, (int ClientId, int CaseId, int WorkerId) existing)
+    private async Task<int> AddOverlappingCase(Guid organisation, (int ClientId, int CaseId, int WorkerId) existing)
     {
         await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
         await connection.OpenAsync();
@@ -532,8 +957,25 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         await seed.Database.UseTransactionAsync(transaction);
         var client = await seed.Clients.SingleAsync(x => x.Id == existing.ClientId);
         var worker = await seed.SocialWorkers.SingleAsync(x => x.Id == existing.WorkerId);
-        seed.SocialCases.Add(new SocialCase(client, DateTime.Today.AddDays(-2), worker, "overlap"));
+        var overlap = new SocialCase(client, DateTime.Today.AddDays(-2), worker, "overlap");
+        seed.SocialCases.Add(overlap);
         await seed.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return overlap.Id;
+    }
+
+    private async Task SetWorkerMembership(Guid organisation, int workerId, Guid membership)
+    {
+        await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetTenant(connection, transaction, organisation);
+        await using var command = new NpgsqlCommand(
+            "UPDATE public.\"SocialWorkers\" SET \"OrganisationMembershipId\" = @membership WHERE \"SocialWorkerId\" = @id",
+            connection, transaction);
+        command.Parameters.AddWithValue("membership", membership);
+        command.Parameters.AddWithValue("id", workerId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
         await transaction.CommitAsync();
     }
 
@@ -591,7 +1033,11 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
     }
 
     private ServiceProvider Provider(Guid organisation, Guid membership, bool syntheticActionGate = false,
-        bool all = true, NotificationProbe? notificationProbe = null)
+        bool all = true, NotificationProbe? notificationProbe = null, bool syntheticEligible = true,
+        string targetScope = "All", TimeSpan? observationAge = null, TimeSpan? remoteDelay = null,
+        Func<Task>? onEligibility = null, bool integratedGate = false, Func<bool>? activeTarget = null,
+        bool authorityUnavailable = false, Func<bool>? zoneAvailable = null,
+        TimeProvider? clock = null, ITenantAttemptOrderObserver? attemptEvidence = null)
     {
         var configuration = new ConfigurationManager();
         configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -603,16 +1049,33 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         services.AddSingleton<IConfiguration>(configuration);
         services.AddTenantContext();
         services.AddSingleton<ICurrentUserService, SyntheticCurrentUser>();
-        services.AddScoped<IOperationIdentity>(_ => new Identity(organisation));
+        services.AddScoped<IOperationIdentity>(_ => new Identity(organisation,
+            syntheticActionGate ? membership : null));
         services.AddApplication();
         ClientManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
+        if (clock is not null)
+        {
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton(clock);
+        }
+        if (attemptEvidence is not null)
+        {
+            services.RemoveAll<ITenantAttemptOrderObserver>();
+            services.AddSingleton(attemptEvidence);
+        }
         services.RemoveAll<IHostedService>();
         services.RemoveAll<ICurrentTenantAccess>();
         services.AddScoped<ICurrentTenantAccess>(_ => new Access(organisation, membership, all));
         if (syntheticActionGate)
         {
             services.RemoveAll<IActionWriteActivationGate>();
-            services.AddSingleton<IActionWriteActivationGate, SyntheticActionGate>();
+            services.AddSingleton<IActionWriteActivationGate>(integratedGate
+                ? new IntegratedActionGate() : new SyntheticActionGate());
+            services.RemoveAll<IActionAuthorityReads>();
+            services.AddScoped<IActionAuthorityReads>(sp => new SyntheticActionAuthority(
+                sp.GetRequiredService<ApplicationDbContext>(), syntheticEligible, targetScope,
+                observationAge ?? TimeSpan.Zero, remoteDelay ?? TimeSpan.Zero, onEligibility, activeTarget,
+                authorityUnavailable, zoneAvailable));
         }
         if (notificationProbe is not null)
         {
@@ -647,9 +1110,9 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         return await context.Set<T>().CountAsync();
     }
 
-    private sealed record Identity(Guid SelectedOrganisationId) : IOperationIdentity
+    private sealed record Identity(Guid SelectedOrganisationId, Guid? actorSubjectId = null) : IOperationIdentity
     {
-        public string SubjectId => "issue76-synthetic-actor";
+        public string SubjectId => actorSubjectId?.ToString("D") ?? "issue76-synthetic-actor";
     }
 
     private sealed class SyntheticCurrentUser : ICurrentUserService
@@ -672,10 +1135,69 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
     private sealed class SyntheticActionGate : IActionWriteActivationGate
     {
         public void DemandActionWrite() { }
+        // Issue #76 historical internal foundation proof exercised all kinds before #81 narrows activation.
+        public void DemandActionChange(ActionChangeKind kind) { }
+    }
+
+    private sealed class IntegratedActionGate : IActionWriteActivationGate
+    {
+        public void DemandActionWrite() { }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
+    private sealed class ActionAttemptEvidence : ITenantAttemptOrderObserver
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<TenantAttemptOrderEvent> events = new();
+        public TenantAttemptOrderEvent[] Events => events.ToArray();
+        public void Observe(TenantAttemptOrderEvent evidence) => events.Enqueue(evidence);
+    }
+
+    private sealed class SyntheticActionAuthority(ApplicationDbContext database, bool eligible, string targetScope,
+        TimeSpan observationAge, TimeSpan remoteDelay, Func<Task>? onEligibility, Func<bool>? activeTarget,
+        bool authorityUnavailable, Func<bool>? zoneAvailable)
+        : IActionAuthorityReads
+    {
+        public async Task<ActionTimeZone> TimeZoneAsync(Guid organisationId, Guid actorSubjectId,
+            Guid actorMembershipId, CancellationToken token)
+        {
+            Assert.Null(database.Database.CurrentTransaction); // No remote authority while holding a tenant transaction.
+            if (remoteDelay > TimeSpan.Zero) await Task.Delay(remoteDelay, token);
+            if (zoneAvailable?.Invoke() == false)
+                throw new TenantAccessException(AccessFailure.Unavailable);
+            return new ActionTimeZone("Europe/Brussels", 1,
+                DateTimeOffset.UtcNow - observationAge,
+                TimeZoneInfo.FindSystemTimeZoneById("Europe/Brussels"));
+        }
+
+        public async Task<AssigneeDecision?> EligibilityAsync(Guid organisationId, Guid actorSubjectId,
+            Guid actorMembershipId, Guid targetMembershipId, CancellationToken token)
+        {
+            Assert.Null(database.Database.CurrentTransaction);
+            if (remoteDelay > TimeSpan.Zero) await Task.Delay(remoteDelay, token);
+            if (authorityUnavailable) throw new TenantAccessException(AccessFailure.Unavailable);
+            var observed = DateTimeOffset.UtcNow - observationAge;
+            var activeAtObservation = activeTarget?.Invoke() ?? eligible;
+            if (onEligibility is not null) await onEligibility();
+            return activeAtObservation
+                ? new AssigneeDecision(targetScope, "synthetic", observed)
+                : null;
+        }
     }
 
     private sealed class ReconciledReceiptStore(RecordInteractionResult result) : IActionWriteStore
     {
+        public Task<RecordInteractionResult?> TrySavedResultAsync(RecordInteractionCommand request, Guid actor,
+            CancellationToken token) => Task.FromResult<RecordInteractionResult?>(null);
+        public Task<ActionChangeResult?> TrySavedResultAsync(ActionChangeCommand request, Guid actor,
+            CancellationToken token) => Task.FromResult<ActionChangeResult?>(null);
+        public Task<ActionPreflight> PreflightAsync(RecordInteractionCommand request, CancellationToken token) =>
+            Task.FromResult(new ActionPreflight(request.ClientId, request.SocialCaseId));
+        public Task<ActionPreflight> PreflightAsync(ActionChangeCommand request, CancellationToken token) =>
+            throw new NotSupportedException();
         public Task<RecordInteractionResult> RecordAsync(RecordInteractionCommand request, Guid actor,
             CancellationToken token) => throw new NotSupportedException();
         public Task<ActionChangeResult> ChangeAsync(ActionChangeCommand request, Guid actor,
@@ -686,15 +1208,33 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
             CancellationToken token) => throw new NotSupportedException();
     }
 
-    private sealed class UncertainOnceExecutor : ITenantTransactionExecutor
+    private sealed class ReceiptAuthority : IActionAuthorityReads
+    {
+        public Task<ActionTimeZone> TimeZoneAsync(Guid organisationId, Guid subjectId, Guid membershipId,
+            CancellationToken token) => Task.FromResult(new ActionTimeZone("Europe/Brussels", 1,
+                DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Europe/Brussels")));
+        public Task<AssigneeDecision?> EligibilityAsync(Guid organisationId, Guid subjectId,
+            Guid actorMembershipId, Guid targetMembershipId, CancellationToken token) =>
+            Task.FromResult<AssigneeDecision?>(new AssigneeDecision("All", "synthetic", DateTimeOffset.UtcNow));
+    }
+
+    private sealed class UncertainOnceExecutor(ActionWriteAuthorityScope? scope = null) : ITenantTransactionExecutor
     {
         public int Attempts { get; private set; }
+        public int GuardedAttempts { get; private set; }
         public async Task<T> ExecuteOrdinaryOnceAsync<T>(Func<CancellationToken, Task<T>> work,
             CancellationToken token)
         {
             Attempts++;
+            var guarded = scope?.ConsumeFinalGuard() == true;
+            if (guarded)
+            {
+                GuardedAttempts++;
+                scope!.ValidateFinal(DateTimeOffset.UtcNow);
+            }
             var result = await work(token);
-            if (Attempts == 1) throw new TenantCommitIndeterminateException(new Exception("synthetic"));
+            if (guarded || scope is null && Attempts == 1)
+                throw new TenantCommitIndeterminateException(new Exception("synthetic"));
             return result;
         }
         public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken token) =>
@@ -710,7 +1250,7 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         public Task ExecuteLifecycleAsync(Func<CancellationToken, Task> work, CancellationToken token) =>
             throw new NotSupportedException();
         public Task<T> ExecuteOnceAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken token) =>
-            throw new NotSupportedException();
+            scope is null ? throw new NotSupportedException() : work(token);
     }
 
     private sealed class NotificationProbe : INotificationHandler<SendSocialWorkerChangedNotificationCommand>

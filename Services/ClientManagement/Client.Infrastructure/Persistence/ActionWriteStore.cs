@@ -8,10 +8,61 @@ using ActionHistory = ClientManagement.Core.Entities.ActionChange;
 namespace ClientManagement.Infrastructure.Persistence;
 
 internal sealed class ActionWriteStore(ApplicationDbContext database, IClientParentLock locks,
-    IActionWriteActivationGate activation) : IActionWriteStore
+    IActionWriteActivationGate activation, ActionWriteAuthorityScope authority) : IActionWriteStore
 {
     private const string RecordOperation = "RecordInteraction.v1";
     private const string ChangeOperation = "ActionChange.v1";
+
+    public async Task<RecordInteractionResult?> TrySavedResultAsync(RecordInteractionCommand request,
+        Guid actorMembershipId, CancellationToken cancellationToken)
+    {
+        await DemandDossierAsync(request.ClientId, cancellationToken);
+        return await FindRecordReceiptAsync(request, actorMembershipId, cancellationToken);
+    }
+
+    public async Task<ActionChangeResult?> TrySavedResultAsync(ActionChangeCommand request,
+        Guid actorMembershipId, CancellationToken cancellationToken)
+    {
+        var clientId = await locks.ResolveActionClientAsync(request.ActionId, cancellationToken);
+        if (clientId is null) throw new TenantAccessException(AccessFailure.Denied);
+        await DemandDossierAsync(clientId.Value, cancellationToken);
+        return await FindChangeReceiptAsync(request, actorMembershipId, cancellationToken);
+    }
+
+    public async Task<ActionPreflight> PreflightAsync(RecordInteractionCommand request,
+        CancellationToken cancellationToken)
+    {
+        await DemandDossierAsync(request.ClientId, cancellationToken);
+        await DemandPreflightCaseAsync(request.ClientId, request.SocialCaseId, cancellationToken);
+        return new ActionPreflight(request.ClientId, request.SocialCaseId);
+    }
+
+    public async Task<ActionPreflight> PreflightAsync(ActionChangeCommand request,
+        CancellationToken cancellationToken)
+    {
+        var clientId = await locks.ResolveActionClientAsync(request.ActionId, cancellationToken);
+        if (clientId is null) throw new TenantAccessException(AccessFailure.Denied);
+        await DemandDossierAsync(clientId.Value, cancellationToken);
+        var action = await database.Visible<FollowUpAction>().AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == request.ActionId && a.ClientId == clientId.Value,
+                cancellationToken) ?? throw new TenantAccessException(AccessFailure.Denied);
+        await DemandPreflightCaseAsync(clientId.Value, action.SocialCaseId, cancellationToken);
+        return new ActionPreflight(clientId.Value, action.SocialCaseId);
+    }
+
+    private async Task DemandPreflightCaseAsync(int clientId, int expectedCaseId, CancellationToken token)
+    {
+        var day = authority.LocalDay?.ToDateTime(TimeOnly.MinValue)
+            ?? throw new TenantAccessException(AccessFailure.Unavailable);
+        var current = await database.SocialCases.AsNoTracking().Where(x => x.ClientId == clientId)
+            .Where(CurrentAssignment.ActiveOn(day)).Take(2).ToListAsync(token);
+        if (current.Count == 0) throw new ActionWriteConflictException("CONTEXT_REQUIRED");
+        if (current.Count != 1 || current[0].Id != expectedCaseId)
+            throw new ActionWriteConflictException("CONTEXT_CONFLICT");
+        if (!await database.SocialWorkers.AnyAsync(w => w.Id == current[0].SocialWorkerId
+                && !w.Softdelete && w.OrganisationMembershipId != Guid.Empty, token))
+            throw new ActionWriteConflictException("CONTEXT_CONFLICT");
+    }
 
     public async Task<RecordInteractionResult> RecordAsync(RecordInteractionCommand request, Guid actorMembershipId,
         CancellationToken cancellationToken)
@@ -34,6 +85,8 @@ internal sealed class ActionWriteStore(ApplicationDbContext database, IClientPar
         if (duplicate is not null) return duplicate;
 
         var current = await DemandCurrentCaseAsync(request.ClientId, request.SocialCaseId, cancellationToken);
+        if (request.Action is not null)
+            await DemandTargetAsync(current.SocialWorkerId, cancellationToken);
         var interaction = new Interaction
         {
             ClientId = request.ClientId,
@@ -98,7 +151,7 @@ internal sealed class ActionWriteStore(ApplicationDbContext database, IClientPar
     public async Task<ActionChangeResult> ChangeAsync(ActionChangeCommand request, Guid actorMembershipId,
         CancellationToken cancellationToken)
     {
-        activation.DemandActionWrite();
+        activation.DemandActionChange(request.Kind);
         ValidateKey(request.IdempotencyKey, actorMembershipId);
         if (request.ActionId <= 0 || request.ExpectedVersion <= 0 || !Enum.IsDefined(request.Kind)
             || request.Kind == ActionChangeKind.Complete
@@ -121,7 +174,9 @@ internal sealed class ActionWriteStore(ApplicationDbContext database, IClientPar
         var candidate = await database.FollowUpActions.AsNoTracking()
             .SingleOrDefaultAsync(a => a.Id == request.ActionId && a.ClientId == clientId.Value, cancellationToken)
             ?? throw new TenantAccessException(AccessFailure.Denied);
-        await DemandCurrentCaseAsync(clientId.Value, candidate.SocialCaseId, cancellationToken);
+        var currentCase = await DemandCurrentCaseAsync(clientId.Value, candidate.SocialCaseId, cancellationToken);
+        if (request.Kind == ActionChangeKind.Reassign)
+            await DemandTargetAsync(currentCase.SocialWorkerId, cancellationToken);
         await locks.LockActionAsync(request.ActionId, cancellationToken);
         var action = await database.FollowUpActions.SingleOrDefaultAsync(a => a.Id == request.ActionId
             && a.ClientId == clientId.Value, cancellationToken)
@@ -221,8 +276,9 @@ internal sealed class ActionWriteStore(ApplicationDbContext database, IClientPar
     private async Task<SocialCase> DemandCurrentCaseAsync(int clientId, int expectedCaseId,
         CancellationToken cancellationToken)
     {
+        var day = authority.LocalDay?.ToDateTime(TimeOnly.MinValue) ?? DateTime.Today;
         var cases = await database.SocialCases.AsNoTracking()
-            .Where(x => x.ClientId == clientId).Where(CurrentAssignment.ActiveOn(DateTime.Today))
+            .Where(x => x.ClientId == clientId).Where(CurrentAssignment.ActiveOn(day))
             .Take(2).ToListAsync(cancellationToken);
         if (cases.Count == 0) throw new ActionWriteConflictException("CONTEXT_REQUIRED");
         if (cases.Count != 1 || cases[0].Id != expectedCaseId)
@@ -232,7 +288,7 @@ internal sealed class ActionWriteStore(ApplicationDbContext database, IClientPar
         database.ChangeTracker.Clear();
         await DemandDossierAsync(clientId, cancellationToken);
         var current = await database.SocialCases.AsNoTracking()
-            .Where(x => x.ClientId == clientId).Where(CurrentAssignment.ActiveOn(DateTime.Today))
+            .Where(x => x.ClientId == clientId).Where(CurrentAssignment.ActiveOn(day))
             .Take(2).ToListAsync(cancellationToken);
         if (current.Count != 1 || current[0].Id != expectedCaseId)
             throw new ActionWriteConflictException("CONTEXT_CONFLICT");
@@ -241,6 +297,15 @@ internal sealed class ActionWriteStore(ApplicationDbContext database, IClientPar
             throw new ActionWriteConflictException("CONTEXT_CONFLICT");
         return current[0];
     }
+
+    private async Task DemandTargetAsync(int socialWorkerId, CancellationToken token)
+    {
+        var membership = await database.SocialWorkers.Where(w => w.Id == socialWorkerId && !w.Softdelete)
+            .Select(w => w.OrganisationMembershipId).SingleOrDefaultAsync(token);
+        if (membership == Guid.Empty) throw new ActionWriteConflictException("CONTEXT_CONFLICT");
+        authority.DemandTarget(membership);
+    }
+
 
     private static void ValidateKey(string key, Guid actorMembershipId)
     {
