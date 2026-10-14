@@ -34,7 +34,8 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
     private static readonly string[] OrdinaryOwnedTables =
     [
         "Assessments", "Clients", "MonitoringReports", "ProfessionalAssessments",
-        "ProfessionnalExperience", "SchoolRegistrations", "SocialCases", "SocialWorkers"
+        "ProfessionnalExperience", "SchoolRegistrations", "SocialCases", "SocialWorkers",
+        "Interactions", "FollowUpActions", "ActionChanges", "IdempotencyReceipts"
     ];
 
     private static readonly string[] GlobalReferenceTables =
@@ -69,6 +70,11 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
         var application = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             ExecuteActualAddClientCommand(providerA, organisation, 33));
         Assert.Equal("organisation_closure_fence_active", application.Message);
+        var oneShot = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            InTenant(providerA, organisation, async services =>
+                await services.GetRequiredService<ITenantTransactionExecutor>()
+                    .ExecuteOrdinaryOnceAsync(_ => Task.FromResult(true), default)));
+        Assert.Equal("organisation_closure_fence_active", oneShot.Message);
 
         var direct = await Assert.ThrowsAsync<PostgresException>(() => RuntimeSql(organisation,
             "UPDATE public.\"Clients\" SET \"ReferenceNumber\" = \"ReferenceNumber\""));
@@ -218,7 +224,9 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
         while (await reader.ReadAsync()) actual.Add(reader.GetString(0));
         Assert.Equal(new[]
         {
-            "trg_assessments_closure_fence", "trg_clients_closure_fence",
+            "trg_actionchanges_closure_fence", "trg_assessments_closure_fence",
+            "trg_clients_closure_fence", "trg_followupactions_closure_fence",
+            "trg_idempotencyreceipts_closure_fence", "trg_interactions_closure_fence",
             "trg_monitoringreports_closure_fence", "trg_professionalassessments_closure_fence",
             "trg_professionnalexperience_closure_fence", "trg_schoolregistrations_closure_fence",
             "trg_socialcases_closure_fence", "trg_socialworkers_closure_fence"
@@ -494,7 +502,9 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
             tenant,
             tenant);
         var behavior = new AuthorizationBehaviour<AddClientCommand, int>(operation,
-            scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>());
+            scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>(),
+            new PostCommitNotifications(),
+            scope.ServiceProvider.GetRequiredService<ClientManagement.Application.ActionWrites.IActionWriteStore>());
         return await behavior.Handle(new AddClientCommand(), async () =>
         {
             var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();

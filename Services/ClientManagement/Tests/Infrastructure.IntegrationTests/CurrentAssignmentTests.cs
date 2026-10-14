@@ -54,7 +54,7 @@ public sealed class CurrentAssignmentTests(TenantDatabase fixture) : IClassFixtu
         await using (var database = new ApplicationDbContext(collisionOptions, scope, operation))
         {
             var repository = new RepositoryManager(database);
-            var handler = new UpsertSupportCommand.UpsertSupportCommandHandler(repository, null!);
+            var handler = new UpsertSupportCommand.UpsertSupportCommandHandler(repository, null!, new LegacyIsolatedLock(database));
             var date = DateTime.Today.AddDays(-3);
             var matching = new UpsertSupportCommand { SupportId = supportId, ClientId = clientId,
                 SocialWorkerId = workerId, StartDate = date, Note = "updated" };
@@ -107,7 +107,7 @@ public sealed class CurrentAssignmentTests(TenantDatabase fixture) : IClassFixtu
         var operation = await Operation(ownOrganisation, membership, all, scope);
         await using (var database = new ApplicationDbContext(Options, scope, operation))
         {
-            var handler = new UpsertSupportCommand.UpsertSupportCommandHandler(new RepositoryManager(database), null!);
+            var handler = new UpsertSupportCommand.UpsertSupportCommandHandler(new RepositoryManager(database), null!, new LegacyIsolatedLock(database));
             foreach (var id in new[] { hiddenId, int.MaxValue })
             {
                 var command = new UpsertSupportCommand { SupportId = id, ClientId = hiddenClientId,
@@ -161,7 +161,7 @@ public sealed class CurrentAssignmentTests(TenantDatabase fixture) : IClassFixtu
             var command = new UpsertSupportCommand { SupportId = supportId, ClientId = clientId,
                 SocialWorkerId = workerId, StartDate = DateTime.Today.AddDays(-2), Note = "should-rollback" };
             await Assert.ThrowsAsync<DbUpdateException>(() =>
-                new UpsertSupportCommand.UpsertSupportCommandHandler(new RepositoryManager(database), null!)
+                new UpsertSupportCommand.UpsertSupportCommandHandler(new RepositoryManager(database), null!, new LegacyIsolatedLock(database))
                     .Handle(command, default));
         }
         finally
@@ -324,4 +324,18 @@ public sealed class CurrentAssignmentTests(TenantDatabase fixture) : IClassFixtu
             Task.FromResult(new TenantAccessDecision(TenantAccessOutcome.Authorized,
                 new(Organisation, Membership, new[] { All ? "Clients.EditAll" : "Clients.EditAssigned" }, "1", DateTimeOffset.UtcNow)));
     }
+}
+
+// Existing direct-handler regression tests use a provider but do not exercise the guarded
+// transaction pipeline. Lock-order and two-connection behavior have separate tests.
+internal sealed class LegacyIsolatedLock(ApplicationDbContext database) : IClientParentLock
+{
+    public Task<int?> ResolveCaseClientAsync(int socialCaseId, CancellationToken cancellationToken) =>
+        database.SocialCases.Where(x => x.Id == socialCaseId).Select(x => (int?)x.ClientId)
+            .SingleOrDefaultAsync(cancellationToken);
+    public Task<int?> ResolveActionClientAsync(int actionId, CancellationToken cancellationToken) =>
+        Task.FromResult<int?>(null);
+    public Task LockAsync(int clientId, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task LockWorkerAsync(int socialWorkerId, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task LockActionAsync(int actionId, CancellationToken cancellationToken) => Task.CompletedTask;
 }

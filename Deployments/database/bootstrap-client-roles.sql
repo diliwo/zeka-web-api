@@ -144,6 +144,12 @@ BEGIN
       ('TABLE', 'SELECT', ARRAY[
         'Languages','NatureOfContract','Profession','School','Training','TrainingField','TrainingType'
       ]),
+      ('TABLE', 'SELECT, INSERT', ARRAY[
+        'Interactions','ActionChanges','IdempotencyReceipts'
+      ]),
+      ('TABLE', 'SELECT, INSERT, UPDATE', ARRAY[
+        'FollowUpActions'
+      ]),
       ('SEQUENCE', 'SELECT, USAGE', ARRAY[
         'Assessments_AssessmentId_seq','Clients_Id_seq','MonitoringActions_ActionId_seq',
         'MonitoringReports_Id_seq','ProfessionalAssessments_Id_seq',
@@ -152,7 +158,9 @@ BEGIN
         'OrganisationExportFences_Id_seq','OrganisationExportFragments_Id_seq',
         'OrganisationExportInbox_Id_seq','OrganisationExportOutbox_Id_seq',
         'OrganisationClosureFences_Id_seq','OrganisationClosureInbox_Id_seq',
-        'OrganisationClosureOutbox_Id_seq'
+        'OrganisationClosureOutbox_Id_seq',
+        'Interactions_Id_seq','FollowUpActions_Id_seq',
+        'ActionChanges_Id_seq','IdempotencyReceipts_Id_seq'
       ])
     ) AS grants(object_kind, privileges, object_names)
   LOOP

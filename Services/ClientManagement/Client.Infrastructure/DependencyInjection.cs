@@ -33,6 +33,11 @@ public static class DependencyInjection
         services.AddScoped<TenantTransactionAttemptState>();
         services.AddScoped<TenantCommandGuard>();
         services.AddScoped<ITenantTransactionExecutor, TenantTransactionExecutor>();
+        services.TryAddScoped<PostCommitNotifications>();
+        services.AddScoped<IClientParentLock, ClientParentLock>();
+        services.AddScoped<ClientManagement.Application.ActionWrites.IActionWriteStore, Persistence.ActionWriteStore>();
+        services.AddSingleton<ClientManagement.Application.ActionWrites.IActionWriteActivationGate,
+            ClientManagement.Application.ActionWrites.ClosedActionWriteActivationGate>();
         services.AddDbContext<ApplicationDbContext>((provider, options) =>
             options.UseNpgsql(
                 runtimeConnection,

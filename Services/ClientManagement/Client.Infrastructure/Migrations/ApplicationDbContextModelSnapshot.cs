@@ -22,6 +22,86 @@ namespace ClientManagement.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ClientManagement.Core.Entities.ActionChange", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid>("ActorMembershipId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ChangedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("Created")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("FollowUpActionId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastModified")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastModifiedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("NewAssigneeMembershipId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("NewDueLocalDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("NewState")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("NewVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PriorAssigneeMembershipId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("PriorDueLocalDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("PriorState")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("PriorVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Softdelete")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FollowUpActionId", "OrganisationId");
+
+                    b.HasIndex("OrganisationId", "FollowUpActionId", "NewVersion")
+                        .IsUnique();
+
+                    b.ToTable("ActionChanges", (string)null);
+                });
+
             modelBuilder.Entity("ClientManagement.Core.Entities.Assessment", b =>
                 {
                     b.Property<int>("Id")
@@ -300,6 +380,226 @@ namespace ClientManagement.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Clients");
+                });
+
+            modelBuilder.Entity("ClientManagement.Core.Entities.FollowUpAction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid>("AssigneeMembershipId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Created")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("CreatorMembershipId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("DueLocalDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("InteractionId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastModified")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastModifiedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("SocialCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Softdelete")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "OrganisationId");
+
+                    b.HasIndex("InteractionId", "OrganisationId");
+
+                    b.HasIndex("SocialCaseId", "OrganisationId");
+
+                    b.HasIndex("OrganisationId", "ClientId", "State", "DueLocalDate");
+
+                    b.ToTable("FollowUpActions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_FollowUpActions_State", "\"State\" IN ('Open', 'Completed')");
+                        });
+                });
+
+            modelBuilder.Entity("ClientManagement.Core.Entities.IdempotencyReceipt", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ActionChangeId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ActorMembershipId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CanonicalMetadata")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ClientKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("Created")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("FollowUpActionId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("InteractionId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastModified")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastModifiedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ResultVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("RetainUntilUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("Softdelete")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("Id", "OrganisationId");
+
+                    b.HasIndex("ActionChangeId", "OrganisationId");
+
+                    b.HasIndex("ClientId", "OrganisationId");
+
+                    b.HasIndex("FollowUpActionId", "OrganisationId");
+
+                    b.HasIndex("InteractionId", "OrganisationId");
+
+                    b.HasIndex("OrganisationId", "ActorMembershipId", "Operation", "ClientKey")
+                        .IsUnique();
+
+                    b.ToTable("IdempotencyReceipts", (string)null);
+                });
+
+            modelBuilder.Entity("ClientManagement.Core.Entities.Interaction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid>("AuthorMembershipId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Created")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("LastModified")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastModifiedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid>("OrganisationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SocialCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Softdelete")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "OrganisationId");
+
+                    b.HasIndex("SocialCaseId", "OrganisationId");
+
+                    b.HasIndex("OrganisationId", "ClientId", "OccurredAtUtc");
+
+                    b.ToTable("Interactions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Interactions_Revision", "\"Revision\" = 1");
+                        });
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.Language", b =>
@@ -813,8 +1113,6 @@ namespace ClientManagement.Infrastructure.Migrations
                         .HasColumnType("timestamp without time zone");
 
                     b.HasKey("Id");
-
-                    b.HasAlternateKey("Id", "OrganisationId");
 
                     b.HasIndex("ClientId", "OrganisationId");
 
@@ -1506,6 +1804,16 @@ namespace ClientManagement.Infrastructure.Migrations
                     b.ToTable("OrganisationExportOutbox", (string)null);
                 });
 
+            modelBuilder.Entity("ClientManagement.Core.Entities.ActionChange", b =>
+                {
+                    b.HasOne("ClientManagement.Core.Entities.FollowUpAction", null)
+                        .WithMany()
+                        .HasForeignKey("FollowUpActionId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ClientManagement.Core.Entities.Assessment", b =>
                 {
                     b.HasOne("ClientManagement.Core.Entities.Client", "Client")
@@ -1514,6 +1822,75 @@ namespace ClientManagement.Infrastructure.Migrations
                         .HasPrincipalKey("Id", "OrganisationId");
 
                     b.Navigation("Client");
+                });
+
+            modelBuilder.Entity("ClientManagement.Core.Entities.FollowUpAction", b =>
+                {
+                    b.HasOne("ClientManagement.Core.Entities.Client", null)
+                        .WithMany()
+                        .HasForeignKey("ClientId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ClientManagement.Core.Entities.Interaction", null)
+                        .WithMany()
+                        .HasForeignKey("InteractionId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ClientManagement.Core.Entities.SocialCase", null)
+                        .WithMany()
+                        .HasForeignKey("SocialCaseId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ClientManagement.Core.Entities.IdempotencyReceipt", b =>
+                {
+                    b.HasOne("ClientManagement.Core.Entities.ActionChange", null)
+                        .WithMany()
+                        .HasForeignKey("ActionChangeId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ClientManagement.Core.Entities.Client", null)
+                        .WithMany()
+                        .HasForeignKey("ClientId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ClientManagement.Core.Entities.FollowUpAction", null)
+                        .WithMany()
+                        .HasForeignKey("FollowUpActionId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ClientManagement.Core.Entities.Interaction", null)
+                        .WithMany()
+                        .HasForeignKey("InteractionId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("ClientManagement.Core.Entities.Interaction", b =>
+                {
+                    b.HasOne("ClientManagement.Core.Entities.Client", null)
+                        .WithMany()
+                        .HasForeignKey("ClientId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ClientManagement.Core.Entities.SocialCase", null)
+                        .WithMany()
+                        .HasForeignKey("SocialCaseId", "OrganisationId")
+                        .HasPrincipalKey("Id", "OrganisationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ClientManagement.Core.Entities.MonitoringReport", b =>

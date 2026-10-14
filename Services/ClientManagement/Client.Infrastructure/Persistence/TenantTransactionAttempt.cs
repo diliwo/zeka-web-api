@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Runtime.ExceptionServices;
 using ClientManagement.Application.Common.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -72,9 +73,6 @@ internal sealed class TenantTransactionAttemptState(ITenantAttemptOrderObserver 
     }
 }
 
-public sealed class TenantCommitIndeterminateException(Exception innerException)
-    : Exception("The tenant transaction commit outcome is indeterminate and was not replayed.", innerException);
-
 internal sealed class TenantCommandGuard(TenantTransactionAttemptState attempt, ITenantContextAccessor tenant) : DbCommandInterceptor
 {
     private void Demand(DbCommand command, CommandEventData eventData, bool write)
@@ -107,8 +105,14 @@ internal sealed class TenantCommandGuard(TenantTransactionAttemptState attempt, 
 }
 
 internal sealed class TenantTransactionExecutor(ApplicationDbContext database, ITenantContextAccessor tenant,
-    TenantTransactionAttemptState attempt) : ITenantTransactionExecutor
+    TenantTransactionAttemptState attempt, PostCommitNotifications notifications) : ITenantTransactionExecutor
 {
+    private sealed class NonRetryableAttemptFailure(ExceptionDispatchInfo original)
+        : Exception("A non-replaying tenant attempt failed.")
+    {
+        public ExceptionDispatchInfo Original { get; } = original;
+    }
+
     public Task ExecuteAsync(Func<CancellationToken, Task> work, CancellationToken cancellationToken) =>
         ExecuteAsync(async token => { await work(token); return true; }, cancellationToken);
     public async Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
@@ -136,12 +140,41 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
     {
         var organisation = tenant.Current.OrganisationId.Value;
         if (organisation == Guid.Empty) throw new InvalidOperationException("Tenant context is not established.");
-        return ExecuteAttemptAsync(work, organisation, ordinaryActivity: false, cancellationToken);
+        return ExecuteOneAttemptAsync(work, organisation, ordinaryActivity: false, cancellationToken);
+    }
+    public Task<T> ExecuteOrdinaryOnceAsync<T>(Func<CancellationToken, Task<T>> work,
+        CancellationToken cancellationToken)
+    {
+        var organisation = tenant.Current.OrganisationId.Value;
+        if (organisation == Guid.Empty) throw new InvalidOperationException("Tenant context is not established.");
+        // Deliberately no EF execution strategy: a remote authority decision must never be replayed.
+        return ExecuteOneAttemptAsync(work, organisation, ordinaryActivity: true, cancellationToken);
+    }
+
+    private async Task<T> ExecuteOneAttemptAsync<T>(Func<CancellationToken, Task<T>> work,
+        Guid organisation, bool ordinaryActivity, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // EF requires the configured strategy around a user transaction. Hide every failure from its
+            // retry classifier, then rethrow the exact original: no body/authority decision can replay.
+            return await database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+            {
+                try { return await ExecuteAttemptAsync(work, organisation, ordinaryActivity, cancellationToken); }
+                catch (Exception error) { throw new NonRetryableAttemptFailure(ExceptionDispatchInfo.Capture(error)); }
+            });
+        }
+        catch (NonRetryableAttemptFailure failure)
+        {
+            failure.Original.Throw();
+            throw;
+        }
     }
     private async Task<T> ExecuteAttemptAsync<T>(Func<CancellationToken, Task<T>> work, Guid organisation,
         bool ordinaryActivity, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        notifications.Clear();
         IDbContextTransaction? transaction = null;
         try
         {
@@ -171,6 +204,7 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
                 }
                 catch { }
             database.ChangeTracker.Clear();
+            notifications.Clear();
             throw;
         }
         finally
