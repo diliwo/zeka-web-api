@@ -112,6 +112,10 @@ public sealed class ClosureGateRoutingTests
 
     private sealed class UnusedActionStore : IActionWriteStore
     {
+        public Task<RecordInteractionResult?> TrySavedResultAsync(RecordInteractionCommand request, Guid actor,
+            CancellationToken token) => throw new NotSupportedException();
+        public Task<ActionChangeResult?> TrySavedResultAsync(ActionChangeCommand request, Guid actor,
+            CancellationToken token) => throw new NotSupportedException();
         public Task<ActionPreflight> PreflightAsync(RecordInteractionCommand request,
             CancellationToken token) => throw new NotSupportedException();
         public Task<ActionPreflight> PreflightAsync(ActionChangeCommand request,

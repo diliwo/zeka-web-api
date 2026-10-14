@@ -13,6 +13,22 @@ internal sealed class ActionWriteStore(ApplicationDbContext database, IClientPar
     private const string RecordOperation = "RecordInteraction.v1";
     private const string ChangeOperation = "ActionChange.v1";
 
+    public async Task<RecordInteractionResult?> TrySavedResultAsync(RecordInteractionCommand request,
+        Guid actorMembershipId, CancellationToken cancellationToken)
+    {
+        await DemandDossierAsync(request.ClientId, cancellationToken);
+        return await FindRecordReceiptAsync(request, actorMembershipId, cancellationToken);
+    }
+
+    public async Task<ActionChangeResult?> TrySavedResultAsync(ActionChangeCommand request,
+        Guid actorMembershipId, CancellationToken cancellationToken)
+    {
+        var clientId = await locks.ResolveActionClientAsync(request.ActionId, cancellationToken);
+        if (clientId is null) throw new TenantAccessException(AccessFailure.Denied);
+        await DemandDossierAsync(clientId.Value, cancellationToken);
+        return await FindChangeReceiptAsync(request, actorMembershipId, cancellationToken);
+    }
+
     public async Task<ActionPreflight> PreflightAsync(RecordInteractionCommand request,
         CancellationToken cancellationToken)
     {

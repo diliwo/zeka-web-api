@@ -27,6 +27,12 @@ public sealed class ActionWriteConflictException(string code) : Exception(code)
 
 public interface IActionWriteStore
 {
+    // Receipt-only read under the ordinary closure fence. The store must establish current
+    // dossier visibility before looking up a receipt; it must not require a current case.
+    Task<RecordInteractionResult?> TrySavedResultAsync(RecordInteractionCommand request,
+        Guid actorMembershipId, CancellationToken cancellationToken);
+    Task<ActionChangeResult?> TrySavedResultAsync(ActionChangeCommand request,
+        Guid actorMembershipId, CancellationToken cancellationToken);
     Task<ActionPreflight> PreflightAsync(RecordInteractionCommand request, CancellationToken cancellationToken);
     Task<ActionPreflight> PreflightAsync(ActionChangeCommand request, CancellationToken cancellationToken);
     Task<RecordInteractionResult> RecordAsync(RecordInteractionCommand request, Guid actorMembershipId,

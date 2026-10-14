@@ -146,6 +146,55 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
 
     [Fact]
     [Trait("Issue", "81")]
+    public async Task EditAll_exact_saved_action_retry_survives_case_closure_and_authority_loss_but_mismatch_does_not()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        var configured = true;
+        var targetActive = true;
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            zoneAvailable: () => configured, activeTarget: () => targetActive);
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic saved action", "saved-after-close", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        var first = await Send(provider, command);
+        await SetCaseEndDate(organisation, own.CaseId, DateTime.Today.AddDays(-1));
+        configured = false;
+        targetActive = false;
+        Assert.Equal(first, await Send(provider, command));
+        var conflict = await Assert.ThrowsAsync<ActionWriteConflictException>(() => Send(provider,
+            command with { Note = "Different saved note" }));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", conflict.Code);
+        Assert.Equal(1, await Count<Interaction>(organisation));
+        Assert.Equal(1, await Count<FollowUpAction>(organisation));
+        Assert.Equal(1, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
+    public async Task Assigned_editor_cannot_read_saved_action_when_timezone_or_current_dossier_visibility_is_lost()
+    {
+        var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var own = await Seed(organisation, actor);
+        var configured = true;
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            all: false, targetScope: "Assigned", zoneAvailable: () => configured);
+        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+            "Synthetic assigned action", "assigned-saved-after-close", new FollowUpActionInput("Follow up",
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+        await Send(provider, command);
+        configured = false;
+        var unavailable = await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider, command));
+        Assert.Equal(AccessFailure.Unavailable, unavailable.Failure);
+        configured = true;
+        await SetCaseEndDate(organisation, own.CaseId, DateTime.Today.AddDays(-1));
+        await Assert.ThrowsAsync<TenantAccessException>(() => Send(provider, command));
+        Assert.Equal(1, await Count<Interaction>(organisation));
+        Assert.Equal(1, await Count<IdempotencyReceipt>(organisation));
+    }
+
+    [Fact]
+    [Trait("Issue", "81")]
     public async Task PostgreSQL_action_predicates_use_Brussels_day_when_host_day_differs()
     {
         var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
@@ -344,8 +393,22 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
     {
         var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
         var own = await Seed(organisation, actor);
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<double>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, active) =>
+        {
+            if (instrument.Name == "action_authority.combined_remote_duration_ms")
+                active.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
+        {
+            foreach (var tag in tags)
+                if (tag.Key == "outcome" && Equals(tag.Value, "eligibility_failure"))
+                    failures.Enqueue(value);
+        });
+        listener.Start();
         await using var provider = Provider(organisation, actor, syntheticActionGate: true,
-            authorityUnavailable: true);
+            authorityUnavailable: true, remoteDelay: TimeSpan.FromMilliseconds(25));
         var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
             "Synthetic action", "authority-outage", new FollowUpActionInput("Follow up",
                 DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
@@ -354,6 +417,7 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         Assert.Equal(0, await Count<Interaction>(organisation));
         Assert.Equal(0, await Count<FollowUpAction>(organisation));
         Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+        Assert.Contains(failures, elapsed => elapsed >= 45 && elapsed < 2000);
     }
 
     [Fact]
@@ -363,8 +427,22 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
         var own = await Seed(organisation, actor);
         var configured = true;
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<double>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, active) =>
+        {
+            if (instrument.Name == "action_authority.combined_remote_duration_ms")
+                active.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
+        {
+            foreach (var tag in tags)
+                if (tag.Key == "outcome" && Equals(tag.Value, "timezone_failure"))
+                    failures.Enqueue(value);
+        });
+        listener.Start();
         await using var provider = Provider(organisation, actor, syntheticActionGate: true,
-            zoneAvailable: () => configured);
+            zoneAvailable: () => configured, remoteDelay: TimeSpan.FromMilliseconds(25));
         var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
             "Synthetic action", "zone-first", new FollowUpActionInput("Follow up",
                 DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
@@ -376,6 +454,7 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         Assert.Equal(1, await Count<Interaction>(organisation));
         Assert.Equal(1, await Count<FollowUpAction>(organisation));
         Assert.Equal(1, await Count<IdempotencyReceipt>(organisation));
+        Assert.Contains(failures, elapsed => elapsed >= 20 && elapsed < 2000);
     }
 
     [Fact]
@@ -444,7 +523,7 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         }, default);
         Assert.Equal(expected, result);
         Assert.Equal(1, handlerCalls);
-        Assert.Equal(2, executor.Attempts);
+        Assert.Equal(3, executor.Attempts); // Closure-fenced receipt probe, mutation, reconciliation.
         Assert.Equal(1, executor.GuardedAttempts);
         Assert.Throws<TenantAccessException>(() => authorityScope.ValidateFinal(DateTimeOffset.UtcNow.AddSeconds(3)));
     }
@@ -1111,6 +1190,10 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
 
     private sealed class ReconciledReceiptStore(RecordInteractionResult result) : IActionWriteStore
     {
+        public Task<RecordInteractionResult?> TrySavedResultAsync(RecordInteractionCommand request, Guid actor,
+            CancellationToken token) => Task.FromResult<RecordInteractionResult?>(null);
+        public Task<ActionChangeResult?> TrySavedResultAsync(ActionChangeCommand request, Guid actor,
+            CancellationToken token) => Task.FromResult<ActionChangeResult?>(null);
         public Task<ActionPreflight> PreflightAsync(RecordInteractionCommand request, CancellationToken token) =>
             Task.FromResult(new ActionPreflight(request.ClientId, request.SocialCaseId));
         public Task<ActionPreflight> PreflightAsync(ActionChangeCommand request, CancellationToken token) =>
@@ -1143,13 +1226,15 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
             CancellationToken token)
         {
             Attempts++;
-            if (scope?.ConsumeFinalGuard() == true)
+            var guarded = scope?.ConsumeFinalGuard() == true;
+            if (guarded)
             {
                 GuardedAttempts++;
-                scope.ValidateFinal(DateTimeOffset.UtcNow);
+                scope!.ValidateFinal(DateTimeOffset.UtcNow);
             }
             var result = await work(token);
-            if (Attempts == 1) throw new TenantCommitIndeterminateException(new Exception("synthetic"));
+            if (guarded || scope is null && Attempts == 1)
+                throw new TenantCommitIndeterminateException(new Exception("synthetic"));
             return result;
         }
         public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken token) =>

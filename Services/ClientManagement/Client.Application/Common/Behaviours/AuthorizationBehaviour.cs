@@ -35,11 +35,28 @@ public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation 
             if (authority is null || actionScope is null) throw new TenantAccessException(AccessFailure.Unavailable);
             if (!Guid.TryParse(operation.SubjectId, out var actorSubjectId) || actorSubjectId == Guid.Empty)
                 throw new TenantAccessException(AccessFailure.Unavailable);
+            // An EditAll retry can return the exact saved result without consulting a now-closed
+            // case or a subsequently unavailable authority. The closure fence and current dossier
+            // visibility still apply. Assigned visibility needs the authoritative local day first.
+            if (!operation.AssignedOnly && await ReadSavedResultAsync() is TResponse savedAll)
+                return savedAll;
             var zoneStarted = Stopwatch.GetTimestamp();
-            var zone = await authority.TimeZoneAsync(operation.OrganisationId, actorSubjectId,
-                operation.MembershipId, cancellationToken);
+            ActionTimeZone zone;
+            try
+            {
+                zone = await authority.TimeZoneAsync(operation.OrganisationId, actorSubjectId,
+                    operation.MembershipId, cancellationToken);
+            }
+            catch
+            {
+                CombinedRemoteDuration.Record((combinedRemote + Stopwatch.GetElapsedTime(zoneStarted)).TotalMilliseconds,
+                    new KeyValuePair<string, object?>("outcome", "timezone_failure"));
+                throw;
+            }
             combinedRemote += Stopwatch.GetElapsedTime(zoneStarted);
             actionScope.SetTimeZone(zone, (clock ?? TimeProvider.System).GetUtcNow());
+            if (operation.AssignedOnly && await ReadSavedResultAsync() is TResponse savedAssigned)
+                return savedAssigned;
             var target = request switch
             {
                 RecordInteractionCommand record => record.Action!.AssigneeMembershipId,
@@ -61,8 +78,18 @@ public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation 
             }, cancellationToken);
             // Last remote call; the ordinary write attempt below cannot replay it.
             var assigneeStarted = Stopwatch.GetTimestamp();
-            var decision = await authority.EligibilityAsync(operation.OrganisationId, actorSubjectId,
-                operation.MembershipId, target, cancellationToken);
+            AssigneeDecision? decision;
+            try
+            {
+                decision = await authority.EligibilityAsync(operation.OrganisationId, actorSubjectId,
+                    operation.MembershipId, target, cancellationToken);
+            }
+            catch
+            {
+                CombinedRemoteDuration.Record((combinedRemote + Stopwatch.GetElapsedTime(assigneeStarted)).TotalMilliseconds,
+                    new KeyValuePair<string, object?>("outcome", "eligibility_failure"));
+                throw;
+            }
             combinedRemote += Stopwatch.GetElapsedTime(assigneeStarted);
             CombinedRemoteDuration.Record(combinedRemote.TotalMilliseconds,
                 new KeyValuePair<string, object?>("outcome", decision is null ? "ineligible" : "eligible"));
@@ -100,5 +127,14 @@ public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation 
             result = await transactions.ExecuteAsync(_ => next(), cancellationToken);
         await notifications.PublishAsync(cancellationToken);
         return result;
+
+        async Task<object?> ReadSavedResultAsync() => request switch
+        {
+            RecordInteractionCommand command => await transactions.ExecuteOrdinaryOnceAsync(
+                token => actionWrites.TrySavedResultAsync(command, operation.MembershipId, token), cancellationToken),
+            ActionChangeCommand command => await transactions.ExecuteOrdinaryOnceAsync(
+                token => actionWrites.TrySavedResultAsync(command, operation.MembershipId, token), cancellationToken),
+            _ => null
+        };
     }
 }
