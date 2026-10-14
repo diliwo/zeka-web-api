@@ -24,7 +24,11 @@ public sealed class ConfigureTimeZoneCore(
         var owner = await verifier.VerifyAsync(ownerJws, command);
         if (owner is null || !IsValidHumanRelease(human, owner, command.ArtifactSha256()))
             return ConfigureTimeZoneOutcome.Denied;
+        if (database.ChangeTracker.Entries().Any(entry => entry.State is
+                EntityState.Added or EntityState.Modified or EntityState.Deleted))
+            return ConfigureTimeZoneOutcome.Denied;
 
+        TimeZoneConfigurationAudit? attemptedReceipt = null;
         try
         {
             await using var transaction = await database.Database.BeginTransactionAsync(
@@ -53,22 +57,33 @@ public sealed class ConfigureTimeZoneCore(
                 """, cancellationToken);
             if (affected != 1) return ConfigureTimeZoneOutcome.Denied;
 
-            database.TimeZoneConfigurationAudits.Add(TimeZoneConfigurationAudit.Create(
+            attemptedReceipt = TimeZoneConfigurationAudit.Create(
                 command.ApprovalId, command.OrganisationId, command.ArtifactSha256(),
                 GetKeyId(ownerJws), human.ExecutorSubject,
                 human.ReviewerSubject, human.ReleaseEvidenceId, command.ChangeReference,
                 current.TimeZoneId, command.TimeZoneId, current.TimeZoneConfigVersion,
-                clock.GetUtcNow(), human.CorrelationId));
+                clock.GetUtcNow(), human.CorrelationId);
+            database.TimeZoneConfigurationAudits.Add(attemptedReceipt);
             await database.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return ConfigureTimeZoneOutcome.Committed;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        { throw; }
+        {
+            DetachAttemptedReceipt();
+            throw;
+        }
         catch (Exception)
         {
             // A commit can be indeterminate. Never retry a signed approval automatically.
+            DetachAttemptedReceipt();
             return ConfigureTimeZoneOutcome.Uncertain;
+        }
+
+        void DetachAttemptedReceipt()
+        {
+            if (attemptedReceipt is not null)
+                database.Entry(attemptedReceipt).State = EntityState.Detached;
         }
     }
 

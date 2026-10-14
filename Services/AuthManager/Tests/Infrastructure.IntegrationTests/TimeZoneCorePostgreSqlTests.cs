@@ -11,6 +11,7 @@ using AuthManager.Infrastructure.TimeZones;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -266,9 +267,47 @@ public sealed class TimeZoneCorePostgreSqlTests(PostgreSqlFixture fixture)
         { ExecutorSubject = "executor-test", ReviewerSubject = "executor-test" };
         (await new ConfigureTimeZoneCore(db, verifier, clock)
             .ExecuteAsync(jws, command, selfReviewed, default)).Should().Be(ConfigureTimeZoneOutcome.Denied);
+        db.Users.Add(User.Create("pending-context@example.invalid", "pending-context",
+            "Pending", "Context", Now));
+        var validHuman = human with
+        { ExecutorSubject = "executor-test", ReviewerSubject = "reviewer-test" };
+        (await new ConfigureTimeZoneCore(db, verifier, clock)
+            .ExecuteAsync(jws, command, validHuman, default)).Should().Be(ConfigureTimeZoneOutcome.Denied);
         (await db.TimeZoneConfigurationAudits.CountAsync()).Should().Be(0);
         (await db.Organisations.AsNoTracking().SingleAsync(x => x.Id == organisationId))
             .TimeZoneConfigVersion.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Failed_save_cannot_be_committed_by_a_later_approval_on_the_same_context()
+    {
+        var connection = await PreparedDatabaseAsync();
+        var failure = new FailOneSaveInterceptor();
+        await using var db = Context(connection, failure);
+        var organisationId = await AddActiveOrganisationAsync(db);
+        using var rsa = RSA.Create(2048);
+        var key = new RsaSecurityKey(rsa) { KeyId = "synthetic-test-key" };
+        var clock = new FixedClock(Now);
+        var verifier = new ConfigureTimeZoneApprovalVerifier(
+            new Dictionary<string, SecurityKey> { [key.KeyId] = key }, clock);
+        var core = new ConfigureTimeZoneCore(db, verifier, clock);
+        var first = new ConfigureTimeZoneCommand("test", organisationId,
+            "Europe/Brussels", 0, Guid.NewGuid(), "failed-save");
+        var second = new ConfigureTimeZoneCommand("test", organisationId,
+            "America/New_York", 0, Guid.NewGuid(), "successful-save");
+        var firstHuman = new HumanTimeZoneReleaseProof("executor-test", "reviewer-test",
+            "release-test", first.ArtifactSha256(), "correlation-test");
+        var secondHuman = firstHuman with { ReviewedArtifactSha256 = second.ArtifactSha256() };
+
+        failure.Arm();
+        (await core.ExecuteAsync(SignedApproval(first, key), first, firstHuman, default))
+            .Should().Be(ConfigureTimeZoneOutcome.Uncertain);
+        (await core.ExecuteAsync(SignedApproval(second, key), second, secondHuman, default))
+            .Should().Be(ConfigureTimeZoneOutcome.Committed);
+        (await core.ReconcileAsync(first, default)).Should().Be(ConfigureTimeZoneOutcome.Uncertain);
+        (await core.ReconcileAsync(second, default)).Should().Be(ConfigureTimeZoneOutcome.Committed);
+        (await db.TimeZoneConfigurationAudits.AsNoTracking().Select(x => x.ApprovalId).ToListAsync())
+            .Should().Equal(second.ApprovalId);
     }
 
     private async Task<string> PreparedDatabaseAsync()
@@ -336,8 +375,12 @@ public sealed class TimeZoneCorePostgreSqlTests(PostgreSqlFixture fixture)
         ((bool)(await command.ExecuteScalarAsync())!).Should().BeTrue(phase);
     }
 
-    private static AuthDbContext Context(string connection) => new(
-        new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connection).Options);
+    private static AuthDbContext Context(string connection, IInterceptor? interceptor = null)
+    {
+        var options = new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connection);
+        if (interceptor is not null) options.AddInterceptors(interceptor);
+        return new AuthDbContext(options.Options);
+    }
 
     private static async Task<Guid> AddActiveOrganisationAsync(AuthDbContext db)
     {
@@ -377,5 +420,22 @@ public sealed class TimeZoneCorePostgreSqlTests(PostgreSqlFixture fixture)
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private sealed class FailOneSaveInterceptor : SaveChangesInterceptor
+    {
+        private bool armed;
+        public void Arm() => armed = true;
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (armed)
+            {
+                armed = false;
+                throw new InvalidOperationException("Synthetic one-time save failure");
+            }
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 }
