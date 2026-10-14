@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using ClientManagement.Application.ActionWrites;
 using Zeka.Extensions.MultiTenancy.Abstractions;
 
 namespace ClientManagement.Application.Common.Authorization;
@@ -37,12 +38,15 @@ public sealed class RequiresTenantPermissionAttribute(string permission, string?
 }
 
 public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdentity identity,
-    ITenantContextInitializer initializer, ITenantContextAccessor context)
+    ITenantContextInitializer initializer, ITenantContextAccessor context, ActionWriteAuthorityScope? actionScope = null)
 {
     private bool established;
     public Guid MembershipId { get; private set; }
     public bool AssignedOnly { get; private set; }
     public string Permission { get; private set; } = string.Empty;
+    public string SubjectId => identity.SubjectId;
+    public Guid OrganisationId => identity.SelectedOrganisationId;
+    public DateOnly? ActionLocalDay => actionScope?.LocalDay;
 
     public async Task AuthorizeAsync(RequiresTenantPermissionAttribute policy, CancellationToken cancellationToken)
     {

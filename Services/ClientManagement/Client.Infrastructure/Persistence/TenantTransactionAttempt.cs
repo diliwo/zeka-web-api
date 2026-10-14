@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Runtime.ExceptionServices;
 using ClientManagement.Application.Common.Authorization;
+using ClientManagement.Application.ActionWrites;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -105,7 +106,8 @@ internal sealed class TenantCommandGuard(TenantTransactionAttemptState attempt, 
 }
 
 internal sealed class TenantTransactionExecutor(ApplicationDbContext database, ITenantContextAccessor tenant,
-    TenantTransactionAttemptState attempt, PostCommitNotifications notifications) : ITenantTransactionExecutor
+    TenantTransactionAttemptState attempt, PostCommitNotifications notifications,
+    ActionWriteAuthorityScope actionAuthority) : ITenantTransactionExecutor
 {
     private sealed class NonRetryableAttemptFailure(ExceptionDispatchInfo original)
         : Exception("A non-replaying tenant attempt failed.")
@@ -173,6 +175,9 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
     private async Task<T> ExecuteAttemptAsync<T>(Func<CancellationToken, Task<T>> work, Guid organisation,
         bool ordinaryActivity, CancellationToken cancellationToken)
     {
+        // Consumed for one mutation attempt only. Receipt-only ambiguous-commit reconciliation is a
+        // separate read attempt in the same DI scope and must not recheck an aged authority decision.
+        var finalGuard = actionAuthority.ConsumeFinalGuard();
         cancellationToken.ThrowIfCancellationRequested();
         notifications.Clear();
         IDbContextTransaction? transaction = null;
@@ -189,6 +194,18 @@ internal sealed class TenantTransactionExecutor(ApplicationDbContext database, I
                 await DemandOrdinaryActivityAllowedAsync(
                     database.Database.GetDbConnection(), dbTransaction, organisation, cancellationToken);
             var result = await work(cancellationToken);
+            if (finalGuard)
+            {
+                // This is deliberately the last SQL in the write transaction, after all handler DML.
+                // PostgreSQL time, not the application clock, decides freshness after any lock wait.
+                await using var finalClock = database.Database.GetDbConnection().CreateCommand();
+                finalClock.Transaction = dbTransaction;
+                finalClock.CommandText = "SELECT pg_catalog.clock_timestamp()";
+                var instant = await finalClock.ExecuteScalarAsync(cancellationToken);
+                if (instant is not DateTime postgresUtc)
+                    throw new TenantAccessException(AccessFailure.Unavailable);
+                actionAuthority.ValidateFinal(new DateTimeOffset(DateTime.SpecifyKind(postgresUtc, DateTimeKind.Utc)));
+            }
             try { await transaction.CommitAsync(cancellationToken); }
             catch (Exception exception) { throw new TenantCommitIndeterminateException(exception); }
             attempt.Record(TenantAttemptCommandCategory.Commit);

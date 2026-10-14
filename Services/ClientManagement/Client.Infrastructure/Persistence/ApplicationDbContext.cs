@@ -55,7 +55,8 @@ public class ApplicationDbContext : TenantDbContext
 
     public IQueryable<Client> AssignedClients(Guid membership)
     {
-        var active = SocialCases.Where(CurrentAssignment.ActiveOn(DateTime.Today));
+        var active = SocialCases.Where(CurrentAssignment.ActiveOn(
+            operation?.ActionLocalDay?.ToDateTime(TimeOnly.MinValue) ?? DateTime.Today));
         return Clients.Where(c => !c.Softdelete
             && membership != Guid.Empty
             && active.Count(s => s.ClientId == c.Id) == 1

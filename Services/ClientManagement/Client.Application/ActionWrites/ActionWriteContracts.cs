@@ -27,6 +27,8 @@ public sealed class ActionWriteConflictException(string code) : Exception(code)
 
 public interface IActionWriteStore
 {
+    Task<ActionPreflight> PreflightAsync(RecordInteractionCommand request, CancellationToken cancellationToken);
+    Task<ActionPreflight> PreflightAsync(ActionChangeCommand request, CancellationToken cancellationToken);
     Task<RecordInteractionResult> RecordAsync(RecordInteractionCommand request, Guid actorMembershipId,
         CancellationToken cancellationToken);
     Task<ActionChangeResult> ChangeAsync(ActionChangeCommand request, Guid actorMembershipId,
@@ -41,6 +43,12 @@ public interface IActionWriteStore
 public interface IActionWriteActivationGate
 {
     void DemandActionWrite();
+    void DemandActionChange(ActionChangeKind kind)
+    {
+        if (kind != ActionChangeKind.Reassign)
+            throw new TenantAccessException(AccessFailure.Unavailable);
+        DemandActionWrite();
+    }
 }
 
 public sealed class ClosedActionWriteActivationGate : IActionWriteActivationGate
@@ -63,7 +71,7 @@ public sealed class ActionChangeHandler(IActionWriteStore store, TenantOperation
 {
     public Task<ActionChangeResult> Handle(ActionChangeCommand request, CancellationToken cancellationToken)
     {
-        gate.DemandActionWrite();
+        gate.DemandActionChange(request.Kind);
         return store.ChangeAsync(request, operation.MembershipId, cancellationToken);
     }
 }
