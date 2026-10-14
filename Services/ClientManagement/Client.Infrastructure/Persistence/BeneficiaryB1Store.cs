@@ -15,8 +15,8 @@ internal sealed class BeneficiaryB1Store(ApplicationDbContext database, IClientP
     private const string RecordOperation = "RecordInteraction.v1";
     private const string AudienceText = "Current authorised dossier readers may read this interaction history.";
 
-    public async Task<BeneficiaryContextV1> ContextAsync(int beneficiaryId, bool canEdit,
-        CancellationToken token)
+    public async Task<BeneficiaryContextV1> ContextAsync(int beneficiaryId, bool canEditAll,
+        bool canEditAssigned, Guid actorMembershipId, CancellationToken token)
     {
         var client = await DemandDossierAsync(beneficiaryId, token);
         var day = DateTime.Today;
@@ -29,9 +29,12 @@ internal sealed class BeneficiaryB1Store(ApplicationDbContext database, IClientP
             _ => await database.SocialWorkers.AnyAsync(w => w.Id == cases[0].SocialWorkerId
                 && !w.Softdelete && w.OrganisationMembershipId != Guid.Empty, token) ? "One" : "Invalid"
         };
+        var canEditDossier = canEditAll || canEditAssigned
+            && await database.AssignedClients(actorMembershipId).AnyAsync(c => c.Id == beneficiaryId, token);
         return new BeneficiaryContextV1(1, beneficiaryId,
             string.Join(' ', new[] { client.FirstName, client.LastName }.Where(x => !string.IsNullOrWhiteSpace(x))),
-            state, new AudienceV1("CurrentAuthorisedDossierReaders", AudienceText), canEdit && state == "One");
+            state, new AudienceV1("CurrentAuthorisedDossierReaders", AudienceText),
+            canEditDossier && state == "One");
     }
 
     public async Task<InteractionPageV1> RecentAsync(int beneficiaryId, int limit,

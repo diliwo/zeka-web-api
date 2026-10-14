@@ -43,7 +43,8 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
     private bool established;
     public Guid MembershipId { get; private set; }
     public bool AssignedOnly { get; private set; }
-    public bool CanEditDossier { get; private set; }
+    public bool CanEditAll { get; private set; }
+    public bool CanEditAssigned { get; private set; }
     public string Permission { get; private set; } = string.Empty;
     public string SubjectId => identity.SubjectId;
     public Guid OrganisationId => identity.SelectedOrganisationId;
@@ -100,9 +101,8 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
             MembershipId = grant.OrganisationMembershipId;
             Permission = allPermission;
             AssignedOnly = !all;
-            CanEditDossier = all
-                ? permissions.Contains("Clients.EditAll")
-                : permissions.Contains("Clients.EditAssigned");
+            CanEditAll = permissions.Contains("Clients.EditAll");
+            CanEditAssigned = permissions.Contains("Clients.EditAssigned");
             established = true;
         }
     }

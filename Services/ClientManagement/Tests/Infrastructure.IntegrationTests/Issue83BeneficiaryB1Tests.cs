@@ -126,6 +126,36 @@ public sealed class Issue83BeneficiaryB1Tests(PostgreSqlClientRuntimeDatabase da
     }
 
     [Fact]
+    public async Task Broad_view_and_assigned_edit_report_only_current_assigned_record_capability()
+    {
+        var org = Guid.NewGuid(); var member = Guid.NewGuid();
+        var assigned = await Seed(org, member);
+        var unassigned = await Seed(org, Guid.NewGuid());
+        var access = new Access();
+        access.Grant("dual", org, member, "Clients.ViewAll", "Clients.EditAssigned");
+        access.Grant("view-only", org, member, "Clients.ViewAll");
+        await using var app = await Host(access);
+        using var dual = Client(app, org, "dual");
+        using var viewer = Client(app, org, "view-only");
+
+        var ownContext = await Json(await dual.GetAsync($"/api/v1/beneficiaries/{assigned.ClientId}/context"));
+        var otherContext = await Json(await dual.GetAsync($"/api/v1/beneficiaries/{unassigned.ClientId}/context"));
+        var viewOnlyContext = await Json(await viewer.GetAsync($"/api/v1/beneficiaries/{assigned.ClientId}/context"));
+        Assert.True(ownContext.GetProperty("canRecordInteraction").GetBoolean());
+        Assert.False(otherContext.GetProperty("canRecordInteraction").GetBoolean());
+        Assert.False(viewOnlyContext.GetProperty("canRecordInteraction").GetBoolean());
+
+        Assert.Equal(HttpStatusCode.Created, (await Post(dual, assigned.ClientId, UtcMilliseconds(),
+            "Synthetic assigned edit", Guid.NewGuid().ToString("D"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Post(dual, unassigned.ClientId, UtcMilliseconds(),
+            "Synthetic unassigned denial", Guid.NewGuid().ToString("D"))).StatusCode);
+        await EndCase(org, assigned.CaseId);
+        var revokedContext = await Json(await dual.GetAsync($"/api/v1/beneficiaries/{assigned.ClientId}/context"));
+        Assert.False(revokedContext.GetProperty("canRecordInteraction").GetBoolean());
+        Assert.Equal(1, await Count<Interaction>(org));
+    }
+
+    [Fact]
     public async Task New_write_requires_unique_current_case_and_leaves_no_partial_rows()
     {
         var org = Guid.NewGuid(); var member = Guid.NewGuid(); var own = await Seed(org, member);
@@ -181,6 +211,27 @@ public sealed class Issue83BeneficiaryB1Tests(PostgreSqlClientRuntimeDatabase da
             new string('x', 8200), Guid.NewGuid().ToString("D"));
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, tooLarge.StatusCode);
         Assert.Equal(0, await Count<Interaction>(org));
+    }
+
+    [Fact]
+    public async Task Escaped_NUL_note_is_rejected_with_redacted_400_before_PostgreSQL_write()
+    {
+        var org = Guid.NewGuid(); var member = Guid.NewGuid(); var own = await Seed(org, member);
+        var access = new Access(); access.Grant("editor", org, member, "Clients.EditAll");
+        await using var app = await Host(access);
+        using var client = Client(app, org, "editor");
+        var note = "before\0after";
+        Assert.Contains("\\u0000", JsonSerializer.Serialize(note), StringComparison.Ordinal);
+        var response = await Post(client, own.ClientId, UtcMilliseconds(), note, Guid.NewGuid().ToString("D"));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var body = await response.Content.ReadAsStringAsync();
+        using (var problem = JsonDocument.Parse(body))
+            Assert.Equal(400, problem.RootElement.GetProperty("status").GetInt32());
+        Assert.DoesNotContain("before", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Postgres", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, await Count<Interaction>(org));
+        Assert.Equal(0, await Count<IdempotencyReceipt>(org));
     }
 
     [Fact]
@@ -275,6 +326,8 @@ public sealed class Issue83BeneficiaryB1Tests(PostgreSqlClientRuntimeDatabase da
         using var client = Client(app, org, "editor");
         await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
         await connection.OpenAsync();
+        await using var observer = new NpgsqlConnection(database.AdministratorConnectionString);
+        await observer.OpenAsync();
         await using var tx = await connection.BeginTransactionAsync();
         await SetTenant(connection, tx, org);
         await using (var barrier = new NpgsqlCommand(
@@ -286,8 +339,7 @@ public sealed class Issue83BeneficiaryB1Tests(PostgreSqlClientRuntimeDatabase da
         }
         var pending = Post(client, own.ClientId, UtcMilliseconds(),
             "Synthetic concurrent closure", Guid.NewGuid().ToString("D"));
-        await Task.Delay(150);
-        Assert.False(pending.IsCompleted); // Ordinary B1 attempt is waiting at the same advisory fence.
+        await WaitForAdvisoryWaiter(observer, connection.ProcessID, pending);
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(connection).Options;
         await using (var context = new ApplicationDbContext(options, TenantEnforcementTests.Scope(org)))
         {
@@ -562,6 +614,39 @@ public sealed class Issue83BeneficiaryB1Tests(PostgreSqlClientRuntimeDatabase da
             .UseNpgsql(database.AdministratorConnectionString).Options;
         await using var context = new ApplicationDbContext(options, TenantEnforcementTests.Scope(org));
         return await context.Set<T>().CountAsync();
+    }
+
+    private static async Task WaitForAdvisoryWaiter(NpgsqlConnection observer, int holderPid,
+        Task<HttpResponseMessage> pending)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await using var command = new NpgsqlCommand("""
+                SELECT waiter.pid
+                FROM pg_catalog.pg_locks AS holder
+                JOIN pg_catalog.pg_locks AS waiter
+                  ON waiter.locktype = holder.locktype
+                  AND waiter.database IS NOT DISTINCT FROM holder.database
+                  AND waiter.classid = holder.classid
+                  AND waiter.objid = holder.objid
+                  AND waiter.objsubid = holder.objsubid
+                JOIN pg_catalog.pg_stat_activity AS activity ON activity.pid = waiter.pid
+                WHERE holder.pid = @holder_pid AND holder.locktype = 'advisory' AND holder.granted
+                  AND waiter.pid <> holder.pid AND NOT waiter.granted
+                  AND activity.wait_event_type = 'Lock' AND activity.wait_event = 'advisory'
+                LIMIT 1
+                """, observer);
+            command.Parameters.AddWithValue("holder_pid", holderPid);
+            if (await command.ExecuteScalarAsync() is int)
+            {
+                Assert.False(pending.IsCompleted);
+                return;
+            }
+            Assert.False(pending.IsCompleted); // A completed request never reached the observed lock wait.
+            await Task.Delay(25);
+        }
+        throw new TimeoutException("B1 write did not reach the PostgreSQL advisory-lock wait.");
     }
 
     private static async Task SetTenant(NpgsqlConnection connection, NpgsqlTransaction tx, Guid org)

@@ -27,7 +27,8 @@ public sealed class BeneficiaryWireException(string code) : Exception(code)
 
 public interface IBeneficiaryB1Store
 {
-    Task<BeneficiaryContextV1> ContextAsync(int beneficiaryId, bool canEdit, CancellationToken token);
+    Task<BeneficiaryContextV1> ContextAsync(int beneficiaryId, bool canEditAll,
+        bool canEditAssigned, Guid actorMembershipId, CancellationToken token);
     Task<InteractionPageV1> RecentAsync(int beneficiaryId, int limit, string? cursor, CancellationToken token);
     Task<InteractionV1> DirectAsync(int beneficiaryId, int interactionId, CancellationToken token);
     Task<RecordInteractionV1> RecordAsync(int beneficiaryId, DateTime occurredAtUtc,
@@ -47,7 +48,7 @@ public sealed class BeneficiaryB1Service(IBeneficiaryB1Store store, TenantOperat
     {
         await operation.AuthorizeBeneficiaryReadAsync(token);
         return await transactions.ExecuteOnceAsync(t => store.ContextAsync(beneficiaryId,
-            operation.CanEditDossier, t), token);
+            operation.CanEditAll, operation.CanEditAssigned, operation.MembershipId, t), token);
     }
 
     public async Task<InteractionPageV1> RecentAsync(int beneficiaryId, int limit,
@@ -93,7 +94,7 @@ public sealed class BeneficiaryB1Service(IBeneficiaryB1Store store, TenantOperat
         string idempotencyKey, DateTimeOffset now)
     {
         if (beneficiaryId <= 0 || note is null || note.Length is < 1 or > 1000
-            || string.IsNullOrWhiteSpace(note) || !WellFormedUtf16(note)
+            || string.IsNullOrWhiteSpace(note) || note.Contains('\0') || !WellFormedUtf16(note)
             || occurredAtUtc.Kind != DateTimeKind.Utc
             || occurredAtUtc.Ticks % TimeSpan.TicksPerMillisecond != 0
             || occurredAtUtc > now.UtcDateTime.AddMinutes(5)
