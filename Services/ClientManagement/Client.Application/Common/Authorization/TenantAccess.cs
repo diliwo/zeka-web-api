@@ -43,17 +43,31 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
     private bool established;
     public Guid MembershipId { get; private set; }
     public bool AssignedOnly { get; private set; }
+    public bool CanEditAll { get; private set; }
+    public bool CanEditAssigned { get; private set; }
     public string Permission { get; private set; } = string.Empty;
     public string SubjectId => identity.SubjectId;
     public Guid OrganisationId => identity.SelectedOrganisationId;
     public DateOnly? ActionLocalDay => actionScope?.LocalDay;
 
-    public async Task AuthorizeAsync(RequiresTenantPermissionAttribute policy, CancellationToken cancellationToken)
+    public Task AuthorizeAsync(RequiresTenantPermissionAttribute policy, CancellationToken cancellationToken) =>
+        AuthorizeCoreAsync(policy.Permission, policy.AssignedAlternative, null, null, cancellationToken);
+
+    // B1 read-only surface accepts either current View or Edit at the same dossier scope.
+    // Legacy request policies retain their exact two-code semantics.
+    public Task AuthorizeBeneficiaryReadAsync(CancellationToken cancellationToken) =>
+        AuthorizeCoreAsync("Clients.ViewAll", "Clients.ViewAssigned", "Clients.EditAll",
+            "Clients.EditAssigned", cancellationToken);
+
+    private async Task AuthorizeCoreAsync(string allPermission, string? assignedPermission,
+        string? secondAllPermission, string? secondAssignedPermission, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(identity.SubjectId))
             throw new TenantAccessException(AccessFailure.Unauthenticated);
-        if (identity.SelectedOrganisationId == Guid.Empty || !PermissionCatalogue.IsKnown(policy.Permission)
-            || (policy.AssignedAlternative is not null && !PermissionCatalogue.IsKnown(policy.AssignedAlternative)))
+        if (identity.SelectedOrganisationId == Guid.Empty || !PermissionCatalogue.IsKnown(allPermission)
+            || (assignedPermission is not null && !PermissionCatalogue.IsKnown(assignedPermission))
+            || (secondAllPermission is not null && !PermissionCatalogue.IsKnown(secondAllPermission))
+            || (secondAssignedPermission is not null && !PermissionCatalogue.IsKnown(secondAssignedPermission)))
             throw new TenantAccessException(AccessFailure.Denied);
 
         var decision = await access.ResolveAsync(identity.SubjectId, identity.SelectedOrganisationId, cancellationToken);
@@ -68,23 +82,27 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
             || grant.EffectivePermissionCodes.Any(permission => !PermissionCatalogue.IsKnown(permission)))
             throw new TenantAccessException(AccessFailure.Denied);
         var permissions = grant.EffectivePermissionCodes.ToFrozenSet(StringComparer.Ordinal);
-        var all = permissions.Contains(policy.Permission);
-        if (!all && (policy.AssignedAlternative is null || !permissions.Contains(policy.AssignedAlternative)))
+        var all = permissions.Contains(allPermission)
+            || secondAllPermission is not null && permissions.Contains(secondAllPermission);
+        if (!all && (assignedPermission is null || !permissions.Contains(assignedPermission))
+            && (secondAssignedPermission is null || !permissions.Contains(secondAssignedPermission)))
             throw new TenantAccessException(AccessFailure.Denied);
 
         if (established)
         {
             // A scope is one operation. Re-entry must not change either identity or resource permissions.
             if (context.Current.OrganisationId.Value != grant.OrganisationId || context.Current.SubjectId != identity.SubjectId
-                || MembershipId != grant.OrganisationMembershipId || Permission != policy.Permission || AssignedOnly != !all)
+                || MembershipId != grant.OrganisationMembershipId || Permission != allPermission || AssignedOnly != !all)
                 throw new TenantAccessException(AccessFailure.Denied);
         }
         else
         {
             initializer.Establish(new TenantContext(new TenantId(grant.OrganisationId), identity.SubjectId));
             MembershipId = grant.OrganisationMembershipId;
-            Permission = policy.Permission;
+            Permission = allPermission;
             AssignedOnly = !all;
+            CanEditAll = permissions.Contains("Clients.EditAll");
+            CanEditAssigned = permissions.Contains("Clients.EditAssigned");
             established = true;
         }
     }
