@@ -45,7 +45,7 @@ namespace ClientManagement.API.Controllers
         {
             var vm = await Mediator.Send(new GetClientDetailQuery() { ClientId = clientid });
 
-            return Ok(vm);
+            return vm is null ? NotFound() : Ok(vm);
         }
 
         [HttpPost]
