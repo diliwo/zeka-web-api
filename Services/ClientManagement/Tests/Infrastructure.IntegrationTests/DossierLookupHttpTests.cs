@@ -29,7 +29,7 @@ namespace Infrastructure.IntegrationTests;
 
 // Real controller, request identity, MediatR policy, dossier predicate and PostgreSQL runtime/RLS.
 // Only authentication and the remote current-access decision use synthetic test adapters.
-public sealed class DossierLookupHttpTests(PostgreSqlClientRuntimeDatabase database)
+public sealed partial class DossierLookupHttpTests(PostgreSqlClientRuntimeDatabase database)
     : IClassFixture<PostgreSqlClientRuntimeDatabase>
 {
     private static int sequence = 9100;
@@ -150,10 +150,11 @@ public sealed class DossierLookupHttpTests(PostgreSqlClientRuntimeDatabase datab
             .OrderBy(x => x.Name).ToDictionary(x => x.Name, x => x.Value.Clone()));
     }
 
-    private async Task<WebApplication> Host(Access access)
+    private async Task<WebApplication> Host(Access access, ILoggerProvider? logs = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.Logging.ClearProviders();
+        if (logs is not null) builder.Logging.AddProvider(logs);
         builder.WebHost.UseTestServer();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -173,6 +174,9 @@ public sealed class DossierLookupHttpTests(PostgreSqlClientRuntimeDatabase datab
             .AddScheme<AuthenticationSchemeOptions, TestAuthentication>(TestAuthentication.SchemeName, _ => { });
         builder.Services.AddAuthorization();
         builder.Services.AddControllers().AddApplicationPart(typeof(ClientsController).Assembly).AddNewtonsoftJson();
+        // Match production AddWebServices: actions return non-disclosing binding errors.
+        builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
+            options.SuppressModelStateInvalidFilter = true);
         var app = builder.Build();
         app.UseAuthentication();
         app.UseMiddleware<TenantAccessMiddleware>();
@@ -190,7 +194,8 @@ public sealed class DossierLookupHttpTests(PostgreSqlClientRuntimeDatabase datab
         return client;
     }
 
-    private async Task<int> Seed(Guid organisation, Guid membership)
+    private async Task<int> Seed(Guid organisation, Guid membership, string firstName = "Synthetic",
+        string lastName = "Client", bool assigned = true)
     {
         await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
         await connection.OpenAsync();
@@ -205,11 +210,18 @@ public sealed class DossierLookupHttpTests(PostgreSqlClientRuntimeDatabase datab
         await using var context = new ApplicationDbContext(options, TenantEnforcementTests.Scope(organisation));
         await context.Database.UseTransactionAsync(tx);
         var client = SyntheticClient.Create(SyntheticClient.Niss(sequence: Interlocked.Increment(ref sequence)));
+        client.FirstName = firstName;
+        client.LastName = lastName;
         client.ReferenceNumber = $"dossier-test-{Guid.NewGuid():N}";
-        var worker = new SocialWorker();
-        worker.ApplyProjection(membership, 1, Guid.NewGuid(), true, "Synthetic", "Worker",
-            Guid.NewGuid().ToString("N"), "Team", "T");
-        context.Add(new SocialCase(client, DateTime.Today.AddDays(-2), worker));
+        var worker = await context.SocialWorkers.SingleOrDefaultAsync(w => w.OrganisationMembershipId == membership);
+        if (worker is null)
+        {
+            worker = new SocialWorker();
+            worker.ApplyProjection(membership, 1, Guid.NewGuid(), true, "Synthetic", "Worker",
+                Guid.NewGuid().ToString("N"), "Team", "T");
+        }
+        if (assigned) context.Add(new SocialCase(client, DateTime.Today.AddDays(-2), worker));
+        else context.Add(client);
         await context.SaveChangesAsync();
         await tx.CommitAsync();
         return client.Id;
@@ -218,7 +230,7 @@ public sealed class DossierLookupHttpTests(PostgreSqlClientRuntimeDatabase datab
     private sealed class Access(bool assignedOnly) : ICurrentTenantAccess
     {
         public Guid Organisation { get; } = Guid.NewGuid();
-        public Guid Membership { get; } = Guid.NewGuid();
+        public Guid Membership { get; set; } = Guid.NewGuid();
         public string[] Permissions { get; set; } = [assignedOnly ? "Clients.ViewAssigned" : "Clients.ViewAll"];
         public TenantAccessOutcome Outcome { get; set; } = TenantAccessOutcome.Authorized;
         public int Calls { get; private set; }
