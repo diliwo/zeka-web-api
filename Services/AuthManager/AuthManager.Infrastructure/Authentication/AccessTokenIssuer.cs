@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Zeka.Authentication;
+using AuthManager.Application.Authentication;
 namespace AuthManager.Infrastructure.Authentication;
 
 public interface IAccessTokenIssuer
@@ -21,7 +22,7 @@ public interface IPublicJwksPublisher
 public sealed record PublishedJwks(string Json, string Fingerprint);
 
 public sealed class AccessTokenIssuer(ISigningKeyProvider provider, IssuerOptions options,
-    AuthenticationOptions validation, TimeProvider clock) : IAccessTokenIssuer, IPublicJwksPublisher
+    AuthenticationOptions validation, TimeProvider clock) : IAccessTokenIssuer, IPublicJwksPublisher, ISessionAccessTokenIssuer
 {
     private string? publishedFingerprint;
     private static readonly Meter Metrics = new("Zeka.Authentication.Issuer");
@@ -60,7 +61,15 @@ public sealed class AccessTokenIssuer(ISigningKeyProvider provider, IssuerOption
         }
         catch { return false; }
     }
-    public async Task<string> IssueAsync(string subject, CancellationToken cancellationToken = default)
+    public Task<string> IssueAsync(string subject, CancellationToken cancellationToken = default)
+        => IssueCoreAsync(subject, null, options.AccessTokenLifetime, cancellationToken);
+    public Task<string> IssueSessionAsync(Guid subjectId, Guid sessionId, TimeSpan lifetime, CancellationToken cancellationToken)
+    {
+        if (subjectId == Guid.Empty || sessionId == Guid.Empty || lifetime <= TimeSpan.Zero
+            || lifetime > IssuerOptions.MaximumAccessTokenLifetime) throw new ArgumentException("Invalid session issuance.");
+        return IssueCoreAsync(subjectId.ToString("D"), sessionId.ToString("D"), lifetime, cancellationToken);
+    }
+    private async Task<string> IssueCoreAsync(string subject, string? sessionId, TimeSpan lifetime, CancellationToken cancellationToken)
     {
         using var trace = Traces.StartActivity("authentication.issue");
         var outcome = "unavailable";
@@ -74,8 +83,9 @@ public sealed class AccessTokenIssuer(ISigningKeyProvider provider, IssuerOption
             var descriptor = new SecurityTokenDescriptor
             {
                 Issuer = validation.Issuer, Audience = validation.Audience,
-                Subject = new ClaimsIdentity([new Claim("sub", subject)]),
-                IssuedAt = now, NotBefore = now, Expires = now + options.AccessTokenLifetime,
+                Subject = new ClaimsIdentity(sessionId is null ? [new Claim("sub", subject)]
+                    : [new Claim("sub", subject), new Claim("sid", sessionId)]),
+                IssuedAt = now, NotBefore = now, Expires = now + lifetime,
                 SigningCredentials = new SigningCredentials(new RsaSecurityKey(key)
                 {
                     KeyId = options.ActiveKeyId,
