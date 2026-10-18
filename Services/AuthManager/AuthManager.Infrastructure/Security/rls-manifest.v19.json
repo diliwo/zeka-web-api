@@ -137,11 +137,11 @@
     },
     {
       "schema": "public",
-      "name": "AspNetUsers"
+      "name": "AspNetUserTokens"
     },
     {
       "schema": "public",
-      "name": "AspNetUserTokens"
+      "name": "AspNetUsers"
     },
     {
       "schema": "public",
@@ -270,7 +270,7 @@
     {
       "object": {
         "schema": "public",
-        "name": "AspNetUsers"
+        "name": "AspNetUserTokens"
       },
       "privileges": [
         "DELETE",
@@ -282,7 +282,7 @@
     {
       "object": {
         "schema": "public",
-        "name": "AspNetUserTokens"
+        "name": "AspNetUsers"
       },
       "privileges": [
         "DELETE",

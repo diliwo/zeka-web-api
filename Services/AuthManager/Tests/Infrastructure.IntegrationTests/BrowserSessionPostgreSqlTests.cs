@@ -13,6 +13,10 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Data.Common;
+using AuthManager.Infrastructure.Authentication;
+using System.Diagnostics.Metrics;
+using System.Collections.Concurrent;
+using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace Infrastructure.IntegrationTests;
 
@@ -26,9 +30,11 @@ public sealed class BrowserSessionPostgreSqlTests(PostgreSqlFixture fixture)
     [Fact]
     public async Task Two_connections_rotate_once_and_predecessor_reuse_revokes_the_successor_and_sid()
     {
-        await using var test = await PrepareAsync();
+        var locks = new LockProbe();
+        await using var test = await PrepareAsync(locks: locks);
         var initial = await test.SignInAsync();
         Assert.Equal(BrowserSessionOutcome.Success, initial.Outcome);
+        locks.Arm();
         using var first = test.Services.CreateScope();
         using var second = test.Services.CreateScope();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -40,6 +46,7 @@ public sealed class BrowserSessionPostgreSqlTests(PostgreSqlFixture fixture)
         var one = Restore(first.ServiceProvider); var two = Restore(second.ServiceProvider);
         start.SetResult();
         var results = await Task.WhenAll(one, two);
+        Assert.True(locks.Overlapped);
         Assert.Single(results.Where(x => x.Outcome == BrowserSessionOutcome.Success));
         Assert.Single(results.Where(x => x.Outcome == BrowserSessionOutcome.Unauthenticated));
         using var verify = test.Services.CreateScope();
@@ -165,15 +172,27 @@ public sealed class BrowserSessionPostgreSqlTests(PostgreSqlFixture fixture)
     public async Task Missing_hash_authority_returns_unavailable_without_session_or_token()
     {
         await using var test = await PrepareAsync();
+        var measurements = new List<string>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, owner) =>
+        { if (instrument.Meter.Name == "Zeka.Authentication.BrowserSessions") owner.EnableMeasurementEvents(instrument); };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        { lock (measurements) measurements.Add(string.Join('|', tags.ToArray().Select(x => $"{x.Key}={x.Value}"))); });
+        listener.Start();
         File.Delete(test.KeyPath);
         var result = await test.SignInAsync();
         Assert.Equal(BrowserSessionOutcome.Unavailable, result.Outcome);
         Assert.Null(result.AccessToken); Assert.Null(result.RefreshSecret);
+        Assert.Contains(measurements, value => value == "operation=sign_in|category=hash_key_unavailable");
+        Assert.All(measurements, value =>
+        { Assert.DoesNotContain(test.KeyPath, value); Assert.DoesNotContain(Email, value); Assert.DoesNotContain(Password, value); });
     }
 
     [Fact]
     public async Task Lost_commit_acknowledgement_never_replays_rotation_and_old_cookie_reuse_revokes_family()
     {
+        var categories = new ConcurrentBag<string>();
+        using var listener = FailureListener(categories);
         var failure = new LostCommit();
         await using var test = await PrepareAsync(failure);
         var first = await test.SignInAsync();
@@ -185,6 +204,7 @@ public sealed class BrowserSessionPostgreSqlTests(PostgreSqlFixture fixture)
             Assert.Equal(BrowserSessionOutcome.Unavailable, ambiguous.Outcome);
             Assert.Null(ambiguous.AccessToken); Assert.Null(ambiguous.RefreshSecret);
             Assert.Equal(1, failure.Failures);
+            Assert.Contains("operation=restore|category=database_uncertain", categories);
         }
         using var verify = test.Services.CreateScope();
         var db = verify.ServiceProvider.GetRequiredService<AuthDbContext>();
@@ -212,6 +232,23 @@ public sealed class BrowserSessionPostgreSqlTests(PostgreSqlFixture fixture)
             .RestoreAsync(signedIn.RefreshSecret, default)).Outcome);
         await Assert.ThrowsAsync<PostgresException>(() => dbContext.Database.ExecuteSqlRawAsync(
             "UPDATE \"BrowserSessionFamilies\" SET \"SecurityStamp\" = 'forged'"));
+        foreach (var sql in new[] {
+            "UPDATE \"BrowserSessionFamilies\" SET \"Id\" = gen_random_uuid()",
+            "UPDATE \"BrowserSessionFamilies\" SET \"UserId\" = gen_random_uuid()",
+            "UPDATE \"BrowserSessionFamilies\" SET \"AbsoluteExpiresAtUtc\" = now()",
+            "UPDATE \"BrowserSessionFamilies\" SET \"CreatedAtUtc\" = now()",
+            "DELETE FROM \"BrowserSessionFamilies\"",
+            "UPDATE \"BrowserRefreshCredentials\" SET \"Hash\" = repeat('A',64)",
+            "UPDATE \"BrowserRefreshCredentials\" SET \"FamilyId\" = gen_random_uuid()",
+            "UPDATE \"BrowserRefreshCredentials\" SET \"ExpiresAtUtc\" = now()",
+            "DELETE FROM \"BrowserRefreshCredentials\"" })
+        {
+            var error = await Assert.ThrowsAsync<PostgresException>(() => dbContext.Database.ExecuteSqlRawAsync(sql));
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, error.SqlState);
+        }
+        Assert.Equal(1, await dbContext.Database.ExecuteSqlRawAsync("UPDATE \"BrowserRefreshCredentials\" SET \"ConsumedAtUtc\" = now() WHERE \"ConsumedAtUtc\" IS NULL"));
+        Assert.Equal(1, await dbContext.Database.ExecuteSqlRawAsync("UPDATE \"BrowserSessionFamilies\" SET \"RevokedAtUtc\" = now() WHERE \"RevokedAtUtc\" IS NULL"));
+        Assert.Equal(1, await dbContext.Database.ExecuteSqlRawAsync("UPDATE \"BrowserSessionFamilies\" SET \"IdleExpiresAtUtc\" = \"IdleExpiresAtUtc\""));
     }
 
     [Fact]
@@ -250,7 +287,130 @@ public sealed class BrowserSessionPostgreSqlTests(PostgreSqlFixture fixture)
         }
     }
 
-    private async Task<TestHost> PrepareAsync(LostCommit? lostCommit = null)
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Two_connections_invalidate_old_stamp_or_suspended_families_in_user_first_order(bool suspended)
+    {
+        var locks = new LockProbe();
+        await using var test = await PrepareAsync(locks: locks);
+        var old = await test.SignInAsync();
+        using (var update = test.Services.CreateScope())
+        {
+            var manager = update.ServiceProvider.GetRequiredService<UserManager<User>>();
+            var user = (await manager.FindByEmailAsync(Email))!;
+            Assert.True((await manager.UpdateSecurityStampAsync(user)).Succeeded);
+        }
+        var current = await test.SignInAsync();
+        var oldId = Guid.Parse(new JsonWebToken(old.AccessToken!).GetClaim("sid").Value);
+        var newId = Guid.Parse(new JsonWebToken(current.AccessToken!).GetClaim("sid").Value);
+        if (suspended)
+        {
+            using var update = test.Services.CreateScope();
+            var db = update.ServiceProvider.GetRequiredService<AuthDbContext>();
+            await db.Users.Where(x => x.Id == old.SubjectId).ExecuteUpdateAsync(set => set.SetProperty(x => x.Status, UserStatus.Suspended));
+        }
+        locks.Arm();
+        using var first = test.Services.CreateScope(); using var second = test.Services.CreateScope();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var before = first.ServiceProvider.GetRequiredService<IBrowserSessions>().CheckActiveAsync(old.SubjectId, oldId, deadline.Token);
+        await locks.UserHeld.Task.WaitAsync(deadline.Token);
+        var after = second.ServiceProvider.GetRequiredService<IBrowserSessions>().CheckActiveAsync(current.SubjectId, newId, deadline.Token);
+        var outcomes = await Task.WhenAll(before, after);
+        Assert.True(locks.Overlapped);
+        Assert.Equal(BrowserSessionOutcome.Unauthenticated, outcomes[0]);
+        Assert.Equal(suspended ? BrowserSessionOutcome.Unauthenticated : BrowserSessionOutcome.Success, outcomes[1]);
+        using var verify = test.Services.CreateScope();
+        var families = await verify.ServiceProvider.GetRequiredService<AuthDbContext>().BrowserSessionFamilies.AsNoTracking().ToListAsync();
+        Assert.NotNull(families.Single(x => x.Id == oldId).RevokedAtUtc);
+        Assert.Equal(suspended, families.Single(x => x.Id == newId).RevokedAtUtc is not null);
+    }
+
+    [Fact]
+    public async Task Concurrent_cross_user_replacement_locks_users_in_stable_order()
+    {
+        var locks = new LockProbe();
+        await using var test = await PrepareAsync(locks: locks);
+        var first = await test.SignInAsync();
+        const string otherEmail = "ben.session@example.invalid";
+        using (var setup = test.Services.CreateScope())
+        {
+            var user = User.Create(otherEmail, otherEmail, "Ben", "Example", test.Clock.Now); user.EmailConfirmed = true;
+            Assert.True((await setup.ServiceProvider.GetRequiredService<UserManager<User>>().CreateAsync(user, Password)).Succeeded);
+            var db = setup.ServiceProvider.GetRequiredService<AuthDbContext>();
+            db.Entry(user).Property(x => x.Status).CurrentValue = UserStatus.Active; await db.SaveChangesAsync();
+        }
+        using var one = test.Services.CreateScope(); using var two = test.Services.CreateScope();
+        var second = await two.ServiceProvider.GetRequiredService<IBrowserSessions>().SignInAsync(otherEmail, Password, null, default);
+        locks.Arm(); using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var a = one.ServiceProvider.GetRequiredService<IBrowserSessions>().SignInAsync(Email, Password, second.RefreshSecret, deadline.Token);
+        await locks.UserHeld.Task.WaitAsync(deadline.Token);
+        var b = two.ServiceProvider.GetRequiredService<IBrowserSessions>().SignInAsync(otherEmail, Password, first.RefreshSecret, deadline.Token);
+        var results = await Task.WhenAll(a, b);
+        Assert.All(results, x => Assert.Equal(BrowserSessionOutcome.Success, x.Outcome));
+        Assert.True(locks.Overlapped);
+        Assert.Equal(2, locks.Attempts.Take(2).Count());
+        Assert.Single(locks.Attempts.Take(2).Distinct());
+        using var verify = test.Services.CreateScope();
+        var families = await verify.ServiceProvider.GetRequiredService<AuthDbContext>().BrowserSessionFamilies.AsNoTracking().ToListAsync();
+        Assert.Equal(2, families.Count(x => x.RevokedAtUtc != null)); Assert.Equal(2, families.Count(x => x.RevokedAtUtc == null));
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("wrong")]
+    public async Task Failed_replacement_preserves_live_family_and_success_reports_exact_signed_expiry(string reason)
+    {
+        await using var test = await PrepareAsync();
+        test.Clock.Now = test.Clock.Now.AddTicks(9999999);
+        var first = await test.SignInAsync();
+        var jwt = new JsonWebToken(first.AccessToken!);
+        Assert.Equal(new DateTimeOffset(jwt.ValidTo), first.ExpiresAtUtc);
+        Assert.True(first.ExpiresAtUtc < test.Clock.Now.AddMinutes(5));
+        using var scope = test.Services.CreateScope(); var sessions = scope.ServiceProvider.GetRequiredService<IBrowserSessions>();
+        var rejected = await sessions.SignInAsync(reason == "unknown" ? "unknown@example.invalid" : Email,
+            reason == "wrong" ? "wrong" : Password, first.RefreshSecret, default);
+        Assert.Equal(BrowserSessionOutcome.Unauthenticated, rejected.Outcome);
+        Assert.Equal(BrowserSessionOutcome.Success, await sessions.CheckActiveAsync(first.SubjectId, Guid.Parse(jwt.GetClaim("sid").Value), default));
+    }
+
+    [Fact]
+    public async Task Identity_write_failure_is_generic_and_emits_only_bounded_operation_and_category()
+    {
+        var failure = new FailIdentityWrite();
+        await using var test = await PrepareAsync(writeFailure: failure);
+        var categories = new ConcurrentBag<string>(); using var listener = FailureListener(categories);
+        failure.Armed = true;
+        using var scope = test.Services.CreateScope();
+        var result = await scope.ServiceProvider.GetRequiredService<IBrowserSessions>().SignInAsync(Email, "wrong", null, default);
+        Assert.Equal(BrowserSessionOutcome.Unavailable, result.Outcome);
+        Assert.Null(result.AccessToken); Assert.Null(result.RefreshSecret);
+        Assert.Contains("operation=sign_in|category=identity_write_unavailable", categories);
+        Assert.All(categories, value =>
+        { Assert.DoesNotContain(Email, value); Assert.DoesNotContain(Password, value); Assert.DoesNotContain(test.KeyPath, value); });
+    }
+
+    private static MeterListener FailureListener(ConcurrentBag<string> categories)
+    {
+        var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, owner) =>
+        { if (instrument.Meter.Name == "Zeka.Authentication.BrowserSessions") owner.EnableMeasurementEvents(instrument); };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+            categories.Add(string.Join('|', tags.ToArray().Select(x => $"{x.Key}={x.Value}"))));
+        listener.Start(); return listener;
+    }
+    private sealed class FailIdentityWrite : SaveChangesInterceptor
+    {
+        public bool Armed { get; set; }
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Armed) { Armed = false; throw new DbUpdateConcurrencyException("Synthetic Identity write failure"); }
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private async Task<TestHost> PrepareAsync(LostCommit? lostCommit = null, LockProbe? locks = null, IInterceptor? writeFailure = null)
     {
         // This connection is exclusively a newly named database in the test-owned PostgreSQL container.
         var connection = await fixture.CreateDatabaseAsync();
@@ -265,8 +425,10 @@ public sealed class BrowserSessionPostgreSqlTests(PostgreSqlFixture fixture)
         builder.Logging.ClearProviders();
         builder.Services.AddDbContext<AuthDbContext>(options =>
         {
-            options.UseNpgsql(connection, provider => provider.EnableRetryOnFailure());
+            options.UseNpgsql(connection, provider => { provider.CommandTimeout(10); provider.EnableRetryOnFailure(); });
             if (lostCommit is not null) options.AddInterceptors(lostCommit);
+            if (locks is not null) options.AddInterceptors(locks);
+            if (writeFailure is not null) options.AddInterceptors(writeFailure);
         });
         builder.ConfigureMicrosoftIdentity();
         builder.Services.AddOnboardingPersistenceFoundations(builder.Configuration);
@@ -312,10 +474,48 @@ public sealed class BrowserSessionPostgreSqlTests(PostgreSqlFixture fixture)
             return Task.CompletedTask;
         }
     }
-    private sealed class TokenIssuer : ISessionAccessTokenIssuer
+    private sealed class LockProbe : DbCommandInterceptor
     {
-        public Task<string> IssueSessionAsync(Guid subjectId, Guid sessionId, TimeSpan lifetime, CancellationToken cancellationToken)
-            => Task.FromResult("synthetic-test-bearer");
+        private bool armed;
+        private int attempts;
+        private readonly TaskCompletionSource secondAttempt = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource UserHeld { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ConcurrentQueue<Guid> Attempts { get; } = new();
+        public bool Overlapped => UserHeld.Task.IsCompleted && secondAttempt.Task.IsCompleted;
+        public void Arm() => armed = true;
+        private static bool UserLock(DbCommand command) => command.CommandText.Contains("\"AspNetUsers\"", StringComparison.Ordinal)
+            && command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal);
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (armed && UserLock(command))
+            {
+                Attempts.Enqueue(command.Parameters.Cast<DbParameter>().Select(x => x.Value).OfType<Guid>().First());
+                if (Interlocked.Increment(ref attempts) == 2) secondAttempt.TrySetResult();
+            }
+            return ValueTask.FromResult(result);
+        }
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (armed && UserLock(command) && UserHeld.TrySetResult())
+                await secondAttempt.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            return result;
+        }
+    }
+    private sealed class TokenIssuer(TimeProvider clock) : ISessionAccessTokenIssuer, IDisposable
+    {
+        private readonly Zeka.Authentication.Tests.AuthenticationFixture fixture = new();
+        public async Task<string> IssueSessionAsync(Guid subjectId, Guid sessionId, TimeSpan lifetime, CancellationToken cancellationToken)
+        {
+            var issuer = new AccessTokenIssuer(new IssuerContractTests.TestKeys(fixture.Key), new IssuerOptions
+            { ActiveKeyId = Zeka.Authentication.Tests.AuthenticationFixture.KeyId,
+                ActiveSigningKeyReference = Path.Combine(Path.GetTempPath(), "not-provisioned-session-test"), AccessTokenLifetime = lifetime },
+                Zeka.Authentication.AuthenticationOptions.Read(fixture.Configuration()), clock);
+            issuer.ConfirmPublication(await issuer.PrepareAsync(cancellationToken));
+            return await issuer.IssueSessionAsync(subjectId, sessionId, lifetime, cancellationToken);
+        }
+        public void Dispose() => fixture.Dispose();
     }
     private sealed class Clock : TimeProvider
     {

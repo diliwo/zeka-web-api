@@ -13,6 +13,8 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Net.Sockets;
+using Microsoft.AspNetCore.Http;
 
 namespace Infrastructure.IntegrationTests;
 
@@ -103,11 +105,106 @@ public sealed class BrowserSessionTransportTests
             ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(5), CookieExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(8) });
     }
 
-    private sealed class Host(WebApplication app, HttpClient http, Sessions sessions, X509Certificate2 certificate) : IAsyncDisposable
+    [Fact]
+    public async Task Proxy_strips_forgery_and_separates_addresses_and_csrf_from_mutations()
+    {
+        await using var test = await Host.StartAsync();
+        var csrf = await test.CsrfAsync();
+        test.Http.DefaultRequestHeaders.Add("X-Forwarded-For", "203.0.113.99, 203.0.113.100");
+        test.Http.DefaultRequestHeaders.Add("Forwarded", "for=untrusted");
+        for (var i = 0; i < 60; i++) using (await test.Http.GetAsync("/api/v1/browser-session/csrf")) { }
+        using var exhausted = await test.Http.GetAsync("/api/v1/browser-session/csrf");
+        Assert.Equal(HttpStatusCode.TooManyRequests, exhausted.StatusCode);
+        Assert.False(exhausted.Headers.Contains("Set-Cookie"));
+        Assert.Equal(HttpStatusCode.OK, (await test.PostAsync("sign-in", csrf)).StatusCode);
+        using var another = test.Client("127.0.0.3");
+        Assert.Equal(HttpStatusCode.OK, (await another.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        using var shared = test.Client("127.0.0.2");
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await shared.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        Assert.Equal(3, test.Admission.PartitionCount);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-an-address")]
+    [InlineData("198.51.100.1, 198.51.100.2")]
+    public async Task Invalid_attribution_rejects_before_credentials_or_partitions(string? header)
+    {
+        await using var test = await Host.StartAsync();
+        using var direct = test.Client("127.0.0.1", direct: true);
+        if (header is not null) direct.DefaultRequestHeaders.TryAddWithoutValidation("X-Forwarded-For", header);
+        using var response = await direct.GetAsync("/api/v1/browser-session/csrf");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+        Assert.Equal("", await response.Content.ReadAsStringAsync());
+        Assert.Equal(0, test.Admission.PartitionCount); Assert.Equal(0, test.Sessions.Mutations);
+    }
+
+    [Fact]
+    public async Task Duplicate_untrusted_and_missing_trust_never_allocate_partitions_or_write_sessions()
+    {
+        await using (var test = await Host.StartAsync())
+        {
+            using var direct = test.Client("127.0.0.1", direct: true);
+            var duplicate = new HttpRequestMessage(HttpMethod.Get, "/api/v1/browser-session/csrf");
+            duplicate.Headers.TryAddWithoutValidation("X-Forwarded-For", new[] { "198.51.100.1", "198.51.100.2" });
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, (await direct.SendAsync(duplicate)).StatusCode);
+            using var attacker = test.Client("127.0.0.2", direct: true);
+            attacker.DefaultRequestHeaders.Add("X-Forwarded-For", "198.51.100.1");
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, (await attacker.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await attacker.GetAsync("/unrelated")).StatusCode);
+            Assert.Equal(0, test.Admission.PartitionCount);
+        }
+        foreach (var peer in new string?[] { null, "invalid" })
+        {
+            await using var test = await Host.StartAsync(values => values["BrowserSession:TrustedProxyPeers:0"] = peer);
+            using var response = await test.Http.GetAsync("/api/v1/browser-session/csrf");
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.False(response.Headers.Contains("Set-Cookie"));
+            Assert.Equal(0, test.Admission.PartitionCount); Assert.Equal(0, test.Sessions.Mutations);
+        }
+    }
+
+    [Fact]
+    public async Task Canonical_mapped_addresses_share_allowance_and_churn_remains_bounded()
+    {
+        await using var test = await Host.StartAsync(values => values["BrowserSession:Limits:PerAddress"] = "1");
+        using var direct = test.Client("127.0.0.1", direct: true);
+        async Task<HttpStatusCode> Get(string address)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/browser-session/csrf");
+            request.Headers.Add("X-Forwarded-For", address);
+            using var response = await direct.SendAsync(request); return response.StatusCode;
+        }
+        Assert.Equal(HttpStatusCode.OK, await Get("198.51.100.1"));
+        Assert.Equal(HttpStatusCode.TooManyRequests, await Get("::ffff:198.51.100.1"));
+        for (var i = 2; i < 40; i++) await Get($"198.51.100.{i}");
+        Assert.Equal(16, test.Admission.PartitionCount);
+        Assert.Equal(HttpStatusCode.TooManyRequests, await Get("203.0.113.1"));
+    }
+
+    [Fact]
+    public async Task Aggregate_overload_is_separate_from_each_address_ordinary_allowance()
+    {
+        await using var test = await Host.StartAsync(values =>
+        { values["BrowserSession:Limits:PerAddress"] = "1"; values["BrowserSession:Limits:Aggregate"] = "2"; });
+        using var one = test.Client("127.0.0.2"); using var two = test.Client("127.0.0.3"); using var three = test.Client("127.0.0.4");
+        Assert.Equal(HttpStatusCode.OK, (await one.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await two.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await three.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        Assert.Equal(0, test.Sessions.Mutations);
+    }
+
+    private sealed class Host(WebApplication app, WebApplication proxy, HttpClient upstream,
+        HttpClient http, Sessions sessions, X509Certificate2 certificate) : IAsyncDisposable
     {
         public HttpClient Http => http;
         public Sessions Sessions => sessions;
-        public static async Task<Host> StartAsync()
+        public BrowserSessionEndpoints.BrowserSessionAdmission Admission => app.Services.GetRequiredService<BrowserSessionEndpoints.BrowserSessionAdmission>();
+        public HttpClient Client(string localAddress, bool direct = false)
+            => CreateClient(direct ? Address(app) : Address(proxy), localAddress, certificate);
+        public static async Task<Host> StartAsync(Action<Dictionary<string, string?>>? configure = null)
         {
             using var rsa = RSA.Create(2048);
             var request = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -116,18 +213,61 @@ public sealed class BrowserSessionTransportTests
             var builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, endpoint => endpoint.UseHttps(certificate)));
-            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["BrowserSession:Origin"] = "https://app.example.invalid" });
+            var values = new Dictionary<string, string?> { ["BrowserSession:Origin"] = "https://app.example.invalid",
+                ["BrowserSession:TrustedProxyPeers:0"] = "127.0.0.1", ["BrowserSession:Limits:PerAddress"] = "60",
+                ["BrowserSession:Limits:MaxPartitions"] = "16", ["BrowserSession:Limits:Aggregate"] = "256",
+                ["BrowserSession:Limits:WindowSeconds"] = "60" };
+            configure?.Invoke(values); builder.Configuration.AddInMemoryCollection(values);
             builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
             builder.Services.AddBrowserSessionTransport();
             var sessions = new Sessions();
             builder.Services.AddSingleton<IBrowserSessions>(sessions);
             var app = builder.Build();
-            app.UseRateLimiter(); app.MapBrowserSessions(); await app.StartAsync();
-            var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
-            var http = new HttpClient(new HttpClientHandler { CookieContainer = new CookieContainer(),
-                ServerCertificateCustomValidationCallback = (_, presented, _, _) => presented?.Thumbprint == certificate.Thumbprint })
-                { BaseAddress = new(address) };
-            return new(app, http, sessions, certificate);
+            app.UseBrowserSessionAttribution(); app.UseRateLimiter(); app.MapBrowserSessions();
+            app.MapGet("/unrelated", () => Results.Ok()); await app.StartAsync();
+            var upstream = CreateClient(Address(app), "127.0.0.1", certificate, cookies: false);
+            var proxyBuilder = WebApplication.CreateBuilder(); proxyBuilder.Logging.ClearProviders();
+            proxyBuilder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, endpoint => endpoint.UseHttps(certificate)));
+            var proxy = proxyBuilder.Build();
+            proxy.Run(async context =>
+            {
+                using var forwarded = new HttpRequestMessage(new HttpMethod(context.Request.Method), context.Request.Path + context.Request.QueryString);
+                if (context.Request.ContentLength > 0)
+                {
+                    forwarded.Content = new StreamContent(context.Request.Body);
+                    forwarded.Content.Headers.TryAddWithoutValidation("Content-Type", context.Request.ContentType);
+                }
+                // This controlled single-hop boundary discards all caller forwarding metadata.
+                foreach (var header in new[] { "Origin", "X-Zeka-CSRF", "Cookie" })
+                    if (context.Request.Headers.TryGetValue(header, out var value)) forwarded.Headers.TryAddWithoutValidation(header, value.ToArray());
+                forwarded.Headers.Add("X-Forwarded-For", context.Connection.RemoteIpAddress!.MapToIPv4().ToString());
+                using var response = await upstream.SendAsync(forwarded);
+                context.Response.StatusCode = (int)response.StatusCode;
+                foreach (var header in response.Headers)
+                    if (header.Key is "Set-Cookie" or "Cache-Control" or "Pragma") context.Response.Headers[header.Key] = header.Value.ToArray();
+                context.Response.ContentType = response.Content.Headers.ContentType?.ToString();
+                await response.Content.CopyToAsync(context.Response.Body);
+            });
+            await proxy.StartAsync();
+            return new(app, proxy, upstream, CreateClient(Address(proxy), "127.0.0.2", certificate), sessions, certificate);
+        }
+        private static string Address(WebApplication app) => app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        private static HttpClient CreateClient(string address, string localAddress, X509Certificate2 certificate, bool cookies = true)
+        {
+            var handler = new SocketsHttpHandler { UseCookies = cookies, CookieContainer = new CookieContainer(), UseProxy = false,
+                SslOptions = new() { RemoteCertificateValidationCallback = (_, presented, _, _) => presented?.GetCertHashString() == certificate.Thumbprint },
+                ConnectCallback = async (context, cancellationToken) =>
+                {
+                    var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    try
+                    {
+                        socket.Bind(new IPEndPoint(IPAddress.Parse(localAddress), 0));
+                        await socket.ConnectAsync(context.DnsEndPoint, cancellationToken);
+                        return new NetworkStream(socket, ownsSocket: true);
+                    }
+                    catch { socket.Dispose(); throw; }
+                } };
+            return new HttpClient(handler) { BaseAddress = new(address), Timeout = TimeSpan.FromSeconds(15) };
         }
         public async Task<string> CsrfAsync()
         {
@@ -144,6 +284,7 @@ public sealed class BrowserSessionTransportTests
             if (origin is not null) request.Headers.Add("Origin", origin);
             return http.SendAsync(request);
         }
-        public async ValueTask DisposeAsync() { http.Dispose(); await app.DisposeAsync(); certificate.Dispose(); }
+        public async ValueTask DisposeAsync()
+        { http.Dispose(); upstream.Dispose(); await proxy.DisposeAsync(); await app.DisposeAsync(); certificate.Dispose(); }
     }
 }

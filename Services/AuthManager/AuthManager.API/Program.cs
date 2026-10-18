@@ -18,6 +18,7 @@ builder.Services.AddAssigneeServiceAuthentication(builder.Configuration);
 builder.Services.AddAccessTokenIssuer(builder.Configuration);
 builder.Services.AddBrowserSessionTransport();
 var app = builder.Build();
+app.UseBrowserSessionAttribution();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();

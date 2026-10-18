@@ -2,6 +2,9 @@ using System.Threading.RateLimiting;
 using AuthManager.Application.Authentication;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.RateLimiting;
+using System.Net;
+using System.Net.Sockets;
+using Microsoft.AspNetCore.HttpOverrides;
 
 namespace AuthManager.API.Endpoints;
 
@@ -9,7 +12,7 @@ public static class BrowserSessionEndpoints
 {
     public const string CookieName = "__Secure-ZekaRefresh";
     public const string CookiePath = "/api/v1/browser-session";
-    private const string RatePolicy = "browser-session";
+    private const string CallerAddress = "Zeka.BrowserSession.CallerAddress";
 
     public static void AddBrowserSessionTransport(this IServiceCollection services)
     {
@@ -22,18 +25,122 @@ public static class BrowserSessionEndpoints
             options.Cookie.HttpOnly = true;
             options.Cookie.SameSite = SameSiteMode.Strict;
         });
-        services.AddRateLimiter(options =>
+        services.AddRateLimiter(_ => { });
+        services.AddSingleton<BrowserSessionAdmission>();
+    }
+
+    public static void UseBrowserSessionAttribution(this WebApplication app)
+    {
+        var admission = app.Services.GetRequiredService<BrowserSessionAdmission>();
+        app.UseWhen(context => context.Request.Path.StartsWithSegments(CookiePath), branch =>
         {
-            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            // Bounded total state; no account identifier or secret appears in a limiter key.
-            options.AddFixedWindowLimiter(RatePolicy, limiter =>
-            { limiter.PermitLimit = 60; limiter.Window = TimeSpan.FromMinutes(1); limiter.QueueLimit = 0; });
+            branch.Use(async (http, next) =>
+            {
+                http.Response.Headers.CacheControl = "no-store";
+                if (!admission.TryAttribute(http, out var address))
+                { http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable; return; }
+                http.Items[CallerAddress] = address;
+                await next(http);
+            });
+            branch.UseForwardedHeaders(admission.Forwarding);
+            branch.Use(async (http, next) =>
+            {
+                var address = (string)http.Items[CallerAddress]!;
+                if (Canonical(http.Connection.RemoteIpAddress) != address)
+                { http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable; return; }
+                if (!admission.Acquire(address, HttpMethods.IsGet(http.Request.Method)))
+                { http.Response.StatusCode = StatusCodes.Status429TooManyRequests; return; }
+                await next(http);
+            });
         });
     }
 
+    // Receiving-side policy has no production defaults. Only explicitly configured exact proxy peers are trusted.
+    public sealed class BrowserSessionAdmission : IDisposable
+    {
+        private readonly HashSet<string> peers = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, (FixedWindowRateLimiter Limiter, DateTimeOffset Used)>[] partitions = [new(), new()];
+        private readonly FixedWindowRateLimiter[] aggregate = [];
+        private readonly object gate = new();
+        private readonly int perAddress;
+        private readonly int capacity;
+        private readonly TimeSpan window;
+        private readonly bool valid;
+        public ForwardedHeadersOptions Forwarding { get; } = new()
+        { ForwardedHeaders = ForwardedHeaders.XForwardedFor, ForwardLimit = 1 };
+        public int PartitionCount { get { lock (gate) return partitions.Sum(budget => budget.Count); } }
+        public BrowserSessionAdmission(IConfiguration configuration)
+        {
+            Forwarding.KnownNetworks.Clear(); Forwarding.KnownProxies.Clear();
+            var configured = configuration.GetSection("BrowserSession:TrustedProxyPeers").Get<string[]>() ?? [];
+            foreach (var peer in configured)
+            {
+                if (!IPAddress.TryParse(peer, out var address) || peer.Contains('%') || Canonical(address) is not { } canonical
+                    || !peers.Add(canonical)) return;
+                Forwarding.KnownProxies.Add(address);
+            }
+            // Invalid typed values also fail closed, rather than throwing after the host is built.
+            if (!int.TryParse(configuration["BrowserSession:Limits:PerAddress"], out perAddress)
+                || !int.TryParse(configuration["BrowserSession:Limits:MaxPartitions"], out capacity)
+                || !int.TryParse(configuration["BrowserSession:Limits:Aggregate"], out var total)
+                || !int.TryParse(configuration["BrowserSession:Limits:WindowSeconds"], out var seconds)
+                || peers.Count == 0 || perAddress is < 1 or > 10000 || capacity is < 1 or > 4096
+                || total < perAddress || total > 100000 || seconds is < 1 or > 3600) return;
+            window = TimeSpan.FromSeconds(seconds);
+            aggregate = [Create(total), Create(total)];
+            valid = true;
+        }
+        public bool TryAttribute(HttpContext http, out string address)
+        {
+            address = "";
+            if (!valid || Canonical(http.Connection.RemoteIpAddress) is not { } peer || !peers.Contains(peer)
+                || http.Request.Headers["X-Forwarded-For"].Count != 1) return false;
+            var raw = http.Request.Headers["X-Forwarded-For"][0];
+            if (string.IsNullOrWhiteSpace(raw) || raw.Contains(',') || raw.Contains('%')
+                || !IPAddress.TryParse(raw, out var client) || Canonical(client) is not { } canonical) return false;
+            foreach (var header in new[] { "Forwarded", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Prefix", "X-Original-For" })
+                if (http.Request.Headers.ContainsKey(header)) return false;
+            address = canonical;
+            return true;
+        }
+        public bool Acquire(string address, bool csrf)
+        {
+            lock (gate)
+            {
+                var index = csrf ? 0 : 1;
+                var budget = partitions[index];
+                var now = DateTimeOffset.UtcNow;
+                if (!budget.TryGetValue(address, out var entry))
+                {
+                    foreach (var stale in budget.Where(x => now - x.Value.Used >= window + window).Select(x => x.Key).ToArray())
+                    { budget[stale].Limiter.Dispose(); budget.Remove(stale); }
+                    if (budget.Count >= capacity) return false;
+                    entry = (Create(perAddress), now);
+                }
+                budget[address] = (entry.Limiter, now);
+                using var ordinary = entry.Limiter.AttemptAcquire();
+                if (!ordinary.IsAcquired) return false;
+                using var overload = aggregate[index].AttemptAcquire();
+                return overload.IsAcquired;
+            }
+        }
+        private FixedWindowRateLimiter Create(int permits) => new(new FixedWindowRateLimiterOptions
+        { PermitLimit = permits, Window = window, QueueLimit = 0, AutoReplenishment = true });
+        public void Dispose()
+        {
+            lock (gate)
+            {
+                foreach (var budget in partitions) foreach (var entry in budget.Values) entry.Limiter.Dispose();
+                if (aggregate is not null) foreach (var limiter in aggregate) limiter.Dispose();
+            }
+        }
+    }
+    private static string? Canonical(IPAddress? address) => address?.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6
+        ? (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString() : null;
+
     public static void MapBrowserSessions(this WebApplication app)
     {
-        var group = app.MapGroup(CookiePath).RequireRateLimiting(RatePolicy);
+        var group = app.MapGroup(CookiePath);
         group.AddEndpointFilter(async (context, next) =>
         {
             var http = context.HttpContext;

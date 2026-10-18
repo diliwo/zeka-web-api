@@ -262,10 +262,15 @@ public sealed class IssuerContractTests
 
     internal static AccessTokenIssuer Create(AuthenticationFixture fixture, TestKeys? provider = null, IssuerOptions? options = null)
         => new(provider ?? new TestKeys(fixture.Key), options ?? Options(), AuthenticationOptions.Read(fixture.Configuration()), fixture.Clock);
-    [Fact]
-    public async Task Browser_session_issuer_preserves_subject_and_binds_sid_without_tenant_or_role_grants()
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(9999999L)]
+    [InlineData(10000000L)]
+    public async Task Browser_session_issuer_preserves_subject_and_binds_sid_without_tenant_or_role_grants(long ticks)
     {
         using var fixture = new AuthenticationFixture();
+        var instant = DateTimeOffset.FromUnixTimeSeconds(fixture.Clock.GetUtcNow().ToUnixTimeSeconds()).AddTicks(ticks);
+        fixture.Clock.Advance(instant - fixture.Clock.GetUtcNow());
         var issuer = Create(fixture);
         issuer.ConfirmPublication(await issuer.PrepareAsync());
         var subject = Guid.NewGuid(); var session = Guid.NewGuid();
@@ -274,7 +279,11 @@ public sealed class IssuerContractTests
         Assert.Equal(subject.ToString("D"), jwt.GetClaim("sub").Value);
         Assert.Equal(session.ToString("D"), jwt.GetClaim("sid").Value);
         Assert.Equal("RS256", jwt.Alg);
-        Assert.Equal(fixture.Clock.GetUtcNow().AddMinutes(5).UtcDateTime, jwt.ValidTo);
+        var expectedEpoch = instant.AddMinutes(5).ToUnixTimeSeconds();
+        Assert.Equal(expectedEpoch, jwt.GetPayloadValue<long>("exp"));
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(expectedEpoch).UtcDateTime, jwt.ValidTo);
+        Assert.True(jwt.ValidTo <= instant.AddMinutes(5).UtcDateTime);
+        Assert.True(instant.AddMinutes(5).UtcDateTime < jwt.ValidTo.AddSeconds(1));
         Assert.DoesNotContain(jwt.Claims, claim => claim.Type is "role" or "organisationId" or "permission");
     }
     private static string Reference(string name) => Path.Combine(Path.GetTempPath(), "not-provisioned-issue44-test", name);

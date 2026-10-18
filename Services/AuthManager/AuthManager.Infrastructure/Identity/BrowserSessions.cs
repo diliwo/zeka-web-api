@@ -9,6 +9,8 @@ using AuthManager.Infrastructure.Persistence.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 
 namespace AuthManager.Infrastructure.Identity;
 
@@ -18,18 +20,25 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
     private static readonly PasswordHasher<User> DummyHasher = new();
     private static readonly User DummyUser = User.Create("nobody@example.invalid", "nobody", "Synthetic", "Dummy", DateTimeOffset.UnixEpoch);
     private static readonly string DummyHash = DummyHasher.HashPassword(DummyUser, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+    private static readonly Meter Metrics = new("Zeka.Authentication.BrowserSessions");
+    private static readonly Counter<long> Failures = Metrics.CreateCounter<long>("browser_session.unavailable");
+    private sealed class SessionFailure(string category) : Exception
+    { public string Category { get; } = category; }
+    private sealed record CredentialHint(Guid FamilyId, Guid UserId, string Hash);
 
     public Task<BrowserSessionResult> SignInAsync(string email, string password, string? previousCookie, CancellationToken cancellationToken)
-        => Once(async () =>
+        => Once("sign_in", async () =>
         {
-            if (!policy.IsValid) return Unavailable();
+            if (!policy.IsValid) throw new SessionFailure("policy_unavailable");
             // Resolve the keyed hash before accepting a password. Missing key material cannot create a session.
             var secret = NewSecret();
             var hash = await HashAsync(secret, cancellationToken);
-            await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
-            if (await FindLockedAsync(previousCookie, cancellationToken) is { } previous)
-                await RevokeAsync(previous.Family, "replaced", cancellationToken);
             var user = await users.FindByEmailAsync(email);
+            var previousHint = await FindHintAsync(previousCookie, cancellationToken);
+            await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+            // Every operation locks users before families. Cross-user replacement uses the same stable order.
+            foreach (var id in new Guid?[] { user?.Id, previousHint?.UserId }.OfType<Guid>().Distinct().Order())
+                await LockUserAsync(id, cancellationToken);
             if (user is null)
             {
                 DummyHasher.VerifyHashedPassword(DummyUser, DummyHash, password);
@@ -38,25 +47,28 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
                 return Denied();
             }
             user = await LockUserAsync(user.Id, cancellationToken);
-            var validPassword = user is not null && await users.CheckPasswordAsync(user, password);
+            var validPassword = user is not null && user.NormalizedEmail == users.NormalizeEmail(email)
+                && await users.CheckPasswordAsync(user, password);
             if (user is null || !validPassword || !Eligible(user, clock.GetUtcNow()))
             {
                 if (user is not null && !validPassword && !await users.IsLockedOutAsync(user))
                 {
                     var failure = await users.AccessFailedAsync(user);
-                    if (!failure.Succeeded) throw new InvalidOperationException("Identity write unavailable.");
+                    if (!failure.Succeeded) throw new SessionFailure("identity_write_unavailable");
                 }
                 await EventAsync(Guid.Empty, Guid.Empty, "sign_in_denied", cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 return Denied();
             }
             if (!(await users.ResetAccessFailedCountAsync(user)).Succeeded)
-                throw new InvalidOperationException("Identity write unavailable.");
+                throw new SessionFailure("identity_write_unavailable");
+            if (await FindLockedAsync(previousHint, cancellationToken) is { } previous)
+                await RevokeAsync(previous.Family, "replaced", cancellationToken);
             var now = clock.GetUtcNow();
             var family = new BrowserSessionFamily { Id = Guid.NewGuid(), UserId = user.Id,
                 SecurityStamp = user.SecurityStamp ?? "", CreatedAtUtc = now,
                 IdleExpiresAtUtc = now + policy.IdleLifetime, AbsoluteExpiresAtUtc = now + policy.AbsoluteLifetime };
-            if (string.IsNullOrEmpty(family.SecurityStamp)) throw new InvalidOperationException("Identity unavailable.");
+            if (string.IsNullOrEmpty(family.SecurityStamp)) throw new SessionFailure("identity_unavailable");
             database.BrowserSessionFamilies.Add(family);
             database.BrowserRefreshCredentials.Add(new() { Hash = hash, FamilyId = family.Id, ExpiresAtUtc = Deadline(family) });
             var token = await issuer.IssueSessionAsync(user.Id, family.Id, policy.AccessLifetime, cancellationToken);
@@ -67,11 +79,13 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
         }, cancellationToken);
 
     public Task<BrowserSessionResult> RestoreAsync(string? cookie, CancellationToken cancellationToken)
-        => Once(async () =>
+        => Once("restore", async () =>
         {
-            if (!policy.IsValid) return Unavailable();
+            if (!policy.IsValid) throw new SessionFailure("policy_unavailable");
+            var hint = await FindHintAsync(cookie, cancellationToken);
             await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
-            var match = await FindLockedAsync(cookie, cancellationToken);
+            if (hint is null || await LockUserAsync(hint.UserId, cancellationToken) is null) return Denied();
+            var match = await FindLockedAsync(hint, cancellationToken);
             if (match is null) return Denied();
             var (family, credential) = match.Value;
             var now = clock.GetUtcNow();
@@ -100,11 +114,13 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
         }, cancellationToken);
 
     public async Task<BrowserSessionOutcome> LogoutAsync(string? cookie, CancellationToken cancellationToken)
-        => (await Once(async () =>
+        => (await Once("logout", async () =>
         {
-            if (!policy.IsValid) return Unavailable();
+            if (!policy.IsValid) throw new SessionFailure("policy_unavailable");
+            var hint = await FindHintAsync(cookie, cancellationToken);
             await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
-            var match = await FindLockedAsync(cookie, cancellationToken);
+            if (hint is null || await LockUserAsync(hint.UserId, cancellationToken) is null) return Denied();
+            var match = await FindLockedAsync(hint, cancellationToken);
             var now = clock.GetUtcNow();
             // Expired cookies cannot authenticate a tombstone confirmation. Keep hash history for reuse detection.
             if (match is null || match.Value.Credential.ExpiresAtUtc <= now) return Denied();
@@ -114,10 +130,11 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
         }, cancellationToken)).Outcome;
 
     public async Task<BrowserSessionOutcome> CheckActiveAsync(Guid subjectId, Guid sessionId, CancellationToken cancellationToken)
-        => (await Once(async () =>
+        => (await Once("check_active", async () =>
         {
             if (subjectId == Guid.Empty || sessionId == Guid.Empty) return Denied();
             await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+            if (await LockUserAsync(subjectId, cancellationToken) is null) return Denied();
             var family = await LockFamilyAsync(sessionId, cancellationToken);
             if (family is null || family.UserId != subjectId) return Denied();
             var active = await ActiveAsync(family, clock.GetUtcNow(), cancellationToken);
@@ -132,25 +149,35 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
         var user = await LockUserAsync(family.UserId, cancellationToken);
         if (user is not null && Eligible(user, now) && !string.IsNullOrEmpty(user.SecurityStamp)
             && string.Equals(user.SecurityStamp, family.SecurityStamp, StringComparison.Ordinal)) return true;
-        // Password resets change Identity's stamp. Suspension or a changed stamp invalidates all observed families.
-        await database.BrowserSessionFamilies.Where(x => x.UserId == family.UserId && x.RevokedAtUtc == null)
+        // The held user row serializes invalidation with issuance. A stale stamp cannot revoke a newer stamp.
+        var affected = database.BrowserSessionFamilies.Where(x => x.UserId == family.UserId && x.RevokedAtUtc == null);
+        if (user is not null && Eligible(user, now) && !string.IsNullOrEmpty(user.SecurityStamp))
+            affected = affected.Where(x => x.SecurityStamp == family.SecurityStamp);
+        await affected
             .ExecuteUpdateAsync(set => set.SetProperty(x => x.RevokedAtUtc, (DateTimeOffset?)now), cancellationToken);
         family.RevokedAtUtc = now;
         await EventAsync(family.UserId, family.Id, "identity_invalidated", cancellationToken);
         return false;
     }
 
-    private async Task<(BrowserSessionFamily Family, BrowserRefreshCredential Credential)?> FindLockedAsync(string? cookie, CancellationToken cancellationToken)
+    private async Task<CredentialHint?> FindHintAsync(string? cookie, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(cookie) || cookie.Length != 43) return null;
         var hash = await HashAsync(cookie, cancellationToken);
-        var familyId = await database.BrowserRefreshCredentials.AsNoTracking()
-            .Where(x => x.Hash == hash).Select(x => (Guid?)x.FamilyId).SingleOrDefaultAsync(cancellationToken);
-        if (familyId is null) return null;
-        var family = await LockFamilyAsync(familyId.Value, cancellationToken);
-        var credential = await database.BrowserRefreshCredentials.SingleAsync(x => x.Hash == hash, cancellationToken);
+        return await (from credential in database.BrowserRefreshCredentials.AsNoTracking()
+            join family in database.BrowserSessionFamilies.AsNoTracking() on credential.FamilyId equals family.Id
+            where credential.Hash == hash
+            select new CredentialHint(family.Id, family.UserId, hash)).SingleOrDefaultAsync(cancellationToken);
+    }
+    private async Task<(BrowserSessionFamily Family, BrowserRefreshCredential Credential)?> FindLockedAsync(CredentialHint? hint, CancellationToken cancellationToken)
+    {
+        if (hint is null) return null;
+        var family = await LockFamilyAsync(hint.FamilyId, cancellationToken);
+        if (family is null || family.UserId != hint.UserId) return null;
+        var credential = await database.BrowserRefreshCredentials.SingleOrDefaultAsync(x => x.Hash == hint.Hash, cancellationToken);
+        if (credential is null) return null;
         await database.Entry(credential).ReloadAsync(cancellationToken);
-        return family is null ? null : (family, credential);
+        return credential.FamilyId == family.Id && credential.Hash == hint.Hash ? (family, credential) : null;
     }
 
     private async Task<BrowserSessionFamily?> LockFamilyAsync(Guid id, CancellationToken cancellationToken)
@@ -184,12 +211,12 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
         var key = await File.ReadAllBytesAsync(policy.HashKeyReference, cancellationToken);
         try
         {
-            if (key.Length < 32) throw new InvalidOperationException("Session authority unavailable.");
+            if (key.Length < 32) throw new SessionFailure("hash_key_unavailable");
             return Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(secret)));
         }
         finally { CryptographicOperations.ZeroMemory(key); }
     }
-    private async Task<BrowserSessionResult> Once(Func<Task<BrowserSessionResult>> operation, CancellationToken cancellationToken)
+    private async Task<BrowserSessionResult> Once(string operationName, Func<Task<BrowserSessionResult>> operation, CancellationToken cancellationToken)
     {
         var attempted = false;
         try
@@ -197,12 +224,28 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
             // The configured provider retries reads elsewhere. NEVER replay a session mutation after uncertain commit.
             return await database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
             {
-                if (attempted) throw new InvalidOperationException("Session operation cannot be replayed.");
+                if (attempted) throw new SessionFailure("database_uncertain");
                 attempted = true;
                 return await operation();
             });
         }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested) { return Unavailable(); }
+        catch (Exception error) when (!cancellationToken.IsCancellationRequested)
+        {
+            var category = error switch
+            {
+                SessionFailure failure => failure.Category,
+                IOException or UnauthorizedAccessException => "hash_key_unavailable",
+                System.Data.Common.DbException or DbUpdateException
+                    or Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException => "database_uncertain",
+                Zeka.Authentication.AuthenticationAuthorityUnavailableException => "issuer_unavailable",
+                _ => "unexpected"
+            };
+            Failures.Add(1, new KeyValuePair<string, object?>("operation", operationName),
+                new KeyValuePair<string, object?>("category", category));
+            Activity.Current?.AddEvent(new ActivityEvent("browser_session.unavailable", tags: new ActivityTagsCollection
+                { { "operation", operationName }, { "category", category } }));
+            return Unavailable();
+        }
     }
     private static bool Eligible(User user, DateTimeOffset now) => user.Status == UserStatus.Active
         && user.EmailConfirmed && (!user.LockoutEnabled || user.LockoutEnd is null || user.LockoutEnd <= now);
@@ -211,7 +254,8 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
     private static DateTimeOffset Deadline(BrowserSessionFamily family) => Min(family.IdleExpiresAtUtc, family.AbsoluteExpiresAtUtc);
     private BrowserSessionResult Success(BrowserSessionFamily family, string token, string secret, DateTimeOffset now) => new()
     { Outcome = BrowserSessionOutcome.Success, SubjectId = family.UserId, AccessToken = token, RefreshSecret = secret,
-        ExpiresAtUtc = now + policy.AccessLifetime, CookieExpiresAtUtc = Deadline(family) };
+        ExpiresAtUtc = new DateTimeOffset(new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(token).ValidTo),
+        CookieExpiresAtUtc = Deadline(family) };
     private static BrowserSessionResult Denied() => new() { Outcome = BrowserSessionOutcome.Unauthenticated };
     private static BrowserSessionResult Unavailable() => new() { Outcome = BrowserSessionOutcome.Unavailable };
 }
