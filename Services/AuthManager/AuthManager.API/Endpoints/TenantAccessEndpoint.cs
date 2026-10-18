@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using AuthManager.Application.Authorization;
+using AuthManager.Application.Authentication;
 
 namespace AuthManager.API.Endpoints;
 
@@ -18,6 +19,8 @@ public static class TenantAccessEndpoint
             http.Response.Headers.CacheControl = "no-store";
             try
             {
+                var session = await SessionOutcomeAsync(caller, subjectId, http, deadline.Token);
+                if (session != BrowserSessionOutcome.Success) return SessionFailure(session);
                 var decision = await resolver.ResolveAsync(subjectId, organisationId, deadline.Token);
                 if (decision.Outcome == TenantAccessOutcome.Unavailable) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
                 if (decision.Outcome != TenantAccessOutcome.Authorized
@@ -42,6 +45,8 @@ public static class TenantAccessEndpoint
             http.Response.Headers.CacheControl = "no-store";
             try
             {
+                var session = await SessionOutcomeAsync(caller, subjectId, http, deadline.Token);
+                if (session != BrowserSessionOutcome.Success) return SessionFailure(session);
                 var result = await resolver.ResolveAsync(subjectId, organisationId, deadline.Token);
                 if (result.Outcome == TenantAccessOutcome.Unavailable) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
                 return result.Outcome == TenantAccessOutcome.Authorized
@@ -57,6 +62,17 @@ public static class TenantAccessEndpoint
         }).RequireAuthorization(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute
         { AuthenticationSchemes = Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme });
     }
+    private static async Task<BrowserSessionOutcome> SessionOutcomeAsync(ClaimsPrincipal caller, Guid subject,
+        HttpContext http, CancellationToken cancellationToken)
+    {
+        var values = caller.Identities.Where(identity => identity.IsAuthenticated).SelectMany(identity => identity.Claims)
+            .Where(claim => claim.Type == "sid").Select(claim => claim.Value).ToArray();
+        if (values.Length != 1 || !Guid.TryParse(values[0], out var sessionId) || sessionId == Guid.Empty)
+            return BrowserSessionOutcome.Unauthenticated;
+        return await http.RequestServices.GetRequiredService<IBrowserSessions>().CheckActiveAsync(subject, sessionId, cancellationToken);
+    }
+    private static IResult SessionFailure(BrowserSessionOutcome outcome) => outcome == BrowserSessionOutcome.Unavailable
+        ? Results.StatusCode(StatusCodes.Status503ServiceUnavailable) : Results.Unauthorized();
     private static string? AuthenticatedSubject(ClaimsPrincipal caller)
     {
         var subjects = caller.Identities.Where(identity => identity.IsAuthenticated).SelectMany(identity => identity.Claims)

@@ -72,7 +72,8 @@ public static class RlsSecurityManifestVerifier
             || x.EndsWith("rls-manifest.v15.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v16.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v17.json", StringComparison.Ordinal)
-            || x.EndsWith("rls-manifest.v18.json", StringComparison.Ordinal));
+            || x.EndsWith("rls-manifest.v18.json", StringComparison.Ordinal)
+            || x.EndsWith("rls-manifest.v19.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -91,7 +92,7 @@ public static class RlsSecurityManifestVerifier
     public static async Task VerifyAsync(DbContext database, RlsSecurityManifest manifest,
         CancellationToken cancellationToken = default)
     {
-        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18) || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19) || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         var functionDefinitions = FunctionDefinitions(manifest);
         Equal(manifest.RuntimeFunctions, functionDefinitions.Keys,
@@ -756,6 +757,11 @@ public static class RlsSecurityManifestVerifier
                     .. new[] { "Id", "DisplayName", "OwnerUserId", "Status", "Slug",
                         "CreatedAtUtc", "UpdatedAtUtc", "ConcurrencyVersion" }
                         .Select(column => $"{ObjectKey("public", "Organisations")}|{column}")];
+            if (manifest.SchemaVersion >= 19)
+                expectedColumns = [.. expectedColumns,
+                    $"{ObjectKey("public", "BrowserRefreshCredentials")}|ConsumedAtUtc",
+                    $"{ObjectKey("public", "BrowserSessionFamilies")}|IdleExpiresAtUtc",
+                    $"{ObjectKey("public", "BrowserSessionFamilies")}|RevokedAtUtc"];
             if (manifest.SchemaVersion >= 15)
                 expectedColumns = expectedColumns.Order(StringComparer.Ordinal).ToArray();
             if (!manifest.ColumnPrivileges.Select(state => $"{ObjectKey(state.Object)}|{state.Column}")

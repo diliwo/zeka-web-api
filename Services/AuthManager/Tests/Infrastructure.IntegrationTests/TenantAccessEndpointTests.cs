@@ -7,6 +7,7 @@ using System.Text;
 using AuthManager.API;
 using AuthManager.API.Endpoints;
 using AuthManager.Application.Authorization;
+using AuthManager.Application.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -36,6 +37,8 @@ public sealed class TenantAccessEndpointTests
         var access = new Access();
         builder.Services.AddSingleton<ICurrentTenantAccess>(access);
         builder.Services.AddSingleton<IActiveOrganisationMembership, Membership>();
+        var session = new Session();
+        builder.Services.AddSingleton<IBrowserSessions>(session);
         await using var app = builder.Build();
         app.UseAuthentication(); app.UseAuthorization(); app.MapTenantAccess();
         await app.StartAsync();
@@ -46,6 +49,9 @@ public sealed class TenantAccessEndpointTests
         var issuer = IssuerContractTests.Create(fixture);
         issuer.ConfirmPublication(await issuer.PrepareAsync());
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await issuer.IssueAsync(Guid.NewGuid().ToString()));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync(path)).StatusCode);
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            await issuer.IssueSessionAsync(Guid.NewGuid(), Guid.NewGuid(), TimeSpan.FromMinutes(5), default));
         using var authorized = await http.GetAsync(path);
         Assert.Equal(HttpStatusCode.OK, authorized.StatusCode); Assert.True(authorized.Headers.CacheControl!.NoStore);
         Assert.Equal(HttpStatusCode.NoContent, (await http.GetAsync(path + $"/memberships/{Guid.NewGuid()}?includeInactive=true")).StatusCode);
@@ -53,6 +59,18 @@ public sealed class TenantAccessEndpointTests
         Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync(path)).StatusCode);
         access.Outcome = TenantAccessOutcome.Unavailable;
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync(path)).StatusCode);
+        session.Outcome = BrowserSessionOutcome.Unauthenticated;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync(path)).StatusCode);
+        session.Outcome = BrowserSessionOutcome.Unavailable;
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync(path)).StatusCode);
+    }
+    private sealed class Session : IBrowserSessions
+    {
+        public BrowserSessionOutcome Outcome { get; set; } = BrowserSessionOutcome.Success;
+        public Task<BrowserSessionOutcome> CheckActiveAsync(Guid subjectId, Guid sessionId, CancellationToken cancellationToken) => Task.FromResult(Outcome);
+        public Task<BrowserSessionResult> SignInAsync(string email, string password, string? cookie, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<BrowserSessionResult> RestoreAsync(string? cookie, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<BrowserSessionOutcome> LogoutAsync(string? cookie, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
     private sealed class Access : ICurrentTenantAccess
     {

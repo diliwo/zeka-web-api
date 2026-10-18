@@ -86,6 +86,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     }
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<BrowserSessionFamily> BrowserSessionFamilies => Set<BrowserSessionFamily>();
+    public DbSet<BrowserRefreshCredential> BrowserRefreshCredentials => Set<BrowserRefreshCredential>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<Organisation> Organisations => Set<Organisation>();
     public DbSet<TimeZoneConfigurationAudit> TimeZoneConfigurationAudits => Set<TimeZoneConfigurationAudit>();
@@ -115,6 +117,7 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        BrowserSessionConfiguration.Configure(modelBuilder);
         Lifecycle.LifecycleMapping.Configure(modelBuilder, this);
         modelBuilder.ApplyConfiguration(new UserConfiguration());
         modelBuilder.ApplyConfiguration(new IdempotencyRecordConfiguration());

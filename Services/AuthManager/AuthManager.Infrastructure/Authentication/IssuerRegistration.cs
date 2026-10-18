@@ -15,6 +15,7 @@ public static class IssuerRegistration
         services.TryAddSingleton<ISigningKeyProvider, FileSigningKeyProvider>();
         services.AddSingleton<AccessTokenIssuer>();
         services.AddSingleton<IAccessTokenIssuer>(sp => sp.GetRequiredService<AccessTokenIssuer>());
+        services.AddSingleton<AuthManager.Application.Authentication.ISessionAccessTokenIssuer>(sp => sp.GetRequiredService<AccessTokenIssuer>());
         services.AddSingleton<IPublicJwksPublisher>(sp => sp.GetRequiredService<AccessTokenIssuer>());
         return services;
     }

@@ -177,6 +177,18 @@ BEGIN
     END IF;
   END LOOP;
 END $existing_objects$;
+-- Browser sessions are tenant-neutral Identity state; preserve only the mutable rotation/revocation columns.
+DO $browser_session_runtime$
+BEGIN
+  IF pg_catalog.to_regclass('public."BrowserSessionFamilies"') IS NOT NULL THEN
+    GRANT SELECT, INSERT ON public."BrowserSessionFamilies" TO zeka_auth_runtime;
+    GRANT UPDATE ("IdleExpiresAtUtc", "RevokedAtUtc") ON public."BrowserSessionFamilies" TO zeka_auth_runtime;
+  END IF;
+  IF pg_catalog.to_regclass('public."BrowserRefreshCredentials"') IS NOT NULL THEN
+    GRANT SELECT, INSERT ON public."BrowserRefreshCredentials" TO zeka_auth_runtime;
+    GRANT UPDATE ("ConsumedAtUtc") ON public."BrowserRefreshCredentials" TO zeka_auth_runtime;
+  END IF;
+END $browser_session_runtime$;
 -- Organisation configuration is owner-controlled. Reconcile the ordinary runtime to
 -- the pre-timezone column inventory, including after a repeated bootstrap run.
 DO $organisation_runtime_columns$

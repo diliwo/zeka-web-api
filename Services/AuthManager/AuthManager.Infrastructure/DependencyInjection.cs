@@ -45,6 +45,8 @@ public static class DependencyInjection
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
         services.AddOnboardingPersistenceFoundations(configuration);
+        services.AddSingleton(BrowserSessionPolicy.Read(configuration));
+        services.AddScoped<AuthManager.Application.Authentication.IBrowserSessions, BrowserSessions>();
         services.AddScoped<AuthManager.Application.Authorization.ICurrentTenantAccess, CurrentTenantAccessResolver>();
         services.AddScoped<AuthManager.Application.Authorization.IAssigneeEligibility, AssigneeEligibilityResolver>();
         services.AddScoped<AuthManager.Application.Authorization.IOrganisationTimeZone, OrganisationTimeZoneResolver>();
