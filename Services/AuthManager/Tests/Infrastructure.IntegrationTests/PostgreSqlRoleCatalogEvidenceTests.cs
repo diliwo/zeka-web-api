@@ -11,7 +11,7 @@ namespace Infrastructure.IntegrationTests;
 
 [Trait("Issue", "46")]
 [Trait("Evidence", "PlatformConformance")]
-public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
+public sealed class PostgreSqlAuthRoleCatalogEvidenceTests(Xunit.Abstractions.ITestOutputHelper output) : IAsyncLifetime
 {
     private const string MigratorPassword = "test-migrator-password";
     private const string RuntimePassword = "test-runtime-password";
@@ -167,6 +167,8 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
         await ExecuteAdministratorAsync(ReadBootstrapScript("bootstrap-auth-roles.sql"));
 
+        await RecordPrivilegeDifferencesAsync("table", ExactLifecycleTablePrivilegesSql);
+        await RecordPrivilegeDifferencesAsync("column", ExactLifecycleColumnPrivilegesSql);
         Assert.True(await ExecuteAdministratorScalarAsync<bool>(ExactLifecycleTablePrivilegesSql));
         Assert.True(await ExecuteAdministratorScalarAsync<bool>(ExactLifecycleColumnPrivilegesSql));
         Assert.True(await ExecuteAdministratorScalarAsync<bool>("""
@@ -244,6 +246,19 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
         await RlsSecurityManifestVerifier.VerifyAsync(verification, typeof(AuthDbContext).Assembly);
     }
 
+    private async Task RecordPrivilegeDifferencesAsync(string inventory, string exactSql)
+    {
+        var inventories = exactSql[..exactSql.IndexOf("SELECT NOT EXISTS", StringComparison.Ordinal)];
+        var differences = await ExecuteAdministratorScalarAsync<string>(inventories + """
+            SELECT jsonb_build_object(
+              'actual_minus_expected', (SELECT coalesce(jsonb_agg(to_jsonb(delta)), '[]'::jsonb)
+                FROM (SELECT * FROM actual EXCEPT SELECT * FROM expected) delta),
+              'expected_minus_actual', (SELECT coalesce(jsonb_agg(to_jsonb(delta)), '[]'::jsonb)
+                FROM (SELECT * FROM expected EXCEPT SELECT * FROM actual) delta))::text
+            """);
+        output.WriteLine($"{inventory} privilege differences: {differences}");
+    }
+
     private static AuthDbContext Context(string connectionString) => new(
         new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connectionString).Options);
 
@@ -305,6 +320,10 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
           UNION ALL SELECT 'Organisations', 'zeka_auth_runtime', privilege, false
           FROM unnest(ARRAY['SELECT','DELETE']) privilege
           UNION ALL VALUES
+            ('BrowserSessionFamilies','zeka_auth_runtime','SELECT',false),
+            ('BrowserSessionFamilies','zeka_auth_runtime','INSERT',false),
+            ('BrowserRefreshCredentials','zeka_auth_runtime','SELECT',false),
+            ('BrowserRefreshCredentials','zeka_auth_runtime','INSERT',false),
             ('__EFMigrationsHistory','zeka_auth_migrator','SELECT',false),
             ('__EFMigrationsHistory','zeka_auth_migrator','INSERT',false),
             ('__EFMigrationsHistory','zeka_auth_migrator','UPDATE',false),
@@ -370,6 +389,8 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests : IAsyncLifetime
         WITH expected(table_name, column_name, grantee, privilege, is_grantable) AS (
           SELECT table_name, column_name, 'zeka_auth_runtime', 'UPDATE', false
           FROM (VALUES
+            ('BrowserSessionFamilies', ARRAY['IdleExpiresAtUtc','RevokedAtUtc']::text[]),
+            ('BrowserRefreshCredentials', ARRAY['ConsumedAtUtc']::text[]),
             ('OrganisationLifecycleOperations', ARRAY['State','Revision','SnapshotAt','FenceEvidenceHash',
               'PackageSha256','PackageReference','FailureCode','CompletedAt','IsActive','ClosingAt',
               'ArchivedAt','ClosureFenceEvidenceHash','DispositionReadyAt','RetentionDecisionSetHash']::text[]),

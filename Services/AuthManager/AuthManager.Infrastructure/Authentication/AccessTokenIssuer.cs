@@ -80,12 +80,16 @@ public sealed class AccessTokenIssuer(ISigningKeyProvider provider, IssuerOption
             EnsurePrivate(key);
             if (Fingerprint(key) != Volatile.Read(ref publishedFingerprint)) throw new AuthenticationAuthorityUnavailableException();
             var now = clock.GetUtcNow().UtcDateTime;
+            var expires = now + lifetime;
+            // Session validity must never exceed the requested deadline through NumericDate rounding.
+            if (sessionId is not null)
+                expires = new DateTime(expires.Ticks - expires.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc);
             var descriptor = new SecurityTokenDescriptor
             {
                 Issuer = validation.Issuer, Audience = validation.Audience,
                 Subject = new ClaimsIdentity(sessionId is null ? [new Claim("sub", subject)]
                     : [new Claim("sub", subject), new Claim("sid", sessionId)]),
-                IssuedAt = now, NotBefore = now, Expires = now + lifetime,
+                IssuedAt = now, NotBefore = now, Expires = expires,
                 SigningCredentials = new SigningCredentials(new RsaSecurityKey(key)
                 {
                     KeyId = options.ActiveKeyId,

@@ -87,14 +87,51 @@ public sealed class BrowserSessionTransportTests
         Assert.Contains(HttpStatusCode.TooManyRequests, responses);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Proxy_forwards_exact_json_and_content_type_for_known_length_and_chunked_bodies(bool knownLength)
+    {
+        await using var test = await Host.StartAsync();
+        var csrf = await test.CsrfAsync();
+        const string body = "{\"email\":\"fictional@example.invalid\",\"password\":\"Synthetic-Only!89\"}";
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/browser-session/sign-in");
+        request.Content = knownLength ? new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(body))
+            : JsonContent.Create(new { email = "fictional@example.invalid", password = "Synthetic-Only!89" });
+        request.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse("application/json; charset=utf-8");
+        request.Headers.Add("Origin", "https://app.example.invalid");
+        request.Headers.Add("X-Zeka-CSRF", csrf);
+        using var response = await test.Http.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(body, test.Received.Body);
+        Assert.Equal("application/json; charset=utf-8", test.Received.ContentType);
+        Assert.Equal(knownLength, test.Received.ProxyContentLength.HasValue);
+        Assert.Equal(!knownLength, test.Received.ProxyChunked);
+        Assert.Equal("fictional@example.invalid", test.Sessions.LastEmail);
+        Assert.Equal(1, test.Sessions.Mutations);
+        using var restored = await test.PostAsync("restore", csrf);
+        Assert.Equal(HttpStatusCode.OK, restored.StatusCode);
+        Assert.Equal(test.Sessions.RefreshSecret, test.Sessions.LastCookie);
+        Assert.Equal(2, test.Sessions.Mutations);
+    }
+
+    private sealed class ReceivedRequest
+    {
+        public string? Body { get; set; }
+        public string? ContentType { get; set; }
+        public long? ProxyContentLength { get; set; }
+        public bool ProxyChunked { get; set; }
+    }
+
     private sealed class Sessions : IBrowserSessions
     {
         public BrowserSessionOutcome Outcome { get; set; } = BrowserSessionOutcome.Success;
         public string RefreshSecret { get; } = new('a', 43);
         public string? LastCookie { get; private set; }
         public int Mutations { get; private set; }
+        public string? LastEmail { get; private set; }
         public Task<BrowserSessionResult> SignInAsync(string email, string password, string? previousCookie, CancellationToken cancellationToken)
-        { Mutations++; return Result(); }
+        { Mutations++; LastEmail = email; return Result(); }
         public Task<BrowserSessionResult> RestoreAsync(string? cookie, CancellationToken cancellationToken)
         { Mutations++; LastCookie = cookie; return Result(); }
         public Task<BrowserSessionOutcome> LogoutAsync(string? cookie, CancellationToken cancellationToken)
@@ -197,10 +234,11 @@ public sealed class BrowserSessionTransportTests
     }
 
     private sealed class Host(WebApplication app, WebApplication proxy, HttpClient upstream,
-        HttpClient http, Sessions sessions, X509Certificate2 certificate) : IAsyncDisposable
+        HttpClient http, Sessions sessions, X509Certificate2 certificate, ReceivedRequest received) : IAsyncDisposable
     {
         public HttpClient Http => http;
         public Sessions Sessions => sessions;
+        public ReceivedRequest Received => received;
         public BrowserSessionEndpoints.BrowserSessionAdmission Admission => app.Services.GetRequiredService<BrowserSessionEndpoints.BrowserSessionAdmission>();
         public HttpClient Client(string localAddress, bool direct = false)
             => CreateClient(direct ? Address(app) : Address(proxy), localAddress, certificate);
@@ -223,6 +261,19 @@ public sealed class BrowserSessionTransportTests
             var sessions = new Sessions();
             builder.Services.AddSingleton<IBrowserSessions>(sessions);
             var app = builder.Build();
+            var received = new ReceivedRequest();
+            app.Use(async (context, next) =>
+            {
+                if (HttpMethods.IsPost(context.Request.Method))
+                {
+                    context.Request.EnableBuffering();
+                    using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
+                    received.Body = await reader.ReadToEndAsync();
+                    received.ContentType = context.Request.ContentType;
+                    context.Request.Body.Position = 0;
+                }
+                await next(context);
+            });
             app.UseBrowserSessionAttribution(); app.UseRateLimiter(); app.MapBrowserSessions();
             app.MapGet("/unrelated", () => Results.Ok()); await app.StartAsync();
             var upstream = CreateClient(Address(app), "127.0.0.1", certificate, cookies: false);
@@ -232,7 +283,10 @@ public sealed class BrowserSessionTransportTests
             proxy.Run(async context =>
             {
                 using var forwarded = new HttpRequestMessage(new HttpMethod(context.Request.Method), context.Request.Path + context.Request.QueryString);
-                if (context.Request.ContentLength > 0)
+                received.ProxyContentLength = context.Request.ContentLength;
+                received.ProxyChunked = context.Request.Headers.TransferEncoding.Contains("chunked");
+                if (context.Request.ContentLength > 0 || context.Request.Headers.TransferEncoding.Count > 0
+                    || context.Request.ContentType is not null)
                 {
                     forwarded.Content = new StreamContent(context.Request.Body);
                     forwarded.Content.Headers.TryAddWithoutValidation("Content-Type", context.Request.ContentType);
@@ -249,7 +303,7 @@ public sealed class BrowserSessionTransportTests
                 await response.Content.CopyToAsync(context.Response.Body);
             });
             await proxy.StartAsync();
-            return new(app, proxy, upstream, CreateClient(Address(proxy), "127.0.0.2", certificate), sessions, certificate);
+            return new(app, proxy, upstream, CreateClient(Address(proxy), "127.0.0.2", certificate), sessions, certificate, received);
         }
         private static string Address(WebApplication app) => app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         private static HttpClient CreateClient(string address, string localAddress, X509Certificate2 certificate, bool cookies = true)

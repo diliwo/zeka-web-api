@@ -357,6 +357,26 @@ public sealed class BrowserSessionPostgreSqlTests(PostgreSqlFixture fixture)
     }
 
     [Theory]
+    [InlineData(0L)]
+    [InlineData(9999999L)]
+    [InlineData(10000000L)]
+    public async Task Session_response_matches_signed_whole_second_expiry_without_extending_validity(long ticks)
+    {
+        await using var test = await PrepareAsync();
+        test.Clock.Now = DateTimeOffset.FromUnixTimeSeconds(test.Clock.Now.ToUnixTimeSeconds()).AddTicks(ticks);
+        var result = await test.SignInAsync();
+        Assert.Equal(BrowserSessionOutcome.Success, result.Outcome);
+        var jwt = new JsonWebToken(result.AccessToken!);
+        var deadline = test.Clock.Now.AddMinutes(5);
+        var expected = deadline.ToUnixTimeSeconds();
+        Assert.Equal(expected, jwt.GetPayloadValue<long>("exp"));
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(expected), result.ExpiresAtUtc);
+        Assert.Equal(new DateTimeOffset(jwt.ValidTo), result.ExpiresAtUtc);
+        Assert.True(result.ExpiresAtUtc <= deadline);
+        Assert.True(deadline < result.ExpiresAtUtc.AddSeconds(1));
+    }
+
+    [Theory]
     [InlineData("unknown")]
     [InlineData("wrong")]
     public async Task Failed_replacement_preserves_live_family_and_success_reports_exact_signed_expiry(string reason)
