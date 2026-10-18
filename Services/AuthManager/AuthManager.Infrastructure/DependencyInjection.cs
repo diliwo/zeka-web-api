@@ -48,6 +48,7 @@ public static class DependencyInjection
         services.AddSingleton(BrowserSessionPolicy.Read(configuration));
         services.AddScoped<AuthManager.Application.Authentication.IBrowserSessions, BrowserSessions>();
         services.AddScoped<AuthManager.Application.Authorization.ICurrentTenantAccess, CurrentTenantAccessResolver>();
+        services.AddScoped<AuthManager.Application.Authorization.IEligibleOrganisations, EligibleOrganisationsResolver>();
         services.AddScoped<AuthManager.Application.Authorization.IAssigneeEligibility, AssigneeEligibilityResolver>();
         services.AddScoped<AuthManager.Application.Authorization.IOrganisationTimeZone, OrganisationTimeZoneResolver>();
         services.AddScoped<AuthManager.Application.Lifecycle.LifecycleAdmission>();
