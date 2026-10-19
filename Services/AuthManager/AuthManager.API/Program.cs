@@ -24,6 +24,7 @@ app.UseAuthorization();
 app.UseRateLimiter();
 app.MapBrowserSessions();
 app.MapTenantAccess();
+app.MapBrowserEligibleOrganisations();
 app.MapAssigneeEligibility();
 app.MapOrganisationTimeZone();
 app.MapDisabledConfigureTimeZone();
