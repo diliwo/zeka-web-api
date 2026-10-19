@@ -160,7 +160,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
         using (var response = await host.PostAsync("restore", await host.CsrfAsync(noCookies), client: noCookies)) await Error(response, HttpStatusCode.Unauthorized, allowCookie: true);
         using (var response = await host.PostAsync("logout", await host.CsrfAsync(noCookies), client: noCookies)) await Error(response, HttpStatusCode.Unauthorized);
         // Existing legacy route templates are untouched and still participate in the actual gateway.
-        using (var response = await host.Http.GetAsync("/clients/search")) Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await host.AssertLegacyForwardingAsync(output);
         Assert.Contains(host.Gateway.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<FileConfiguration>>().Value.Routes, x => x.UpstreamPathTemplate == "/login");
         output.WriteLine("six_method_path_matrix=true origin_csrf_and_credential_negatives=true internal_routes_closed=true final_assertions=true");
     }
@@ -192,6 +192,27 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
         Assert.Equal(0L, observed.ContentLength);
         Assert.False(observed.HasSetCookie);
         Assert.False(observed.ReachedAuthManager);
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Owned_legacy_listener_is_disposed_on_success_and_startup_failure(bool failStartup)
+    {
+        WebApplication? listener = null;
+        var original = new InvalidOperationException("Synthetic fixture startup failure after legacy acquisition");
+        if (failStartup)
+        {
+            var error = await Record.ExceptionAsync(() => StartAsync(configure: _ => throw original, legacyAcquired: app => listener = app));
+            Assert.Same(original, error);
+        }
+        else
+        {
+            var host = await StartAsync(legacyAcquired: app => listener = app);
+            await host.DisposeAsync();
+        }
+        Assert.NotNull(listener);
+        Assert.Throws<ObjectDisposedException>(() => listener!.Services.GetService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>());
+        output.WriteLine($"legacy_listener_disposed=true startup_failure={failStartup} original_failure_preserved=true final_assertions=true");
     }
 
     [Theory]
@@ -344,7 +365,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     }
 
     private async Task<Fixture> StartAsync(int perAddress = 60, int aggregate = 256, int partitions = 16,
-        Action<Dictionary<string, string?>>? configure = null)
+        Action<Dictionary<string, string?>>? configure = null, Action<WebApplication>? legacyAcquired = null)
     {
         var owned = new Fixture();
         try
@@ -429,10 +450,32 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
                 owned.Alpha = AddChoice(db, owned.Users["ada"], "Alpha"); owned.Beta = AddChoice(db, owned.Users["ada"], "Beta");
                 db.Add(OrganisationMembership.Create(Guid.NewGuid(), owned.Beta, owned.Users["ben"], PermissionSet.ViewerId, DateTimeOffset.UtcNow)); await db.SaveChangesAsync();
             }
+            var legacyBuilder = WebApplication.CreateBuilder(); legacyBuilder.Logging.ClearProviders();
+            legacyBuilder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+            owned.Legacy = legacyBuilder.Build();
+            owned.Legacy.Run(http =>
+            {
+                var correlation = http.Request.Headers["X-Zeka-Test-Case"].ToString();
+                var expected = http.Request.Method == "GET" && http.Request.Path == "/api/clients/search";
+                http.Response.StatusCode = expected ? 404 : 400;
+                owned.LegacyReceipts.Enqueue(new(correlation, http.Request.Method, http.Request.Path.Value!,
+                    http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>()!.RawTarget, http.Response.StatusCode));
+                http.Response.Headers["X-Zeka-Legacy-Fixture"] = correlation;
+                return Task.CompletedTask;
+            });
+            await owned.Legacy.StartAsync(); legacyAcquired?.Invoke(owned.Legacy);
             var gateway = WebApplication.CreateBuilder(); gateway.Logging.ClearProviders(); gateway.Logging.AddProvider(owned.Logs);
             gateway.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(owned.Certificate)));
             gateway.Configuration.AddJsonFile(Path.Combine(root.FullName, "ApiGateways/Ocelot.ApiGateway/ocelot.json"), optional: false, reloadOnChange: false);
+            var routes = gateway.Configuration.GetSection("Routes").Get<List<FileRoute>>()!;
+            var legacyRoute = FindLegacyRoute(routes); // Fail setup unless the existing generic mapping is unique.
+            Assert.Single(legacyRoute.DownstreamHostAndPorts);
+            owned.LegacyRouteOptionsHash = RouteOptionsHash(legacyRoute);
+            var legacyIndex = routes.IndexOf(legacyRoute);
+            var destination = new Uri(Address(owned.Legacy));
             var values = new Dictionary<string, string?> { ["GatewayBrowserTransport:Origin"] = Origin, ["GatewayBrowserTransport:DownstreamOrigin"] = Address(owned.Backend) };
+            values[$"Routes:{legacyIndex}:DownstreamHostAndPorts:0:Host"] = destination.Host;
+            values[$"Routes:{legacyIndex}:DownstreamHostAndPorts:0:Port"] = destination.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
             for (var peer = 2; peer <= 8; peer++) values["GatewayBrowserTransport:ClientPeers:" + (peer - 2)] = "127.0.0." + peer;
             configure?.Invoke(values); gateway.Configuration.AddInMemoryCollection(values); BrowserTransport.Add(gateway);
             // Test-only TLS pin at Ocelot's transport-pool seam. The real route/middleware/requester and TCP/TLS hosts remain in use.
@@ -452,15 +495,29 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
                 }
             });
             owned.Gateway.UseBrowserTransport(); await owned.Gateway.UseOcelot(); await owned.Gateway.StartAsync();
+            var configuredLegacy = FindLegacyRoute(owned.Gateway.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<FileConfiguration>>().Value.Routes);
+            Assert.Equal(owned.LegacyRouteOptionsHash, RouteOptionsHash(configuredLegacy));
+            Assert.Equal(destination.Host, Assert.Single(configuredLegacy.DownstreamHostAndPorts).Host);
+            Assert.Equal(destination.Port, configuredLegacy.DownstreamHostAndPorts[0].Port);
             owned.Http = owned.Client("127.0.0.2"); return owned;
         }
         catch { await owned.DisposeOwnedAsync(suppressErrors: true); throw; }
     }
 
     private static string Address(WebApplication app) => app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+    private static FileRoute FindLegacyRoute(IEnumerable<FileRoute> routes) => Assert.Single(routes.Where(route =>
+        route.UpstreamPathTemplate == "/clients/{url}" && route.DownstreamPathTemplate == "/api/clients/{url}"
+        && route.DownstreamScheme == "http" && route.UpstreamHttpMethod.SequenceEqual(new[] { "GET" }, StringComparer.OrdinalIgnoreCase)));
+    private static string RouteOptionsHash(FileRoute route)
+    {
+        var properties = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(route))!.AsObject();
+        properties.Remove(nameof(FileRoute.DownstreamHostAndPorts));
+        return Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(properties)));
+    }
     private sealed record Received(string Path, string Body, string? ContentType, string Origin, string Csrf, string Cookie, string Authorization, string Client, long? Length, bool Chunked);
     private sealed record GatewayPath(string RawTarget, string DecodedPath, string Method, int Status);
     private sealed record LiteralObservation(HttpStatusCode Status, bool NoStore, long? ContentLength, bool HasSetCookie, bool ReachedAuthManager);
+    private sealed record LegacyReceipt(string Correlation, string Method, string Path, string RawTarget, int Status);
     private sealed class Failure : DbCommandInterceptor
     {
         internal bool Armed;
@@ -508,7 +565,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     }
     private sealed class Fixture : IAsyncDisposable
     {
-        internal WebApplication Backend = null!, Gateway = null!;
+        internal WebApplication Backend = null!, Gateway = null!, Legacy = null!;
         internal AuthenticationFixture Auth = null!;
         internal X509Certificate2 Certificate = null!;
         internal HttpClient Http = null!;
@@ -521,12 +578,51 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
         internal ConcurrentQueue<Received> Received = new();
         internal ConcurrentDictionary<string, TaskCompletionSource<GatewayPath>> PathRequests = new();
         internal ConcurrentDictionary<string, string> DownstreamPaths = new();
+        internal ConcurrentQueue<LegacyReceipt> LegacyReceipts = new();
+        internal string LegacyRouteOptionsHash = "";
         private readonly List<HttpClient> clients = new();
         private readonly Dictionary<HttpClient, CookieContainer> cookies = new();
         internal BrowserSessionEndpoints.BrowserSessionAdmission Admission => Backend.Services.GetRequiredService<BrowserSessionEndpoints.BrowserSessionAdmission>();
         internal string? RefreshCookie => cookies[Http].GetCookies(new Uri(Origin + Session))[BrowserSessionEndpoints.CookieName]?.Value;
         internal AuthDbContext Administrator() => new(new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(AdminConnection).Options);
         internal HttpClient DirectClient() => Client("127.0.0.9", direct: true);
+        internal async Task AssertLegacyForwardingAsync(ITestOutputHelper output)
+        {
+            var correlation = "route-legacy-search-" + Guid.NewGuid().ToString("N");
+            var observed = new TaskCompletionSource<GatewayPath>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Assert.True(PathRequests.TryAdd(correlation, observed));
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/clients/search");
+            request.Headers.Add("X-Zeka-Test-Case", correlation);
+            output.WriteLine("legacy_boundary=" + JsonSerializer.Serialize(new { correlation, boundary = "upstream-send", method = "GET", path = "/clients/search" }));
+            HttpResponseMessage received;
+            try { received = await Http.SendAsync(request); }
+            catch
+            {
+                output.WriteLine("legacy_failure=" + JsonSerializer.Serialize(new { correlation,
+                    gatewayObserved = observed.Task.IsCompletedSuccessfully,
+                    downstreamReceipts = LegacyReceipts.Where(value => value.Correlation == correlation).ToArray(),
+                    reachedAuthManager = DownstreamPaths.ContainsKey(correlation) }));
+                throw;
+            }
+            using var response = received;
+            var gateway = await observed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            var receipt = Assert.Single(LegacyReceipts);
+            output.WriteLine("legacy_receipt=" + JsonSerializer.Serialize(new
+            {
+                correlation, upstreamMethod = "GET", upstreamPath = "/clients/search", gateway.RawTarget,
+                gateway.DecodedPath, downstream = "fixture-owned-ephemeral-loopback", receipt.Method,
+                receipt.Path, downstreamRawTarget = receipt.RawTarget, downstreamStatus = receipt.Status,
+                responseStatus = (int)response.StatusCode, routeOptionsUnchanged = LegacyRouteOptionsHash == RouteOptionsHash(
+                    FindLegacyRoute(Gateway.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<FileConfiguration>>().Value.Routes)),
+                reachedAuthManager = DownstreamPaths.ContainsKey(correlation)
+            }));
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal(correlation, Assert.Single(response.Headers.GetValues("X-Zeka-Legacy-Fixture")));
+            Assert.Equal(correlation, receipt.Correlation); Assert.Equal("GET", receipt.Method);
+            Assert.Equal("/api/clients/search", receipt.Path); Assert.Equal("/api/clients/search", receipt.RawTarget);
+            Assert.Equal(404, receipt.Status); Assert.Equal(404, gateway.Status);
+            Assert.Equal("/clients/search", gateway.RawTarget); Assert.False(DownstreamPaths.ContainsKey(correlation));
+        }
         internal async Task<HttpResponseMessage> ObserveOrdinaryAsync(string caseId, string input, ITestOutputHelper output, HttpMethod? method = null)
         {
             var correlation = "route-" + caseId + "-" + Guid.NewGuid().ToString("N");
@@ -648,6 +744,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
             Exception? first = null;
             foreach (var client in clients) try { client.Dispose(); } catch (Exception e) { first ??= e; }
             try { if (Gateway is not null) await Gateway.DisposeAsync(); } catch (Exception e) { first ??= e; }
+            try { if (Legacy is not null) await Legacy.DisposeAsync(); } catch (Exception e) { first ??= e; }
             try { if (Backend is not null) await Backend.DisposeAsync(); } catch (Exception e) { first ??= e; }
             try { Auth?.Dispose(); } catch (Exception e) { first ??= e; }
             try { Certificate?.Dispose(); } catch (Exception e) { first ??= e; }
