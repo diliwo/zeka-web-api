@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -31,6 +32,60 @@ namespace Infrastructure.IntegrationTests;
 [Trait("Slice", "Discovery")]
 public sealed class EligibleOrganisationsPostgreSqlTests(PostgreSqlFixture fixture, ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Discovery_retry_wait_observes_cancellation_and_uncancelled_control(bool cancel)
+    {
+        await using var test = await PrepareAsync();
+        await using (var db = test.Administrator()) { AddChoice(db, test.Ada, "Alpha"); await db.SaveChangesAsync(); }
+        test.Probe.DiscoveryFailuresRemaining = 2; // Default strategy: first delay zero, second nonzero.
+        using var cancellation = new CancellationTokenSource();
+        using var scope = test.Host.Services.CreateScope();
+        var operation = scope.ServiceProvider.GetRequiredService<IEligibleOrganisations>().ResolveAsync(test.Ada, cancellation.Token);
+        var delay = await test.Probe.NonzeroRetry.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(delay >= TimeSpan.FromSeconds(1));
+        // The diagnostic synchronizes on the real strategy; sample inside its reported wait, not at failure injection.
+        await Task.Delay(TimeSpan.FromMilliseconds(50));
+        Assert.False(operation.IsCompleted);
+        Assert.Equal(2, test.Probe.DiscoveryAttempts);
+        var elapsed = Stopwatch.StartNew();
+        if (cancel)
+        {
+            cancellation.Cancel();
+            var error = await Record.ExceptionAsync(async () => await operation.WaitAsync(delay / 2));
+            if (error is TimeoutException) await Record.ExceptionAsync(async () => await operation);
+            output.WriteLine($"retry_delay_ms={delay.TotalMilliseconds} cancellation_elapsed_ms={elapsed.Elapsed.TotalMilliseconds} attempts={test.Probe.DiscoveryAttempts}");
+            Assert.IsAssignableFrom<OperationCanceledException>(error);
+            Assert.Equal(2, test.Probe.DiscoveryAttempts);
+        }
+        else
+        {
+            var result = await operation;
+            Assert.Equal(EligibleOrganisationsOutcome.Success, result.Outcome);
+            Assert.Single(result.Organisations);
+            Assert.Equal(3, test.Probe.DiscoveryAttempts);
+            output.WriteLine($"uncancelled_retry_delay_ms={delay.TotalMilliseconds} attempts={test.Probe.DiscoveryAttempts}");
+        }
+        Assert.Equal(new[] { "40001", "40001" }, test.Probe.NativeFailures);
+    }
+
+    [Fact]
+    public async Task Discovery_server_deadline_interrupts_provider_retry_wait_with_generic_503()
+    {
+        await using var test = await PrepareAsync();
+        test.Probe.DiscoveryFailuresRemaining = 3;
+        var operation = test.Host.GetAsync(test.Bearer); // Connected client; no client cancellation or timeout.
+        var delay = await test.Probe.LongRetry.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(delay >= TimeSpan.FromSeconds(3));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Delay(Timeout.InfiniteTimeSpan, test.Probe.DiscoveryToken));
+        var elapsed = Stopwatch.StartNew();
+        using var response = await operation.WaitAsync(TimeSpan.FromMilliseconds(750));
+        await DiscoveryEndpointHost.AssertErrorAsync(response, HttpStatusCode.ServiceUnavailable);
+        Assert.Equal(3, test.Probe.DiscoveryAttempts);
+        Assert.Equal(3, test.Probe.NativeFailures.Count);
+        output.WriteLine($"server_retry_delay_ms={delay.TotalMilliseconds} response_after_deadline_ms={elapsed.Elapsed.TotalMilliseconds} attempts={test.Probe.DiscoveryAttempts}");
+    }
+
     [Theory]
     [InlineData(false)] [InlineData(true)]
     public async Task Discovery_fixture_releases_only_its_connections_after_success_or_setup_failure(bool failSetup)
@@ -325,7 +380,8 @@ public sealed class EligibleOrganisationsPostgreSqlTests(PostgreSqlFixture fixtu
         {
             host = await DiscoveryEndpointHost.StartAsync((builder, auth) =>
             {
-                builder.Services.AddDbContext<AuthDbContext>(options => options.UseNpgsql(runtime, provider => provider.EnableRetryOnFailure()).AddInterceptors(probe));
+                builder.Services.AddDbContext<AuthDbContext>(options => options.UseNpgsql(runtime, provider => provider.EnableRetryOnFailure())
+                    .AddInterceptors(probe).LogTo((id, _) => id == CoreEventId.ExecutionStrategyRetrying, probe.Retrying));
                 builder.ConfigureMicrosoftIdentity(); builder.Services.AddOnboardingPersistenceFoundations(builder.Configuration);
                 var issuer = IssuerContractTests.Create(auth);
                 issuer.ConfirmPublication(issuer.PrepareAsync().GetAwaiter().GetResult());
@@ -412,6 +468,18 @@ public sealed class EligibleOrganisationsPostgreSqlTests(PostgreSqlFixture fixtu
     }
     private sealed class ChoiceProbe : DbCommandInterceptor
     {
+        internal int DiscoveryFailuresRemaining { get; set; }
+        internal int DiscoveryAttempts { get; private set; }
+        internal CancellationToken DiscoveryToken { get; private set; }
+        internal List<string> NativeFailures { get; } = [];
+        internal TaskCompletionSource<TimeSpan> NonzeroRetry { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource<TimeSpan> LongRetry { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal void Retrying(EventData data)
+        {
+            var retry = (ExecutionStrategyEventData)data;
+            if (retry.Delay > TimeSpan.Zero) NonzeroRetry.TrySetResult(retry.Delay);
+            if (retry.Delay >= TimeSpan.FromSeconds(3)) LongRetry.TrySetResult(retry.Delay);
+        }
         internal bool FailGrantOnce { get; set; }
         internal CancellationTokenSource? CancelOnFailure { get; set; }
         internal int GrantAttempts { get; private set; }
@@ -446,6 +514,17 @@ public sealed class EligibleOrganisationsPostgreSqlTests(PostgreSqlFixture fixtu
             if (command.CommandText.Contains("LIMIT") && command.CommandText.Contains("OrganisationMemberships")
                 && !command.CommandText.Contains("\"PermissionSets\""))
             {
+                DiscoveryAttempts++;
+                DiscoveryToken = cancellationToken;
+                if (DiscoveryFailuresRemaining > 0)
+                {
+                    DiscoveryFailuresRemaining--;
+                    await using var failure = command.Connection!.CreateCommand();
+                    failure.Transaction = command.Transaction;
+                    failure.CommandText = "DO $$ BEGIN RAISE EXCEPTION 'Synthetic discovery serialization failure' USING ERRCODE = '40001'; END $$";
+                    try { await failure.ExecuteNonQueryAsync(cancellationToken); }
+                    catch (PostgresException error) { NativeFailures.Add(error.SqlState); throw; }
+                }
                 Limit = command.Parameters.Cast<DbParameter>().Select(p => p.Value).OfType<int>().Single();
                 Subject = command.Parameters.Cast<DbParameter>().Select(p => p.Value).OfType<Guid>().Single();
                 Isolation = command.Transaction!.IsolationLevel;

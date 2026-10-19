@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using AuthManager.API;
 using AuthManager.API.Endpoints;
@@ -14,15 +15,111 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using Zeka.Authentication.Tests;
+using Xunit.Abstractions;
 
 namespace Infrastructure.IntegrationTests;
 
 [Trait("Issue", "89")]
 [Trait("Slice", "Discovery")]
-public sealed class BrowserEligibleOrganisationsEndpointTests
+public sealed class BrowserEligibleOrganisationsEndpointTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData("configure", false)] [InlineData("build", false)] [InlineData("start", false)]
+    [InlineData("handler", false)] [InlineData("client", false)] [InlineData("return", false)]
+    [InlineData("return", true)]
+    public async Task Early_startup_failure_releases_owned_resources_and_preserves_original_failure(string stage, bool cleanupFails)
+    {
+        var original = new InvalidOperationException("Synthetic startup failure: " + stage);
+        var owned = new StartupOwnership();
+        var callerOwned = new DisposalProbe(false);
+        var error = await Record.ExceptionAsync(() => DiscoveryEndpointHost.StartAsync((builder, _) =>
+        {
+            builder.Services.AddSingleton(callerOwned);
+            if (stage == "configure") throw original;
+            if (stage == "build")
+            {
+                builder.Host.UseDefaultServiceProvider(options => options.ValidateOnBuild = true);
+                builder.Services.AddSingleton<InvalidStartupService>();
+            }
+            if (stage == "start") builder.Services.AddSingleton<IHostedService>(new FailingStartupService(original));
+            if (cleanupFails) builder.Services.AddSingleton(_ => new DisposalProbe(true));
+        }, (point, resource) =>
+        {
+            owned.Acquired(point, resource);
+            if (cleanupFails && point == "application")
+                ((WebApplication)resource).Services.GetRequiredService<DisposalProbe>();
+            if (point == stage && stage is "handler" or "client" or "return") throw original;
+        }, () => new ObservedHandler(cleanupFails)));
+        if (stage == "build") Assert.Contains(nameof(UnregisteredStartupDependency), error!.ToString());
+        else Assert.Same(original, error);
+        owned.AssertDisposed();
+        Assert.False(callerOwned.Disposed);
+        output.WriteLine($"startup_failure={stage} cleanup_failure={cleanupFails} original_preserved=true owned_disposal_verified=true {owned.Inventory}");
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Successful_startup_and_disposal_release_all_owned_resources_independently(bool cleanupFails)
+    {
+        var owned = new StartupOwnership();
+        var host = await DiscoveryEndpointHost.StartAsync(acquired: owned.Acquired,
+            createHandler: () => new ObservedHandler(cleanupFails));
+        await host.AssertAsync(HttpStatusCode.Unauthorized);
+        var error = await Record.ExceptionAsync(async () => await host.DisposeAsync());
+        if (cleanupFails) Assert.IsType<InvalidOperationException>(error);
+        else Assert.Null(error);
+        owned.AssertDisposed();
+        output.WriteLine($"normal_disposal cleanup_failure={cleanupFails} owned_disposal_verified=true {owned.Inventory}");
+    }
+
+    private sealed class StartupOwnership
+    {
+        private AuthenticationFixture? auth;
+        private WebApplication? app;
+        private HttpClient? client;
+        private ObservedHandler? handler;
+        internal string Inventory => $"auth_acquired={auth is not null} app_acquired={app is not null} client_acquired={client is not null} handler_acquired={handler is not null} handler_disposed={handler?.Disposed}";
+        internal void Acquired(string stage, object value)
+        {
+            if (stage == "auth") auth = (AuthenticationFixture)value;
+            if (stage == "application") app = (WebApplication)value;
+            if (stage == "handler") handler = (ObservedHandler)value;
+            if (stage == "client") client = (HttpClient)value;
+        }
+        internal void AssertDisposed()
+        {
+            Assert.NotNull(auth);
+            Assert.NotNull(Record.Exception(() => auth.Key.ExportParameters(false)));
+            if (app is not null) Assert.Throws<ObjectDisposedException>(() => app.Services.GetService<IHostApplicationLifetime>());
+            if (client is not null) Assert.Throws<ObjectDisposedException>(() => client.CancelPendingRequests());
+            if (handler is not null) Assert.True(handler.Disposed);
+        }
+    }
+    private sealed class ObservedHandler(bool failDispose) : DelegatingHandler(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false })
+    {
+        internal bool Disposed { get; private set; }
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true; base.Dispose(disposing);
+            if (failDispose) throw new InvalidOperationException("Synthetic handler cleanup failure");
+        }
+    }
+    private sealed class DisposalProbe(bool failDispose) : IDisposable
+    {
+        internal bool Disposed { get; private set; }
+        public void Dispose() { Disposed = true; if (failDispose) throw new InvalidOperationException("Synthetic application cleanup failure"); }
+    }
+    private sealed class UnregisteredStartupDependency;
+    private sealed class InvalidStartupService(UnregisteredStartupDependency dependency) { internal object Dependency => dependency; }
+    private sealed class FailingStartupService(Exception original) : IHostedService
+    {
+        public Task StartAsync(CancellationToken token) => Task.FromException(original);
+        public Task StopAsync(CancellationToken token) => Task.CompletedTask;
+    }
+
     [Fact]
     public async Task Bearer_only_gate_rejects_missing_expired_ambiguous_and_subject_only_credentials()
     {
@@ -117,7 +214,7 @@ public sealed class BrowserEligibleOrganisationsEndpointTests
 }
 
 internal sealed class DiscoveryEndpointHost(WebApplication app, AuthenticationFixture auth,
-    DocumentSource source, HttpClient http, DiscoveryChoices choices, DiscoverySessions sessions) : IAsyncDisposable
+    DocumentSource source, HttpClient http, DiscoveryChoices choices, DiscoverySessions sessions, HttpMessageHandler handler) : IAsyncDisposable
 {
     internal const string Path = "/api/v1/browser-organisations/eligible";
     internal Guid Subject { get; } = Guid.Parse("89000000-0000-0000-0000-000000000001");
@@ -128,29 +225,46 @@ internal sealed class DiscoveryEndpointHost(WebApplication app, AuthenticationFi
     internal DiscoveryChoices Choices => choices;
     internal DiscoverySessions Sessions => sessions;
     internal IServiceProvider Services => app.Services;
-    internal static async Task<DiscoveryEndpointHost> StartAsync(Action<WebApplicationBuilder, AuthenticationFixture>? configure = null)
+    internal static async Task<DiscoveryEndpointHost> StartAsync(Action<WebApplicationBuilder, AuthenticationFixture>? configure = null,
+        Action<string, object>? acquired = null, Func<HttpMessageHandler>? createHandler = null)
     {
-        var builder = WebApplication.CreateBuilder(); builder.Logging.ClearProviders();
-        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
-        var auth = new AuthenticationFixture(); var source = new DocumentSource(auth.Jwks());
-        builder.Configuration.AddConfiguration(auth.Configuration());
-        builder.Services.AddAuthentication(options => { options.DefaultAuthenticateScheme = "identity-cookie"; options.DefaultChallengeScheme = "identity-cookie"; }).AddCookie("identity-cookie");
-        builder.Services.AddTenantAuthentication(auth.Configuration());
-        builder.Services.AddSingleton<Zeka.Authentication.IJwksDocumentSource>(source);
-        builder.Services.AddSingleton<TimeProvider>(auth.Clock);
-        var choices = new DiscoveryChoices(); var sessions = new DiscoverySessions();
-        builder.Services.AddSingleton<IEligibleOrganisations>(choices);
-        builder.Services.AddSingleton<IBrowserSessions>(sessions);
-        configure?.Invoke(builder, auth);
-        var mapTenantAccess = builder.Services.Any(service => service.ServiceType == typeof(ICurrentTenantAccess));
-        var app = builder.Build(); app.UseAuthentication(); app.UseAuthorization();
-        app.MapBrowserEligibleOrganisations();
-        // Real selected-tenant route is mapped only for provider tests that register its dependencies.
-        if (mapTenantAccess) app.MapTenantAccess();
-        await app.StartAsync();
-        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
-        return new(app, auth, source, new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false })
-            { BaseAddress = new Uri(address) }, choices, sessions);
+        AuthenticationFixture? auth = null; WebApplication? app = null; HttpClient? http = null; HttpMessageHandler? handler = null;
+        try
+        {
+            var builder = WebApplication.CreateBuilder(); builder.Logging.ClearProviders();
+            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+            auth = new AuthenticationFixture(); acquired?.Invoke("auth", auth);
+            var source = new DocumentSource(auth.Jwks());
+            builder.Configuration.AddConfiguration(auth.Configuration());
+            builder.Services.AddAuthentication(options => { options.DefaultAuthenticateScheme = "identity-cookie"; options.DefaultChallengeScheme = "identity-cookie"; }).AddCookie("identity-cookie");
+            builder.Services.AddTenantAuthentication(auth.Configuration());
+            builder.Services.AddSingleton<Zeka.Authentication.IJwksDocumentSource>(source);
+            builder.Services.AddSingleton<TimeProvider>(auth.Clock);
+            var choices = new DiscoveryChoices(); var sessions = new DiscoverySessions();
+            builder.Services.AddSingleton<IEligibleOrganisations>(choices);
+            builder.Services.AddSingleton<IBrowserSessions>(sessions);
+            configure?.Invoke(builder, auth);
+            var mapTenantAccess = builder.Services.Any(service => service.ServiceType == typeof(ICurrentTenantAccess));
+            app = builder.Build(); acquired?.Invoke("application", app);
+            app.UseAuthentication(); app.UseAuthorization();
+            app.MapBrowserEligibleOrganisations();
+            // Real selected-tenant route is mapped only for provider tests that register its dependencies.
+            if (mapTenantAccess) app.MapTenantAccess();
+            await app.StartAsync();
+            var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+            handler = createHandler?.Invoke() ?? new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false };
+            acquired?.Invoke("handler", handler);
+            http = new HttpClient(handler, disposeHandler: false);
+            http.BaseAddress = new Uri(address);
+            acquired?.Invoke("client", http);
+            acquired?.Invoke("return", app);
+            return new(app, auth, source, http, choices, sessions, handler);
+        }
+        catch
+        {
+            await DisposeOwnedAsync(http, handler, app, auth, suppressErrors: true);
+            throw;
+        }
     }
     internal string ValidToken() => Token([new("sub", Subject.ToString()), new("sid", Session.ToString())]);
     internal string Token(IEnumerable<Claim> claims, bool expired = false)
@@ -173,7 +287,23 @@ internal sealed class DiscoveryEndpointHost(WebApplication app, AuthenticationFi
         Assert.Equal(status, response.StatusCode); Assert.True(response.Headers.CacheControl!.NoStore);
         Assert.Equal("", await response.Content.ReadAsStringAsync()); Assert.False(response.Headers.Contains("Set-Cookie"));
     }
-    public async ValueTask DisposeAsync() { http.Dispose(); await app.DisposeAsync(); auth.Dispose(); }
+    private bool disposed;
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed) return;
+        disposed = true;
+        await DisposeOwnedAsync(http, handler, app, auth, suppressErrors: false);
+    }
+    private static async Task DisposeOwnedAsync(HttpClient? client, HttpMessageHandler? handler,
+        WebApplication? application, AuthenticationFixture? authentication, bool suppressErrors)
+    {
+        Exception? first = null;
+        try { client?.Dispose(); } catch (Exception error) { first ??= error; }
+        try { handler?.Dispose(); } catch (Exception error) { first ??= error; }
+        try { if (application is not null) await application.DisposeAsync(); } catch (Exception error) { first ??= error; }
+        try { authentication?.Dispose(); } catch (Exception error) { first ??= error; }
+        if (!suppressErrors && first is not null) ExceptionDispatchInfo.Capture(first).Throw();
+    }
 }
 
 internal sealed class DiscoveryChoices : IEligibleOrganisations
