@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -115,19 +116,28 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
             var right = index is 1 or 2 or 3 ? HttpMethod.Post : HttpMethod.Get;
             foreach (var wrong in new[] { HttpMethod.Get, HttpMethod.Post, HttpMethod.Put, HttpMethod.Delete, HttpMethod.Options, HttpMethod.Head }.Where(x => x != right))
             {
-                using var request = new HttpRequestMessage(wrong, paths[index]);
-                using var response = await host.Http.SendAsync(request);
+                using var response = await host.ObserveOrdinaryAsync($"method-{index}-{wrong.Method}", paths[index], output, wrong);
                 await Error(response, HttpStatusCode.NotFound);
             }
+            var variantIndex = 0;
             foreach (var path in new[] { paths[index] + "/", paths[index] + "/extra", paths[index].ToUpperInvariant() })
             {
-                using var response = await host.Http.GetAsync(path); await Error(response, HttpStatusCode.NotFound);
+                using var response = await host.ObserveOrdinaryAsync($"path-{index}-{++variantIndex}", path, output);
+                await Error(response, HttpStatusCode.NotFound);
             }
         }
+        var invalidIndex = 0;
         foreach (var path in new[] { "/api/v1/browser-session", "/api/v1/browser-session/unknown", "/api/v1/tenant-access/not-a-guid",
             "/api/v1/tenant-access/", "/api/v1/tenant-access/" + Guid.Empty, "/api/v1/tenant-access/" + host.Alpha + "/memberships/" + Guid.NewGuid(), "/api/v1/internal", "/api/v1/browser-session/%63srf" })
         {
-            using var response = await host.Http.GetAsync(path); await Error(response, HttpStatusCode.NotFound);
+            var caseId = "invalid-" + ++invalidIndex;
+            if (path == Session + "%63srf")
+                AssertLiteralDenied(await host.ObserveLiteralAsync(caseId, path, output));
+            else
+            {
+                using var response = await host.ObserveOrdinaryAsync(caseId, path, output);
+                await Error(response, HttpStatusCode.NotFound);
+            }
         }
         foreach (var path in new[] { Eligible, "/api/v1/tenant-access/" + host.Alpha })
         {
@@ -153,6 +163,35 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
         using (var response = await host.Http.GetAsync("/clients/search")) Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Contains(host.Gateway.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<FileConfiguration>>().Value.Routes, x => x.UpstreamPathTemplate == "/login");
         output.WriteLine("six_method_path_matrix=true origin_csrf_and_credential_negatives=true internal_routes_closed=true final_assertions=true");
+    }
+
+    [Fact]
+    public async Task Ordinary_URI_normalization_and_literal_TLS_target_are_observed_at_the_unchanged_gateway()
+    {
+        await using var host = await StartAsync();
+        const string encoded = "/api/v1/browser-session/%63srf";
+        using (var ordinary = await host.ObserveOrdinaryAsync("normalization-control", encoded, output))
+        {
+            // This is the observed canonical request control, not the disallowed-target assertion.
+            await Success(ordinary, HttpStatusCode.OK);
+            Assert.Equal(Session + "csrf", ordinary.RequestMessage!.RequestUri!.PathAndQuery);
+        }
+        var literal = await host.ObserveLiteralAsync("literal-encoded", encoded, output);
+        AssertLiteralDenied(literal);
+        var control = await host.ObserveLiteralAsync("literal-canonical-control", Session + "csrf", output);
+        Assert.Equal(HttpStatusCode.OK, control.Status);
+        Assert.True(control.NoStore);
+        Assert.True(control.ReachedAuthManager);
+        output.WriteLine("ordinary_normalization_proved=true literal_encoded_denied=true literal_canonical_control_passed=true final_assertions=true");
+    }
+
+    private static void AssertLiteralDenied(LiteralObservation observed)
+    {
+        Assert.Equal(HttpStatusCode.NotFound, observed.Status);
+        Assert.True(observed.NoStore);
+        Assert.Equal(0L, observed.ContentLength);
+        Assert.False(observed.HasSetCookie);
+        Assert.False(observed.ReachedAuthManager);
     }
 
     [Theory]
@@ -362,6 +401,8 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
             owned.Backend = backend.Build();
             owned.Backend.Use(async (http, next) =>
             {
+                var correlation = http.Request.Headers["X-Zeka-Test-Case"].ToString();
+                if (owned.PathRequests.ContainsKey(correlation)) owned.DownstreamPaths[correlation] = http.Request.Path.Value!;
                 http.Request.EnableBuffering(); using var reader = new StreamReader(http.Request.Body, leaveOpen: true);
                 var body = await reader.ReadToEndAsync(); http.Request.Body.Position = 0;
                 owned.Received.Enqueue(new(http.Request.Path, body, http.Request.ContentType, http.Request.Headers.Origin.ToString(),
@@ -396,7 +437,21 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
             configure?.Invoke(values); gateway.Configuration.AddInMemoryCollection(values); BrowserTransport.Add(gateway);
             // Test-only TLS pin at Ocelot's transport-pool seam. The real route/middleware/requester and TCP/TLS hosts remain in use.
             gateway.Services.AddSingleton<IMessageInvokerPool>(_ => owned.Pool = new PinnedPool(owned.Certificate));
-            owned.Gateway = gateway.Build(); owned.Gateway.UseBrowserTransport(); await owned.Gateway.UseOcelot(); await owned.Gateway.StartAsync();
+            owned.Gateway = gateway.Build();
+            // Observe before the real guard without rewriting any request feature or header.
+            owned.Gateway.Use(async (http, next) =>
+            {
+                var correlation = http.Request.Headers["X-Zeka-Test-Case"].ToString();
+                var raw = http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>()!.RawTarget;
+                var path = http.Request.Path.Value!;
+                try { await next(http); }
+                finally
+                {
+                    if (owned.PathRequests.TryGetValue(correlation, out var observation))
+                        observation.TrySetResult(new(raw, path, http.Request.Method, http.Response.StatusCode));
+                }
+            });
+            owned.Gateway.UseBrowserTransport(); await owned.Gateway.UseOcelot(); await owned.Gateway.StartAsync();
             owned.Http = owned.Client("127.0.0.2"); return owned;
         }
         catch { await owned.DisposeOwnedAsync(suppressErrors: true); throw; }
@@ -404,6 +459,8 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
 
     private static string Address(WebApplication app) => app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
     private sealed record Received(string Path, string Body, string? ContentType, string Origin, string Csrf, string Cookie, string Authorization, string Client, long? Length, bool Chunked);
+    private sealed record GatewayPath(string RawTarget, string DecodedPath, string Method, int Status);
+    private sealed record LiteralObservation(HttpStatusCode Status, bool NoStore, long? ContentLength, bool HasSetCookie, bool ReachedAuthManager);
     private sealed class Failure : DbCommandInterceptor
     {
         internal bool Armed;
@@ -462,12 +519,83 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
         internal Guid Alpha, Beta;
         internal Dictionary<string, Guid> Users = new();
         internal ConcurrentQueue<Received> Received = new();
+        internal ConcurrentDictionary<string, TaskCompletionSource<GatewayPath>> PathRequests = new();
+        internal ConcurrentDictionary<string, string> DownstreamPaths = new();
         private readonly List<HttpClient> clients = new();
         private readonly Dictionary<HttpClient, CookieContainer> cookies = new();
         internal BrowserSessionEndpoints.BrowserSessionAdmission Admission => Backend.Services.GetRequiredService<BrowserSessionEndpoints.BrowserSessionAdmission>();
         internal string? RefreshCookie => cookies[Http].GetCookies(new Uri(Origin + Session))[BrowserSessionEndpoints.CookieName]?.Value;
         internal AuthDbContext Administrator() => new(new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(AdminConnection).Options);
         internal HttpClient DirectClient() => Client("127.0.0.9", direct: true);
+        internal async Task<HttpResponseMessage> ObserveOrdinaryAsync(string caseId, string input, ITestOutputHelper output, HttpMethod? method = null)
+        {
+            var correlation = "route-" + caseId + "-" + Guid.NewGuid().ToString("N");
+            var completion = new TaskCompletionSource<GatewayPath>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Assert.True(PathRequests.TryAdd(correlation, completion));
+            using var request = new HttpRequestMessage(method ?? HttpMethod.Get, input) { Version = HttpVersion.Version11, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
+            var constructed = request.RequestUri!.OriginalString;
+            request.Headers.Add("X-Zeka-Test-Case", correlation);
+            var response = await Http.SendAsync(request);
+            var gateway = await completion.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            output.WriteLine("route_observation=" + JsonSerializer.Serialize(new
+            {
+                caseId, correlation, sender = "ordinary-HttpClient", input, method = request.Method.Method, constructedRequestUri = constructed,
+                requestUri = request.RequestUri!.AbsoluteUri, originalString = request.RequestUri.OriginalString,
+                serializedTarget = request.RequestUri.PathAndQuery, gateway.RawTarget, gateway.DecodedPath,
+                responseStatus = (int)response.StatusCode, gatewayStatus = gateway.Status,
+                reachedAuthManager = DownstreamPaths.ContainsKey(correlation),
+                downstreamPath = DownstreamPaths.GetValueOrDefault(correlation)
+            }));
+            Assert.Equal(request.RequestUri.PathAndQuery, gateway.RawTarget);
+            Assert.Equal((int)response.StatusCode, gateway.Status);
+            return response;
+        }
+        internal async Task<LiteralObservation> ObserveLiteralAsync(string caseId, string target, ITestOutputHelper output)
+        {
+            // Only fixed fictional path probes are admitted; no credentials, cookies or bodies enter this sender.
+            if (target != Session + "%63srf" && target != Session + "csrf") throw new ArgumentException("Unexpected literal test target");
+            var correlation = "route-" + caseId + "-" + Guid.NewGuid().ToString("N");
+            var completion = new TaskCompletionSource<GatewayPath>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Assert.True(PathRequests.TryAdd(correlation, completion));
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            socket.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.2"), 0));
+            await socket.ConnectAsync(IPAddress.Loopback, new Uri(Address(Gateway)).Port, deadline.Token);
+            await using var network = new NetworkStream(socket, ownsSocket: false);
+            await using var tls = new SslStream(network, leaveInnerStreamOpen: true);
+            await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            {
+                TargetHost = new Uri(Origin).DnsSafeHost, ApplicationProtocols = [SslApplicationProtocol.Http11],
+                RemoteCertificateValidationCallback = (_, presented, _, _) => presented?.GetCertHashString() == Certificate.Thumbprint
+            }, deadline.Token);
+            var line = Encoding.ASCII.GetBytes("GET " + target + " HTTP/1.1\r\n");
+            var headers = Encoding.ASCII.GetBytes("Host: browser.example.invalid\r\nX-Zeka-Test-Case: " + correlation + "\r\nConnection: close\r\n\r\n");
+            await tls.WriteAsync(line, deadline.Token); await tls.WriteAsync(headers, deadline.Token); await tls.FlushAsync(deadline.Token);
+            using var reader = new StreamReader(tls, Encoding.ASCII, leaveOpen: true);
+            var statusLine = await reader.ReadLineAsync(deadline.Token);
+            Assert.NotNull(statusLine);
+            var status = (HttpStatusCode)int.Parse(statusLine!.Split(' ')[1], System.Globalization.CultureInfo.InvariantCulture);
+            var noStore = false; var hasCookie = false; long? contentLength = null;
+            while (await reader.ReadLineAsync(deadline.Token) is { Length: > 0 } header)
+            {
+                if (header.StartsWith("Cache-Control:", StringComparison.OrdinalIgnoreCase)) noStore = header.Contains("no-store", StringComparison.OrdinalIgnoreCase);
+                if (header.StartsWith("Set-Cookie:", StringComparison.OrdinalIgnoreCase)) hasCookie = true;
+                if (header.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) contentLength = long.Parse(header[15..].Trim(), System.Globalization.CultureInfo.InvariantCulture);
+                // Values of all other headers and response bodies are deliberately not recorded.
+            }
+            var gateway = await completion.Task.WaitAsync(deadline.Token);
+            var reached = DownstreamPaths.ContainsKey(correlation);
+            output.WriteLine("route_observation=" + JsonSerializer.Serialize(new
+            {
+                caseId, correlation, sender = "literal-TLS-HTTP1", input = target, method = "GET",
+                requestLineAscii = Encoding.ASCII.GetString(line), requestLineHex = Convert.ToHexString(line),
+                gateway.RawTarget, gateway.DecodedPath, responseStatus = (int)status, gatewayStatus = gateway.Status,
+                reachedAuthManager = reached, downstreamPath = DownstreamPaths.GetValueOrDefault(correlation), noStore, contentLength
+            }));
+            Assert.Equal(target, gateway.RawTarget); Assert.Equal(Session + "csrf", gateway.DecodedPath);
+            Assert.Equal((int)status, gateway.Status);
+            return new(status, noStore, contentLength, hasCookie, reached);
+        }
         internal HttpClient Client(string peer, bool direct = false)
         {
             var address = new Uri(Address(direct ? Backend : Gateway)); var jar = new CookieContainer();
