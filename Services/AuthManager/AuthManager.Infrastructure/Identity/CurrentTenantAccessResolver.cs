@@ -19,55 +19,59 @@ public sealed class CurrentTenantAccessResolver(AuthDbContext database, TimeProv
         if (authenticatedSubjectId == Guid.Empty || selectedOrganisationId == Guid.Empty)
             return CurrentTenantAccess.Denied(now);
 
-        await using var transaction = await database.Database.BeginTransactionAsync(
-            IsolationLevel.RepeatableRead, cancellationToken);
-        await TenantContextInitializer.InitializeAsync(
-            database, transaction, selectedOrganisationId, cancellationToken);
+        // The caller's one deadline also bounds execution-strategy backoff and every complete attempt.
+        return await database.Database.CreateExecutionStrategy().ExecuteAsync(async attemptCancellation =>
+        {
+            await using var transaction = await database.Database.BeginTransactionAsync(
+                IsolationLevel.RepeatableRead, attemptCancellation);
+            await TenantContextInitializer.InitializeAsync(
+                database, transaction, selectedOrganisationId, attemptCancellation);
 
-        // A repeatable-read database observation avoids assembling an authorization decision from stale claims
-        // or independently cached organisation, membership, role, and explicit-grant records.
-        var matches = await (
-            from membership in database.OrganisationMemberships.AsNoTracking()
-            join organisation in database.Organisations on membership.OrganisationId equals organisation.Id
-            join user in database.Users on membership.UserId equals user.Id
-            join role in database.PermissionSets on membership.PermissionSetId equals role.Id
-            where membership.UserId == authenticatedSubjectId
-                && membership.OrganisationId == selectedOrganisationId
-                && membership.Status == MembershipStatus.Active
-                && organisation.Status == OrganisationStatus.Active
-                && user.Status == UserStatus.Active
-                && user.EmailConfirmed
-                && (!user.LockoutEnabled || user.LockoutEnd == null || user.LockoutEnd <= now)
-                && role.IsSystem
-            select new { membership.Id, Role = role.Code,
-                MembershipVersion = membership.ConcurrencyVersion, OrganisationVersion = organisation.ConcurrencyVersion })
-            .Take(2).ToListAsync(cancellationToken);
+            // A repeatable-read database observation avoids assembling an authorization decision from stale claims
+            // or independently cached organisation, membership, role, and explicit-grant records.
+            var matches = await (
+                from membership in database.OrganisationMemberships.AsNoTracking()
+                join organisation in database.Organisations on membership.OrganisationId equals organisation.Id
+                join user in database.Users on membership.UserId equals user.Id
+                join role in database.PermissionSets on membership.PermissionSetId equals role.Id
+                where membership.UserId == authenticatedSubjectId
+                    && membership.OrganisationId == selectedOrganisationId
+                    && membership.Status == MembershipStatus.Active
+                    && organisation.Status == OrganisationStatus.Active
+                    && user.Status == UserStatus.Active
+                    && user.EmailConfirmed
+                    && (!user.LockoutEnabled || user.LockoutEnd == null || user.LockoutEnd <= now)
+                    && role.IsSystem
+                select new { membership.Id, Role = role.Code,
+                    MembershipVersion = membership.ConcurrencyVersion, OrganisationVersion = organisation.ConcurrencyVersion })
+                .Take(2).ToListAsync(attemptCancellation);
 
-        if (matches.Count != 1 || TenantPermissions.Resolve(matches[0].Role) is not { } permissions)
-            return CurrentTenantAccess.Denied(now);
+            if (matches.Count != 1 || TenantPermissions.Resolve(matches[0].Role) is not { } permissions)
+                return CurrentTenantAccess.Denied(now);
 
-        var match = matches[0];
-        var explicitGrants = await database.MembershipPermissionGrants.AsNoTracking()
-            .Where(grant => grant.OrganisationId == selectedOrganisationId
-                && grant.OrganisationMembershipId == match.Id
-                && grant.RevokedAtUtc == null)
-            .OrderBy(grant => grant.PermissionKey)
-            .ThenBy(grant => grant.Id)
-            .Select(grant => new { grant.Id, grant.PermissionKey, grant.ConcurrencyVersion })
-            .ToListAsync(cancellationToken);
-        if (explicitGrants.Any(grant =>
-                !TenantPermissions.IsExplicitGrantAllowed(match.Role, grant.PermissionKey)))
-            return CurrentTenantAccess.Denied(now);
-        var effectivePermissions = permissions.Concat(explicitGrants.Select(grant => grant.PermissionKey))
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        var grantVersion = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|',
-            explicitGrants.Select(grant => $"{grant.Id:D}:{grant.ConcurrencyVersion}:{grant.PermissionKey}")))));
-        await transaction.CommitAsync(cancellationToken);
-        return new CurrentTenantAccess(TenantAccessOutcome.Authorized, selectedOrganisationId, match.Id,
-            effectivePermissions,
-            $"v2:{match.OrganisationVersion}:{match.MembershipVersion}:{match.Role}:{grantVersion}", now);
+            var match = matches[0];
+            var explicitGrants = await database.MembershipPermissionGrants.AsNoTracking()
+                .Where(grant => grant.OrganisationId == selectedOrganisationId
+                    && grant.OrganisationMembershipId == match.Id
+                    && grant.RevokedAtUtc == null)
+                .OrderBy(grant => grant.PermissionKey)
+                .ThenBy(grant => grant.Id)
+                .Select(grant => new { grant.Id, grant.PermissionKey, grant.ConcurrencyVersion })
+                .ToListAsync(attemptCancellation);
+            if (explicitGrants.Any(grant =>
+                    !TenantPermissions.IsExplicitGrantAllowed(match.Role, grant.PermissionKey)))
+                return CurrentTenantAccess.Denied(now);
+            var effectivePermissions = permissions.Concat(explicitGrants.Select(grant => grant.PermissionKey))
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            var grantVersion = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|',
+                explicitGrants.Select(grant => $"{grant.Id:D}:{grant.ConcurrencyVersion}:{grant.PermissionKey}")))));
+            await transaction.CommitAsync(attemptCancellation);
+            return new CurrentTenantAccess(TenantAccessOutcome.Authorized, selectedOrganisationId, match.Id,
+                effectivePermissions,
+                $"v2:{match.OrganisationVersion}:{match.MembershipVersion}:{match.Role}:{grantVersion}", now);
+        }, cancellationToken);
     }
 
 }
