@@ -138,9 +138,9 @@ internal static class GatewayHandlerTrustProbeSupport
             diagnostic.At(ProbeOperation.UntrustedEndpointStart);
             untrustedServer = await StartEndpointAsync(untrustedLeaf, observations, failures);
             diagnostic.At(ProbeOperation.TrustedAddress);
-            var trustedUri = Address(trustedServer);
+            var trustedUri = RequestTarget(Address(trustedServer));
             diagnostic.At(ProbeOperation.UntrustedAddress);
-            var untrustedUri = Address(untrustedServer);
+            var untrustedUri = RequestTarget(Address(untrustedServer));
             foreach (var lifecycle in new[] { "normal", "startup-failure", "abnormal-child" })
             {
                 await ControlAsync("before-" + lifecycle, trustedUri, false, false);
@@ -382,7 +382,7 @@ internal static class GatewayHandlerTrustProbeSupport
         diagnostic.Source = input.Source;
         diagnostic.At(ProbeOperation.ChildCertificates, Path.GetFileName(directory).Replace("child-", "", StringComparison.Ordinal));
         var target = new Uri(input.Target);
-        Check(target.Scheme == "https" && target.Host == "127.0.0.1" && target.AbsolutePath == "/probe", "local-HTTPS-only");
+        ValidateRequestTarget(target);
         using var leaf = new X509Certificate2(File.ReadAllBytes(input.LeafFile));
         using var issuer = new X509Certificate2(File.ReadAllBytes(input.IssuerFile));
         var nameValid = leaf.MatchesHostname("127.0.0.1", allowWildcards: false, allowCommonName: false);
@@ -770,6 +770,10 @@ internal static class GatewayHandlerTrustProbeSupport
 
     private static string OcelotVersion() => typeof(MessageInvokerPool).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
     private static Uri Address(WebApplication app) => new(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
+    // Compose only the request target; listener identity/port and cleanup stay unchanged.
+    internal static Uri RequestTarget(Uri listener) => new(listener, "/probe");
+    internal static void ValidateRequestTarget(Uri target) =>
+        Check(target.Scheme == "https" && target.Host == "127.0.0.1" && target.AbsolutePath == "/probe", "local-HTTPS-only");
     private static void Check(bool condition, string reason)
     {
         if (condition) return;

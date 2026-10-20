@@ -43,6 +43,14 @@ jobs:
     steps:
       - name: Check out reviewed PR head
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        # Git command-scope configuration lives only in this action's process tree.
+        # No system/global/local config file or repository attributes are changed.
+        env:
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: core.autocrlf
+          GIT_CONFIG_VALUE_0: 'false'
+          GIT_CONFIG_KEY_1: core.eol
+          GIT_CONFIG_VALUE_1: lf
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -85,7 +93,7 @@ jobs:
             }
             $hashes = @{
               'GatewayHandlerTrustProbeTests.cs' = '47a646a76d89df5c0f7bbff492228dbe9f238f69808989b944f126f7a1dcfc52'
-              'GatewayHandlerTrustProbeSupport.cs' = '60f47f881294118eb429a0b73534731e41be9f18bc380f8280bcfac29f7f03ca'
+              'GatewayHandlerTrustProbeSupport.cs' = '67df9f85688839a785dea7127fd8a974fcdc88fe75e1e62abb11532a53314e23'
             }
             foreach ($name in @('GatewayHandlerTrustProbeTests.cs','GatewayHandlerTrustProbeSupport.cs')) {
               $path = 'Services/AuthManager/Tests/Infrastructure.IntegrationTests/' + $name
@@ -133,6 +141,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Probe source ancestry mismatch' }
           git merge-base --is-ancestor 7ab5c36e1c581b13c5f891828fa734bbb9f1ae6f HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Accepted candidate ancestry mismatch' }
+          git merge-base --is-ancestor f008859487039e81f2a9555778f7204b39d33f9d HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Reviewed diagnostic ancestry mismatch' }
+          $corrected = @(git diff --name-status f008859487039e81f2a9555778f7204b39d33f9d HEAD)
+          $approvedCorrection = @("M`t.github/workflows/gateway-handler-trust-probe.yml",
+              "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeSupport.cs")
+          if ($LASTEXITCODE -ne 0 -or $corrected.Count -ne 2 -or
+              ($corrected -join "`n") -cne ($approvedCorrection -join "`n")) { throw 'Two-path correction scope mismatch' }
           $instrumented = @(git diff --name-status 7ab5c36e1c581b13c5f891828fa734bbb9f1ae6f HEAD)
           $approved = @("M`t.github/workflows/gateway-handler-trust-probe.yml", "M`t.github/workflows/mvp-validation.yml",
               "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeSupport.cs")
@@ -148,7 +163,7 @@ jobs:
           $source = 'Services/AuthManager/Tests/Infrastructure.IntegrationTests/'
           $hashes = @{
             'GatewayHandlerTrustProbeTests.cs' = '47a646a76d89df5c0f7bbff492228dbe9f238f69808989b944f126f7a1dcfc52'
-            'GatewayHandlerTrustProbeSupport.cs' = '60f47f881294118eb429a0b73534731e41be9f18bc380f8280bcfac29f7f03ca'
+            'GatewayHandlerTrustProbeSupport.cs' = '67df9f85688839a785dea7127fd8a974fcdc88fe75e1e62abb11532a53314e23'
           }
           foreach ($name in $hashes.Keys) {
             if ((Get-FileHash -LiteralPath ($source + $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hashes[$name]) {
