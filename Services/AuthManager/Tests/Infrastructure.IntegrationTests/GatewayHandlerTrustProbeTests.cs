@@ -49,11 +49,10 @@ public sealed class GatewayHandlerTrustProbeCleanupTests
     [Fact]
     public async Task Primary_and_cleanup_failures_remain_separate()
     {
-        var run = new SyntheticRun();
         var primary = new InvalidOperationException("synthetic-primary");
         var cleanup = new IOException("synthetic-cleanup");
+        var run = new SyntheticRun { CleanupError = cleanup };
         run.Body = () => ThrowPrimary(primary);
-        run.CleanupError = cleanup;
         Assert.Same(primary, await Assert.ThrowsAsync<InvalidOperationException>(run.ExecuteAsync));
         Assert.Same(cleanup, Assert.Single(run.Failures.CleanupFailures).Error.SourceException);
         Assert.Equal(new[] { "first-cleanup" }, run.ReceiptCleanupStages);
