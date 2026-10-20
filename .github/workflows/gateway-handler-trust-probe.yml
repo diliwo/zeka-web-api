@@ -32,7 +32,7 @@ jobs:
       run:
         shell: pwsh
     env:
-      PROBE_MODE: source-admission-only
+      PROBE_MODE: normal
       PROBE_TEST: Infrastructure.IntegrationTests.GatewayHandlerTrustProbeTests.Real_pool_default_validation_fixed_package
       PROBE_PROJECT: Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj
       EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -143,6 +143,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Accepted candidate ancestry mismatch' }
           git merge-base --is-ancestor f008859487039e81f2a9555778f7204b39d33f9d HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Reviewed diagnostic ancestry mismatch' }
+          git merge-base --is-ancestor 115725533c7a1f027019dd0da5ad819cad687521 HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Accepted hosted candidate ancestry mismatch' }
+          $normalModeDelta = @(git diff --name-status 115725533c7a1f027019dd0da5ad819cad687521 HEAD)
+          $approvedNormalModeDelta = @("M`t.github/workflows/gateway-handler-trust-probe.yml")
+          if ($LASTEXITCODE -ne 0 -or $normalModeDelta.Count -ne 1 -or
+              ($normalModeDelta -join "`n") -cne ($approvedNormalModeDelta -join "`n")) { throw 'Workflow-only normal-mode scope mismatch' }
           $corrected = @(git diff --name-status f008859487039e81f2a9555778f7204b39d33f9d HEAD)
           $approvedCorrection = @("M`t.github/workflows/gateway-handler-trust-probe.yml",
               "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeSupport.cs")
@@ -167,17 +173,15 @@ jobs:
           }
           foreach ($name in $hashes.Keys) {
             if ((Get-FileHash -LiteralPath ($source + $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hashes[$name]) {
-              @{ schema = 1; mode = 'source-admission-only'; comparison = 'mismatched'; path = ($source + $name); normalProbeAcceptance = $false } |
+              @{ schema = 1; mode = $env:PROBE_MODE; comparison = 'mismatched'; path = ($source + $name); normalProbeAcceptance = $false } |
                 ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:SOURCE_EXPORT 'comparison.json')
               throw 'Frozen CSharp hash mismatch'
             }
           }
-          if ($env:PROBE_MODE -ceq 'source-admission-only') {
-            @{ schema = 1; mode = 'source-admission-only'; comparison = 'matched'; normalProbeAcceptance = $false } |
-              ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:SOURCE_EXPORT 'comparison.json')
-            exit 0
-          }
-          if ($env:PROBE_MODE -cne 'normal') { throw 'Unrecognized probe mode' }
+          if ($env:PROBE_MODE -cnotin @('source-admission-only','normal')) { throw 'Unrecognized probe mode' }
+          @{ schema = 1; mode = $env:PROBE_MODE; comparison = 'matched'; normalProbeAcceptance = $false } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:SOURCE_EXPORT 'comparison.json')
+          if ($env:PROBE_MODE -ceq 'source-admission-only') { exit 0 }
           $suffix = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$([guid]::NewGuid().ToString('N'))"
           $probe = Join-Path $env:RUNNER_TEMP "zeka-trust-probe-$suffix"
           $export = Join-Path $env:RUNNER_TEMP "zeka-trust-export-$suffix"
@@ -484,7 +488,7 @@ jobs:
         if: ${{ always() && steps.source_observation.outputs.ready == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: gateway-source-only-${{ github.run_id }}-${{ github.run_attempt }}
+          name: gateway-source-observation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.SOURCE_EXPORT }}
           if-no-files-found: error
           retention-days: 14
