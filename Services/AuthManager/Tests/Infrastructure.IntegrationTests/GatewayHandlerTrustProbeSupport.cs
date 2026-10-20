@@ -5,6 +5,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.ExceptionServices;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -60,11 +61,29 @@ internal static class GatewayHandlerTrustProbeSupport
         Directory.CreateDirectory(directory);
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var receipts = Path.Combine(directory, "receipts.jsonl");
-        void Receipt(object value)
+        var failures = new ProbeFailures();
+        void Receipt(object value, bool completion = false)
         {
-            var line = JsonSerializer.Serialize(value, Json);
-            File.AppendAllText(receipts, line + Environment.NewLine);
-            output.WriteLine(line);
+            string line;
+            try { line = JsonSerializer.Serialize(value, Json); }
+            catch (Exception error)
+            {
+                failures.EvidenceFailures.Add(new("receipt-serialization", ExceptionDispatchInfo.Capture(error)));
+                throw;
+            }
+            // The durable completion marker has no subsequent fallible console write.
+            try { if (!completion) output.WriteLine(line); }
+            catch (Exception error)
+            {
+                failures.EvidenceFailures.Add(new("receipt-output", ExceptionDispatchInfo.Capture(error)));
+                throw;
+            }
+            try { File.AppendAllText(receipts, line + Environment.NewLine); }
+            catch (Exception error)
+            {
+                failures.EvidenceFailures.Add(new("receipt-persistence", ExceptionDispatchInfo.Capture(error)));
+                throw;
+            }
         }
         Receipt(new { phase = "admission", identity, os = RuntimeInformation.OSDescription,
             runtime = Environment.Version.ToString(), ocelot = OcelotVersion(), test = TestIdentity,
@@ -94,41 +113,43 @@ internal static class GatewayHandlerTrustProbeSupport
         WebApplication? untrustedServer = null;
         var caFile = Path.Combine(directory, "scoped-ca.pem");
         var caDirectory = Path.Combine(directory, "scoped-ca-directory");
-        Exception? failure = null;
-        try
+        int? trustedPort = null, untrustedPort = null;
+        await RunWithCleanupAsync(failures, async () =>
         {
-            trustedServer = await StartEndpointAsync(trustedLeaf, observations);
-            untrustedServer = await StartEndpointAsync(untrustedLeaf, observations);
+            trustedServer = await StartEndpointAsync(trustedLeaf, observations, failures);
+            untrustedServer = await StartEndpointAsync(untrustedLeaf, observations, failures);
             var trustedUri = Address(trustedServer);
             var untrustedUri = Address(untrustedServer);
             foreach (var lifecycle in new[] { "normal", "startup-failure", "abnormal-child" })
             {
                 await ControlAsync("before-" + lifecycle, trustedUri, false, false);
                 var plannedStartupFailure = false;
-                try
+                await RunWithCleanupAsync(failures, async () =>
                 {
-                    if (OperatingSystem.IsWindows()) ImportOwnedRoot(root);
-                    else
+                    try
                     {
-                        Directory.CreateDirectory(caDirectory);
-                        File.WriteAllText(caFile, root.ExportCertificatePem());
+                        if (OperatingSystem.IsWindows()) ImportOwnedRoot(root);
+                        else
+                        {
+                            Directory.CreateDirectory(caDirectory);
+                            File.WriteAllText(caFile, root.ExportCertificatePem());
+                        }
+                        Receipt(new { phase = "trust-acquired", lifecycle, scope = OperatingSystem.IsWindows() ? "hosted-job-account" : "dedicated-child-startup" });
+                        if (lifecycle == "startup-failure") throw new PlannedStartupFailure();
+                        await ControlAsync("trusted-" + lifecycle, trustedUri, true, true);
+                        await ControlAsync("untrusted-" + lifecycle, untrustedUri, false, true);
+                        if (lifecycle == "abnormal-child")
+                            await ControlAsync("terminated-child", trustedUri, true, true, killAfterReceipt: true);
                     }
-                    Receipt(new { phase = "trust-acquired", lifecycle, scope = OperatingSystem.IsWindows() ? "hosted-job-account" : "dedicated-child-startup" });
-                    if (lifecycle == "startup-failure") throw new PlannedStartupFailure();
-                    await ControlAsync("trusted-" + lifecycle, trustedUri, true, true);
-                    await ControlAsync("untrusted-" + lifecycle, untrustedUri, false, true);
-                    if (lifecycle == "abnormal-child")
-                        await ControlAsync("terminated-child", trustedUri, true, true, killAfterReceipt: true);
-                }
-                catch (PlannedStartupFailure) { plannedStartupFailure = true; }
-                finally
+                    catch (PlannedStartupFailure) { plannedStartupFailure = true; }
+                }, TrustCleanupSteps(root, caFile, caDirectory), TrustObservations(root, caFile, caDirectory), observed =>
                 {
                     // The supervisor owns trust; killed children never own its removal.
-                    CleanupTrust(root, caFile, caDirectory);
-                    Receipt(new { phase = "primary-cleanup", lifecycle, rootAbsent = !OperatingSystem.IsWindows() || !RootPresent(root),
-                        caFileAbsent = !File.Exists(caFile), caDirectoryAbsent = !Directory.Exists(caDirectory),
-                        plannedStartupFailure });
-                }
+                    Receipt(new { phase = "primary-cleanup", lifecycle, rootAbsent = observed["root-absent"],
+                        caFileAbsent = observed["ca-file-absent"], caDirectoryAbsent = observed["ca-directory-absent"],
+                        plannedStartupFailure, cleanupFailures = failures.CleanupStages,
+                        postconditionFailures = failures.PostconditionStages, evidenceFailures = failures.EvidenceStages });
+                });
                 Check(plannedStartupFailure == (lifecycle == "startup-failure"), "startup-failure-observed");
                 await ControlAsync("after-" + lifecycle, trustedUri, false, false);
                 Receipt(new { phase = "lifecycle-complete", lifecycle, freshDefaultTrustRejected = true });
@@ -143,7 +164,7 @@ internal static class GatewayHandlerTrustProbeSupport
                 var correlation = Guid.NewGuid().ToString("N");
                 var result = await RunProcessAsync(directory, name, target, correlation,
                     scoped && !OperatingSystem.IsWindows() ? caFile : null,
-                    scoped && !OperatingSystem.IsWindows() ? caDirectory : null, killAfterReceipt);
+                    scoped && !OperatingSystem.IsWindows() ? caDirectory : null, killAfterReceipt, failures);
                 Check(result.Accepted == success, "unexpected-TLS-outcome");
                 Check(result.NameValid && result.TimeValid && result.RealPool, "control-configuration");
                 Check(result.ChainValid == success, "diagnostic-chain-outcome");
@@ -155,36 +176,139 @@ internal static class GatewayHandlerTrustProbeSupport
                 Receipt(new { phase = "TLS-control", name, correlation, result,
                     downstreamHttpReceipts = observed, listenerReachable = true, abnormalChildKilled = killAfterReceipt });
             }
-        }
-        catch (Exception error) { failure = error; throw; }
-        finally
+        }, [.. TrustCleanupSteps(root, caFile, caDirectory),
+            .. EndpointCleanupSteps(() => trustedServer, port => trustedPort = port, "trusted-endpoint"),
+            .. EndpointCleanupSteps(() => untrustedServer, port => untrustedPort = port, "untrusted-endpoint")],
+        [.. TrustObservations(root, caFile, caDirectory),
+            new("parent-environment-unchanged", () => Task.FromResult(
+                parentTrustFile == Environment.GetEnvironmentVariable("SSL_CERT_FILE")
+                && parentTrustDirectory == Environment.GetEnvironmentVariable("SSL_CERT_DIR"))),
+            new("trusted-listener-closed", () => ListenerClosedAsync(trustedServer, trustedPort)),
+            new("untrusted-listener-closed", () => ListenerClosedAsync(untrustedServer, untrustedPort))], observed =>
         {
-            // Independent cleanup attempts; preserve the original failure, while
-            // recording cleanup failures as failures instead of masking them.
-            var cleanupFailures = new List<string>();
-            try { CleanupTrust(root, caFile, caDirectory); } catch { cleanupFailures.Add("trust-cleanup"); }
-            foreach (var server in new[] { trustedServer, untrustedServer })
-                if (server is not null)
-                    try
-                    {
-                        var port = Address(server).Port;
-                        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                        await server.StopAsync(timeout.Token); await server.DisposeAsync();
-                        using var check = new TcpClient();
-                        try { await check.ConnectAsync(IPAddress.Loopback, port).WaitAsync(TimeSpan.FromSeconds(2)); cleanupFailures.Add("listener-still-open"); }
-                        catch (SocketException) { }
-                    }
-                    catch { cleanupFailures.Add("endpoint-cleanup"); }
-            Check(parentTrustFile == Environment.GetEnvironmentVariable("SSL_CERT_FILE")
-                && parentTrustDirectory == Environment.GetEnvironmentVariable("SSL_CERT_DIR"), "parent-environment-unchanged");
-            Receipt(new { phase = "supervisor-cleanup", cleanupFailures, parentEnvironmentUnchanged = true,
-                originalFailurePreserved = failure is not null });
-            if (failure is null) Check(cleanupFailures.Count == 0, "cleanup-failure");
-        }
-        Receipt(new { phase = "fixed-package-complete", lifecycles = 3, requiredControlsSkipped = 0 });
+            Receipt(new { phase = "supervisor-cleanup", cleanupFailures = failures.CleanupStages,
+                postconditionFailures = failures.PostconditionStages, evidenceFailures = failures.EvidenceStages,
+                parentEnvironmentUnchanged = observed["parent-environment-unchanged"],
+                rootAbsent = observed["root-absent"], caFileAbsent = observed["ca-file-absent"],
+                caDirectoryAbsent = observed["ca-directory-absent"],
+                originalFailurePreserved = failures.PrimaryFailure is not null });
+        }, () => Receipt(new { phase = "fixed-package-complete", lifecycles = 3, requiredControlsSkipped = 0 }, completion: true));
     }
 
-    private static async Task<WebApplication> StartEndpointAsync(X509Certificate2 certificate, ConcurrentDictionary<string, int> observations)
+    // Shared by the real probe and deterministic, certificate-free regressions.
+    // Exceptions stay internal; receipts select only fixed stages and nullable observations.
+    internal sealed record ProbeStep(string Stage, Func<Task> Run);
+    internal sealed record ProbeObservation(string Stage, Func<Task<bool>> Observe);
+    internal sealed record ProbeFailure(string Stage, ExceptionDispatchInfo Error);
+    internal sealed class ProbeFailures
+    {
+        internal ExceptionDispatchInfo? PrimaryFailure { get; private set; }
+        internal List<ProbeFailure> CleanupFailures { get; } = [];
+        internal List<ProbeFailure> PostconditionFailures { get; } = [];
+        internal List<ProbeFailure> EvidenceFailures { get; } = [];
+        internal string[] CleanupStages => CleanupFailures.Select(x => x.Stage).ToArray();
+        internal string[] PostconditionStages => PostconditionFailures.Select(x => x.Stage).ToArray();
+        internal string[] EvidenceStages => EvidenceFailures.Select(x => x.Stage).ToArray();
+        internal bool CompletionEmitted { get; set; }
+        internal bool Failed => PrimaryFailure is not null || CleanupFailures.Count != 0
+            || PostconditionFailures.Count != 0 || EvidenceFailures.Count != 0;
+
+        internal void CapturePrimary(Exception error)
+        {
+            // A nested scope rethrows an already classified failure; do not relabel it.
+            if (PrimaryFailure is null && !CleanupFailures.Concat(PostconditionFailures).Concat(EvidenceFailures)
+                .Any(x => ReferenceEquals(x.Error.SourceException, error)))
+                PrimaryFailure = ExceptionDispatchInfo.Capture(error);
+        }
+
+        internal void ThrowIfFailed()
+        {
+            var first = PrimaryFailure ?? CleanupFailures.Concat(PostconditionFailures).Concat(EvidenceFailures)
+                .Select(x => x.Error).FirstOrDefault();
+            first?.Throw();
+        }
+    }
+
+    internal static async Task RunWithCleanupAsync(ProbeFailures failures, Func<Task> body,
+        IReadOnlyList<ProbeStep> cleanup, IReadOnlyList<ProbeObservation> postconditions,
+        Action<IReadOnlyDictionary<string, bool?>> receipt, Action? complete = null)
+    {
+        try { await body(); }
+        catch (Exception error) { failures.CapturePrimary(error); }
+        foreach (var step in cleanup)
+        {
+            try { await step.Run(); }
+            catch (Exception error) { failures.CleanupFailures.Add(new(step.Stage, ExceptionDispatchInfo.Capture(error))); }
+        }
+        var observed = new Dictionary<string, bool?>();
+        foreach (var check in postconditions)
+        {
+            observed[check.Stage] = null; // Unknown until the observation actually returns.
+            try
+            {
+                observed[check.Stage] = await check.Observe();
+                if (observed[check.Stage] == false)
+                    failures.PostconditionFailures.Add(new(check.Stage,
+                        ExceptionDispatchInfo.Capture(new InvalidOperationException("probe-postcondition-failed"))));
+            }
+            catch (Exception error) { failures.PostconditionFailures.Add(new(check.Stage, ExceptionDispatchInfo.Capture(error))); }
+        }
+        try { receipt(observed); }
+        catch (Exception error) { failures.EvidenceFailures.Add(new("cleanup-receipt", ExceptionDispatchInfo.Capture(error))); }
+        if (!failures.Failed && complete is not null)
+        {
+            try { complete(); failures.CompletionEmitted = true; }
+            catch (Exception error) { failures.EvidenceFailures.Add(new("completion-receipt", ExceptionDispatchInfo.Capture(error))); }
+        }
+        // Receipt failure is a failed outcome and evidence limitation, never a made-up receipt.
+        failures.ThrowIfFailed();
+    }
+
+    private static ProbeStep[] TrustCleanupSteps(X509Certificate2 root, string caFile, string caDirectory) =>
+    [
+        new("owned-root-cleanup", () => { CleanupRoot(root); return Task.CompletedTask; }),
+        new("ca-file-cleanup", () => { if (!PathAbsent(caFile)) File.Delete(caFile); return Task.CompletedTask; }),
+        new("ca-directory-cleanup", () => { if (!PathAbsent(caDirectory)) Directory.Delete(caDirectory, recursive: false); return Task.CompletedTask; })
+    ];
+
+    private static ProbeObservation[] TrustObservations(X509Certificate2 root, string caFile, string caDirectory) =>
+    [
+        new("root-absent", () => Task.FromResult(!OperatingSystem.IsWindows() || !RootPresent(root))),
+        new("ca-file-absent", () => Task.FromResult(PathAbsent(caFile))),
+        new("ca-directory-absent", () => Task.FromResult(PathAbsent(caDirectory)))
+    ];
+
+    private static bool PathAbsent(string path)
+    {
+        // Exists() can hide access/IO errors as false; those must remain unverified.
+        try { _ = File.GetAttributes(path); return false; }
+        catch (FileNotFoundException) { return true; }
+        catch (DirectoryNotFoundException) { return true; }
+    }
+
+    private static ProbeStep[] EndpointCleanupSteps(Func<WebApplication?> endpoint, Action<int> port, string stage) =>
+    [
+        new(stage + "-address", () => { if (endpoint() is { } app) port(Address(app).Port); return Task.CompletedTask; }),
+        new(stage + "-stop", async () =>
+        {
+            if (endpoint() is not { } app) return;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await app.StopAsync(timeout.Token);
+        }),
+        new(stage + "-dispose", async () => { if (endpoint() is { } app) await app.DisposeAsync(); })
+    ];
+
+    private static async Task<bool> ListenerClosedAsync(WebApplication? endpoint, int? port)
+    {
+        if (endpoint is null) return true;
+        Check(port.HasValue, "listener-address-unverified");
+        using var check = new TcpClient();
+        try { await check.ConnectAsync(IPAddress.Loopback, port!.Value).WaitAsync(TimeSpan.FromSeconds(2)); return false; }
+        catch (SocketException) { return true; }
+    }
+
+    private static async Task<WebApplication> StartEndpointAsync(X509Certificate2 certificate, ConcurrentDictionary<string, int> observations,
+        ProbeFailures failures)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
         builder.Logging.ClearProviders();
@@ -203,7 +327,12 @@ internal static class GatewayHandlerTrustProbeSupport
             });
             await app.StartAsync(); return app;
         }
-        catch { await app.DisposeAsync(); throw; }
+        catch (Exception error)
+        {
+            await RunWithCleanupAsync(failures, () => Task.FromException(error),
+                [new("endpoint-startup-dispose", async () => await app.DisposeAsync())], [], _ => { });
+            throw;
+        }
     }
 
     internal static async Task RunChildAsync()
@@ -275,7 +404,7 @@ internal static class GatewayHandlerTrustProbeSupport
     }
 
     private static async Task<ChildResult> RunProcessAsync(string owner, string name, Uri target, string correlation,
-        string? caFile, string? caDirectory, bool killAfterReceipt)
+        string? caFile, string? caDirectory, bool killAfterReceipt, ProbeFailures failures)
     {
         var directory = Path.Combine(owner, "child-" + name); Directory.CreateDirectory(directory);
         var untrusted = name.StartsWith("untrusted-", StringComparison.Ordinal);
@@ -301,7 +430,8 @@ internal static class GatewayHandlerTrustProbeSupport
         // Drain but never publish framework stdout/stderr. Its sanitized TRX has only
         // the generic outer failure; result.json is the allowlisted native observation.
         var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-        try
+        ChildResult? childResult = null;
+        await RunWithCleanupAsync(failures, async () =>
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
             if (killAfterReceipt)
@@ -326,12 +456,15 @@ internal static class GatewayHandlerTrustProbeSupport
             else Check(process.ExitCode != 0, "abnormal-child-termination-exit");
             Write(Path.Combine(directory, "process.json"), new { exitCode = process.ExitCode, killedBySupervisor = killAfterReceipt,
                 expectedExecutedTests = 1, testIdentity = TestIdentity, noCredentialsInherited = true });
-            return Read<ChildResult>(Path.Combine(directory, "result.json"));
-        }
-        finally
-        {
-            if (!process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)); }
-        }
+            childResult = Read<ChildResult>(Path.Combine(directory, "result.json"));
+        }, [new("child-process-kill", () =>
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+                return Task.CompletedTask;
+            }),
+            new("child-process-wait", async () => await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)))],
+            [], _ => { });
+        return childResult!;
     }
 
     private static X509Certificate2 CreateRoot(RSA key, string commonName)
@@ -374,7 +507,7 @@ internal static class GatewayHandlerTrustProbeSupport
         finally { foreach (var certificate in matches) certificate.Dispose(); }
     }
 
-    private static void CleanupTrust(X509Certificate2 root, string caFile, string caDirectory)
+    private static void CleanupRoot(X509Certificate2 root)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -386,9 +519,6 @@ internal static class GatewayHandlerTrustProbeSupport
                     if (certificate.RawData.AsSpan().SequenceEqual(root.RawData)) store.Remove(certificate);
             Check(!RootPresent(root), "owned-root-removed");
         }
-        // Exact probe-created paths only; never clear unrelated directories/pools.
-        if (File.Exists(caFile)) File.Delete(caFile);
-        if (Directory.Exists(caDirectory)) Directory.Delete(caDirectory, recursive: false);
     }
 
     private static EnvironmentIdentity AdmitEnvironment()

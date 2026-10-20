@@ -61,11 +61,15 @@ jobs:
           git merge-base --is-ancestor b41775830f2136b42351334cbb5e27c27457ef84 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Probe source ancestry mismatch' }
           $delta = @(git diff --name-status b41775830f2136b42351334cbb5e27c27457ef84 HEAD)
-          if ($LASTEXITCODE -ne 0 -or $delta.Count -ne 1 -or $delta[0] -cne "A`t.github/workflows/gateway-handler-trust-probe.yml") { throw 'One-file scope mismatch' }
+          $expectedDelta = @("A`t.github/workflows/gateway-handler-trust-probe.yml",
+              "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeSupport.cs",
+              "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeTests.cs")
+          if ($LASTEXITCODE -ne 0 -or $delta.Count -ne 3 -or
+              ($delta -cjoin "`n") -cne ($expectedDelta -cjoin "`n")) { throw 'Three-file scope mismatch' }
           $source = 'Services/AuthManager/Tests/Infrastructure.IntegrationTests/'
           $hashes = @{
-            'GatewayHandlerTrustProbeTests.cs' = 'b8cce9c3c86e3d6b158793c7560954b18c2d13ced88a5dadd118b8277b5c212f'
-            'GatewayHandlerTrustProbeSupport.cs' = '67526f33b41ac44af118662b2f8b37aed5eb7d749f0206edb1e04c2c268c464b'
+            'GatewayHandlerTrustProbeTests.cs' = '28eefd8f36edaf7318eddf3377553660f4f6149be0cefb5589673c237f133d89'
+            'GatewayHandlerTrustProbeSupport.cs' = 'c896b6ba2706e732eb7067c54d1179bba9c24345bd5a5f0843bc29ce6aceda32'
           }
           foreach ($name in $hashes.Keys) {
             if ((Get-FileHash -LiteralPath ($source + $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hashes[$name]) { throw 'Frozen CSharp hash mismatch' }
