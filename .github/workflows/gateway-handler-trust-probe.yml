@@ -1,6 +1,6 @@
 name: Diagnostic Ocelot handler trust probe
 
-# Preparation only. Chief must review the combined three-file SHA before PR opening.
+# Instrumented descendant: Chief must review this exact candidate before publication.
 # This workflow neither accepts PR93 nor starts its fifth A/B/C correction.
 on:
   pull_request:
@@ -32,6 +32,7 @@ jobs:
       run:
         shell: pwsh
     env:
+      PROBE_MODE: source-admission-only
       PROBE_TEST: Infrastructure.IntegrationTests.GatewayHandlerTrustProbeTests.Real_pool_default_validation_fixed_package
       PROBE_PROJECT: Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj
       EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -47,6 +48,76 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Observe committed and checked-out source before admission
+        id: source_observation
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $export = Join-Path $env:RUNNER_TEMP ('zeka-source-observation-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $export | Out-Null
+          "SOURCE_EXPORT=$export" >> $env:GITHUB_ENV
+          'ready=true' >> $env:GITHUB_OUTPUT
+          $record = [ordered]@{ schema = 1; mode = $env:PROBE_MODE; normalProbeAcceptance = $false; head = $null; tree = $null; files = @(); git = @{}; limitation = $null }
+          function Metrics([byte[]]$bytes) {
+            $crlf = 0; $lf = 0; $cr = 0
+            for ($i = 0; $i -lt $bytes.Length; $i++) {
+              if ($bytes[$i] -eq 10) { $lf++; if ($i -gt 0 -and $bytes[$i-1] -eq 13) { $crlf++ } }
+              if ($bytes[$i] -eq 13 -and ($i+1 -eq $bytes.Length -or $bytes[$i+1] -ne 10)) { $cr++ }
+            }
+            $bom = if ($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191) { 'utf8' }
+              elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254 -and $bytes[2] -eq 0 -and $bytes[3] -eq 0) { 'utf32le' }
+              elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 254 -and $bytes[3] -eq 255) { 'utf32be' }
+              elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254) { 'utf16le' }
+              elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 254 -and $bytes[1] -eq 255) { 'utf16be' } else { 'none' }
+            return @{ bytes = $bytes.Length; sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant(); lf = $lf-$crlf; crlf = $crlf; loneCr = $cr; bom = $bom }
+          }
+          try {
+            $record.head = (git rev-parse HEAD).Trim(); if ($LASTEXITCODE -ne 0 -or $record.head -cnotmatch '^[0-9a-f]{40}$') { throw 'identity' }
+            $record.tree = (git rev-parse 'HEAD^{tree}').Trim(); if ($LASTEXITCODE -ne 0 -or $record.tree -cnotmatch '^[0-9a-f]{40}$') { throw 'identity' }
+            foreach ($key in @('core.autocrlf','core.eol','core.safecrlf')) {
+              $value = @(git config --show-scope --get $key); $code = $LASTEXITCODE
+              $scope = 'unset'; $effective = 'unset'
+              if ($code -eq 0 -and $value.Count -eq 1) {
+                $parts = $value[0] -split '\s+',2
+                $scope = if ($parts[0] -cin @('system','global','local','worktree','command')) { $parts[0] } else { 'unknown' }
+                $effective = if ($parts.Count -eq 2 -and $parts[1] -cin @('true','false','input','lf','crlf','native','warn')) { $parts[1] } else { 'other-redacted' }
+              } elseif ($code -ne 1) { $scope = 'unknown'; $effective = 'unknown' }
+              $record.git[$key] = @{ scope = $scope; value = $effective }
+            }
+            $hashes = @{
+              'GatewayHandlerTrustProbeTests.cs' = '47a646a76d89df5c0f7bbff492228dbe9f238f69808989b944f126f7a1dcfc52'
+              'GatewayHandlerTrustProbeSupport.cs' = '60f47f881294118eb429a0b73534731e41be9f18bc380f8280bcfac29f7f03ca'
+            }
+            foreach ($name in @('GatewayHandlerTrustProbeTests.cs','GatewayHandlerTrustProbeSupport.cs')) {
+              $path = 'Services/AuthManager/Tests/Infrastructure.IntegrationTests/' + $name
+              $item = @{ path = $path; expectedSha256 = $hashes[$name]; blobOid = $null; committed = $null; checkout = $null; attributes = @{}; limitation = $null }
+              $record.files += $item
+              try {
+                $oid = (git rev-parse "HEAD:$path").Trim(); if ($LASTEXITCODE -ne 0 -or $oid -cnotmatch '^[0-9a-f]{40}$') { throw 'blob' }
+                $item.blobOid = $oid
+                $start = [Diagnostics.ProcessStartInfo]::new('git'); $start.UseShellExecute = $false
+                $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+                $start.ArgumentList.Add('cat-file'); $start.ArgumentList.Add('blob'); $start.ArgumentList.Add($oid)
+                $process = [Diagnostics.Process]::Start($start); $errorDrain = $process.StandardError.ReadToEndAsync()
+                $memory = [IO.MemoryStream]::new()
+                try {
+                  $process.StandardOutput.BaseStream.CopyTo($memory); $process.WaitForExit(); $errorDrain.GetAwaiter().GetResult() | Out-Null
+                  if ($process.ExitCode -ne 0) { throw 'blob' }; $item.committed = Metrics $memory.ToArray()
+                } finally { $memory.Dispose(); $process.Dispose() }
+                $item.checkout = Metrics ([IO.File]::ReadAllBytes((Join-Path $env:GITHUB_WORKSPACE $path)))
+                $attrs = @(git check-attr text eol filter working-tree-encoding -- $path)
+                if ($LASTEXITCODE -ne 0 -or $attrs.Count -ne 4) { throw 'attributes' }
+                foreach ($attr in $attrs) {
+                  $parts = $attr -split ': ',3
+                  if ($parts.Count -ne 3 -or $parts[1] -cnotin @('text','eol','filter','working-tree-encoding')) { throw 'attributes' }
+                  $safe = if ($parts[2] -cin @('unspecified','unset','set','auto','lf','crlf','UTF-8','UTF-16','UTF-16LE','UTF-16BE')) { $parts[2] } else { 'other-redacted' }
+                  $item.attributes[$parts[1]] = @{ value = $safe; scope = 'effective-path-attributes-origin-not-exported' }
+                }
+              } catch { $item.limitation = 'source-observation-incomplete' }
+            }
+          } catch { $record.limitation = 'source-observation-incomplete' }
+          finally { $record | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $export 'source-identity.json') }
+          if ($record.limitation -or @($record.files | Where-Object limitation).Count -or $record.files.Count -ne 2) { throw 'Source observation incomplete' }
+
       - name: Admit hosted account and immutable source
         id: admission
         run: |
@@ -60,20 +131,38 @@ jobs:
           $tree = (git rev-parse 'HEAD^{tree}').Trim(); if ($LASTEXITCODE -ne 0) { throw 'Tree unavailable' }
           git merge-base --is-ancestor b41775830f2136b42351334cbb5e27c27457ef84 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Probe source ancestry mismatch' }
+          git merge-base --is-ancestor 7ab5c36e1c581b13c5f891828fa734bbb9f1ae6f HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Accepted candidate ancestry mismatch' }
+          $instrumented = @(git diff --name-status 7ab5c36e1c581b13c5f891828fa734bbb9f1ae6f HEAD)
+          $approved = @("M`t.github/workflows/gateway-handler-trust-probe.yml", "M`t.github/workflows/mvp-validation.yml",
+              "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeSupport.cs")
+          if ($LASTEXITCODE -ne 0 -or $instrumented.Count -ne 3 -or
+              ($instrumented -join "`n") -cne ($approved -join "`n")) { throw 'Three-path instrumentation scope mismatch' }
           $delta = @(git diff --name-status b41775830f2136b42351334cbb5e27c27457ef84 HEAD)
           $expectedDelta = @("A`t.github/workflows/gateway-handler-trust-probe.yml",
+              "M`t.github/workflows/mvp-validation.yml",
               "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeSupport.cs",
               "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeTests.cs")
-          if ($LASTEXITCODE -ne 0 -or $delta.Count -ne 3 -or
-              ($delta -join "`n") -cne ($expectedDelta -join "`n")) { throw 'Three-file scope mismatch' }
+          if ($LASTEXITCODE -ne 0 -or $delta.Count -ne 4 -or
+              ($delta -join "`n") -cne ($expectedDelta -join "`n")) { throw 'Approved four-file cumulative scope mismatch' }
           $source = 'Services/AuthManager/Tests/Infrastructure.IntegrationTests/'
           $hashes = @{
             'GatewayHandlerTrustProbeTests.cs' = '47a646a76d89df5c0f7bbff492228dbe9f238f69808989b944f126f7a1dcfc52'
-            'GatewayHandlerTrustProbeSupport.cs' = 'c896b6ba2706e732eb7067c54d1179bba9c24345bd5a5f0843bc29ce6aceda32'
+            'GatewayHandlerTrustProbeSupport.cs' = '60f47f881294118eb429a0b73534731e41be9f18bc380f8280bcfac29f7f03ca'
           }
           foreach ($name in $hashes.Keys) {
-            if ((Get-FileHash -LiteralPath ($source + $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hashes[$name]) { throw 'Frozen CSharp hash mismatch' }
+            if ((Get-FileHash -LiteralPath ($source + $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hashes[$name]) {
+              @{ schema = 1; mode = 'source-admission-only'; comparison = 'mismatched'; path = ($source + $name); normalProbeAcceptance = $false } |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:SOURCE_EXPORT 'comparison.json')
+              throw 'Frozen CSharp hash mismatch'
+            }
           }
+          if ($env:PROBE_MODE -ceq 'source-admission-only') {
+            @{ schema = 1; mode = 'source-admission-only'; comparison = 'matched'; normalProbeAcceptance = $false } |
+              ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:SOURCE_EXPORT 'comparison.json')
+            exit 0
+          }
+          if ($env:PROBE_MODE -cne 'normal') { throw 'Unrecognized probe mode' }
           $suffix = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$([guid]::NewGuid().ToString('N'))"
           $probe = Join-Path $env:RUNNER_TEMP "zeka-trust-probe-$suffix"
           $export = Join-Path $env:RUNNER_TEMP "zeka-trust-export-$suffix"
@@ -94,11 +183,13 @@ jobs:
           'admitted=true' >> $env:GITHUB_OUTPUT
 
       - name: Install pinned SDK
+        if: ${{ env.PROBE_MODE == 'normal' && steps.admission.outputs.admitted == 'true' }}
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: 8.0.129
 
       - name: Restore with existing restore-only package credential
+        if: ${{ env.PROBE_MODE == 'normal' && steps.admission.outputs.admitted == 'true' }}
         env:
           PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
           PACKAGE_USERNAME: ${{ github.repository_owner }}
@@ -120,6 +211,7 @@ jobs:
           exit $status
 
       - name: Build and record actual toolchain
+        if: ${{ env.PROBE_MODE == 'normal' && steps.admission.outputs.admitted == 'true' }}
         run: |
           $ErrorActionPreference = 'Stop'
           if (@(Get-ChildItem Env: | Where-Object Name -Match '^(PACKAGE_READ_TOKEN|NuGetPackageSourceCredentials_.+|GITHUB_TOKEN|GH_TOKEN|ACTIONS_RUNTIME_TOKEN)$').Count) { throw 'Credential environment reached build step' }
@@ -138,6 +230,7 @@ jobs:
             ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $env:PROBE_EXPORT 'toolchain.json')
 
       - name: Unfiltered discovery with exact identity accounting
+        if: ${{ env.PROBE_MODE == 'normal' && steps.admission.outputs.admitted == 'true' }}
         run: |
           $ErrorActionPreference = 'Stop'
           # Do NOT combine --list-tests and --filter: native discovery was adjudicated separately.
@@ -151,6 +244,7 @@ jobs:
           if ($status -ne 0 -or $count -ne 1) { throw 'Exact unfiltered discovery gate failed' }
 
       - name: Execute the one fixed filtered package
+        if: ${{ env.PROBE_MODE == 'normal' && steps.admission.outputs.admitted == 'true' }}
         id: probe
         run: |
           $ErrorActionPreference = 'Stop'
@@ -194,7 +288,7 @@ jobs:
           exit $status
 
       - name: Validate native outer child TLS and primary-cleanup evidence
-        if: ${{ always() && steps.probe.outcome != 'skipped' }}
+        if: ${{ always() && env.PROBE_MODE == 'normal' && steps.probe.outcome != 'skipped' }}
         run: |
           $ErrorActionPreference = 'Stop'
           function Require($condition, [string]$reason) { if (!$condition) { throw $reason } }
@@ -277,7 +371,7 @@ jobs:
           if (!$report.passed) { throw 'Native probe evidence gate failed; retain failed outcomes' }
 
       - name: Bounded probe-owned root fallback
-        if: ${{ always() && steps.admission.outputs.admitted == 'true' }}
+        if: ${{ always() && env.PROBE_MODE == 'normal' && steps.admission.outputs.admitted == 'true' }}
         timeout-minutes: 2
         run: |
           $ErrorActionPreference = 'Stop'
@@ -331,7 +425,7 @@ jobs:
           if (!$record.passed -or $record.rootWasPresent) { throw 'Fallback or primary root-cleanup obligation failed' }
 
       - name: Export only allowlisted native evidence and hash manifest
-        if: ${{ always() && steps.admission.outputs.admitted == 'true' }}
+        if: ${{ always() && env.PROBE_MODE == 'normal' && steps.admission.outputs.admitted == 'true' }}
         run: |
           $ErrorActionPreference = 'Stop'
           function Copy-Evidence([string]$source,[string]$relative) {
@@ -363,10 +457,19 @@ jobs:
             Set-Content -LiteralPath (Join-Path $env:PROBE_EXPORT 'manifest.json')
 
       - name: Retain sanitized evidence including failed outcomes
-        if: ${{ always() && steps.admission.outputs.admitted == 'true' }}
+        if: ${{ always() && env.PROBE_MODE == 'normal' && steps.admission.outputs.admitted == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gateway-trust-windows-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.PROBE_EXPORT }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Retain source observation even on failed admission
+        if: ${{ always() && steps.source_observation.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gateway-source-only-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.SOURCE_EXPORT }}
           if-no-files-found: error
           retention-days: 14

@@ -53,11 +53,24 @@ internal static class GatewayHandlerTrustProbeSupport
 
     internal static async Task RunSupervisorAsync(ITestOutputHelper output)
     {
+        var diagnostic = new ProbeDiagnostic("supervisor",
+            value => AppendDiagnostic(diagnosticDirectory: ProbeDiagnostic.Current?.Directory, value),
+            value => output.WriteLine(JsonSerializer.Serialize(value, Json)));
+        using var scope = diagnostic.Activate();
+        try { await RunSupervisorCoreAsync(output, diagnostic); }
+        catch (Exception error) { diagnostic.Capture(error); throw; }
+        finally { diagnostic.Emit(); }
+    }
+
+    private static async Task RunSupervisorCoreAsync(ITestOutputHelper output, ProbeDiagnostic diagnostic)
+    {
         // This check precedes key generation, directory creation and every store access.
+        diagnostic.At(ProbeOperation.EnvironmentAdmission);
         var identity = AdmitEnvironment();
         var parentTrustFile = Environment.GetEnvironmentVariable("SSL_CERT_FILE");
         var parentTrustDirectory = Environment.GetEnvironmentVariable("SSL_CERT_DIR");
         var directory = EvidenceDirectory();
+        diagnostic.Directory = directory;
         Directory.CreateDirectory(directory);
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var receipts = Path.Combine(directory, "receipts.jsonl");
@@ -85,10 +98,14 @@ internal static class GatewayHandlerTrustProbeSupport
                 throw;
             }
         }
+        diagnostic.At(ProbeOperation.SourceIdentity);
+        var source = SourceIdentity();
+        diagnostic.Source = source;
         Receipt(new { phase = "admission", identity, os = RuntimeInformation.OSDescription,
             runtime = Environment.Version.ToString(), ocelot = OcelotVersion(), test = TestIdentity,
-            source = SourceIdentity(), childEnvironment = "explicit-allowlist-no-restore-credentials" });
+            source, childEnvironment = "explicit-allowlist-no-restore-credentials" });
 
+        diagnostic.At(ProbeOperation.CertificateSetup);
         using var rootKey = RSA.Create(2048);
         var id = Guid.NewGuid().ToString("N");
         using var root = CreateRoot(rootKey, "Zeka-Ocelot-Trust-Probe-" + id);
@@ -116,9 +133,13 @@ internal static class GatewayHandlerTrustProbeSupport
         int? trustedPort = null, untrustedPort = null;
         await RunWithCleanupAsync(failures, async () =>
         {
+            diagnostic.At(ProbeOperation.TrustedEndpointStart);
             trustedServer = await StartEndpointAsync(trustedLeaf, observations, failures);
+            diagnostic.At(ProbeOperation.UntrustedEndpointStart);
             untrustedServer = await StartEndpointAsync(untrustedLeaf, observations, failures);
+            diagnostic.At(ProbeOperation.TrustedAddress);
             var trustedUri = Address(trustedServer);
+            diagnostic.At(ProbeOperation.UntrustedAddress);
             var untrustedUri = Address(untrustedServer);
             foreach (var lifecycle in new[] { "normal", "startup-failure", "abnormal-child" })
             {
@@ -157,6 +178,7 @@ internal static class GatewayHandlerTrustProbeSupport
 
             async Task ControlAsync(string name, Uri target, bool success, bool scoped, bool killAfterReceipt = false)
             {
+                diagnostic.At(ProbeOperation.ControlSocket, name);
                 // A live TCP listener plus certificate validity/name checks and the
                 // certificate-specific child result exclude refused connection/timeout.
                 using (var socket = new TcpClient())
@@ -165,6 +187,7 @@ internal static class GatewayHandlerTrustProbeSupport
                 var result = await RunProcessAsync(directory, name, target, correlation,
                     scoped && !OperatingSystem.IsWindows() ? caFile : null,
                     scoped && !OperatingSystem.IsWindows() ? caDirectory : null, killAfterReceipt, failures);
+                diagnostic.At(ProbeOperation.ControlAssertions, name);
                 Check(result.Accepted == success, "unexpected-TLS-outcome");
                 Check(result.NameValid && result.TimeValid && result.RealPool, "control-configuration");
                 Check(result.ChainValid == success, "diagnostic-chain-outcome");
@@ -234,11 +257,15 @@ internal static class GatewayHandlerTrustProbeSupport
         Action<IReadOnlyDictionary<string, bool?>> receipt, Action? complete = null)
     {
         try { await body(); }
-        catch (Exception error) { failures.CapturePrimary(error); }
+        catch (Exception error) { ProbeDiagnostic.Current?.Capture(error); failures.CapturePrimary(error); }
         foreach (var step in cleanup)
         {
-            try { await step.Run(); }
-            catch (Exception error) { failures.CleanupFailures.Add(new(step.Stage, ExceptionDispatchInfo.Capture(error))); }
+            try { await step.Run(); ProbeDiagnostic.Current?.Cleanup(step.Stage, true, null); }
+            catch (Exception error)
+            {
+                ProbeDiagnostic.Current?.Cleanup(step.Stage, false, error);
+                failures.CleanupFailures.Add(new(step.Stage, ExceptionDispatchInfo.Capture(error)));
+            }
         }
         var observed = new Dictionary<string, bool?>();
         foreach (var check in postconditions)
@@ -253,6 +280,7 @@ internal static class GatewayHandlerTrustProbeSupport
             }
             catch (Exception error) { failures.PostconditionFailures.Add(new(check.Stage, ExceptionDispatchInfo.Capture(error))); }
         }
+        ProbeDiagnostic.Current?.ObserveCleanup(observed);
         try { receipt(observed); }
         catch (Exception error) { failures.EvidenceFailures.Add(new("cleanup-receipt", ExceptionDispatchInfo.Capture(error))); }
         if (!failures.Failed && complete is not null)
@@ -337,9 +365,22 @@ internal static class GatewayHandlerTrustProbeSupport
 
     internal static async Task RunChildAsync()
     {
+        var directory = Environment.GetEnvironmentVariable(ChildDirectory);
+        var diagnostic = new ProbeDiagnostic("child", value => AppendDiagnostic(directory, value)) { Directory = directory };
+        using var scope = diagnostic.Activate();
+        try { await RunChildCoreAsync(diagnostic); }
+        catch (Exception error) { diagnostic.Capture(error); throw; }
+        finally { diagnostic.Emit(); }
+    }
+
+    private static async Task RunChildCoreAsync(ProbeDiagnostic diagnostic)
+    {
         // No keys or store writes in children. The parent passes only public certs.
+        diagnostic.At(ProbeOperation.ChildInput);
         var directory = Environment.GetEnvironmentVariable(ChildDirectory)!;
         var input = Read<ChildInput>(Path.Combine(directory, "input.json"));
+        diagnostic.Source = input.Source;
+        diagnostic.At(ProbeOperation.ChildCertificates, Path.GetFileName(directory).Replace("child-", "", StringComparison.Ordinal));
         var target = new Uri(input.Target);
         Check(target.Scheme == "https" && target.Host == "127.0.0.1" && target.AbsolutePath == "/probe", "local-HTTPS-only");
         using var leaf = new X509Certificate2(File.ReadAllBytes(input.LeafFile));
@@ -354,6 +395,7 @@ internal static class GatewayHandlerTrustProbeSupport
         var chainValid = chain.Build(leaf);
         var statuses = chain.ChainStatus.Select(status => status.Status.ToString()).OrderBy(x => x).ToArray();
 
+        diagnostic.At(ProbeOperation.ChildApplication);
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
         builder.Logging.ClearProviders();
         builder.Configuration.Sources.Clear();
@@ -370,6 +412,7 @@ internal static class GatewayHandlerTrustProbeSupport
         });
         builder.Services.AddOcelot(builder.Configuration);
         await using var app = builder.Build();
+        diagnostic.At(ProbeOperation.ChildOcelot);
         await app.UseOcelot();
         var pool = app.Services.GetRequiredService<IMessageInvokerPool>();
         Check(pool.GetType() == typeof(MessageInvokerPool), "real-pool-registration");
@@ -385,6 +428,7 @@ internal static class GatewayHandlerTrustProbeSupport
         request.Headers.Add("X-Zeka-Probe", input.Correlation);
         ChildResult result;
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        diagnostic.At(ProbeOperation.ChildRequest);
         try
         {
             using var response = await invoker.SendAsync(request, deadline.Token);
@@ -399,6 +443,7 @@ internal static class GatewayHandlerTrustProbeSupport
             result = new(false, error.HttpRequestError == HttpRequestError.SecureConnectionError && authentication,
                 error.HttpRequestError.ToString(), authentication, nameValid, timeValid, chainValid, statuses, true);
         }
+        diagnostic.At(ProbeOperation.ChildResult);
         Write(Path.Combine(directory, "result.json"), result);
         if (input.PauseAfterReceipt) await Task.Delay(Timeout.InfiniteTimeSpan);
     }
@@ -406,11 +451,12 @@ internal static class GatewayHandlerTrustProbeSupport
     private static async Task<ChildResult> RunProcessAsync(string owner, string name, Uri target, string correlation,
         string? caFile, string? caDirectory, bool killAfterReceipt, ProbeFailures failures)
     {
+        ProbeDiagnostic.Current?.At(ProbeOperation.ChildPrepare, name);
         var directory = Path.Combine(owner, "child-" + name); Directory.CreateDirectory(directory);
         var untrusted = name.StartsWith("untrusted-", StringComparison.Ordinal);
         Write(Path.Combine(directory, "input.json"), new ChildInput(target.AbsoluteUri, correlation,
             Path.Combine(owner, untrusted ? "untrusted-leaf.cer" : "trusted-leaf.cer"),
-            Path.Combine(owner, untrusted ? "untrusted-root.cer" : "public-root.cer"), killAfterReceipt));
+            Path.Combine(owner, untrusted ? "untrusted-root.cer" : "public-root.cer"), killAfterReceipt, ProbeDiagnostic.Current?.Source));
         var dotnet = Path.GetFullPath(Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", "..", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"));
         var start = new ProcessStartInfo(dotnet) { UseShellExecute = false, RedirectStandardOutput = true,
             RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = directory };
@@ -426,6 +472,7 @@ internal static class GatewayHandlerTrustProbeSupport
         start.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
         start.Environment[ChildMode] = "handler"; start.Environment[ChildDirectory] = directory;
         if (caFile is not null) { start.Environment["SSL_CERT_FILE"] = caFile; start.Environment["SSL_CERT_DIR"] = caDirectory!; }
+        ProbeDiagnostic.Current?.At(ProbeOperation.ChildLaunch, name);
         using var process = Process.Start(start) ?? throw new InvalidOperationException("child-start");
         // Drain but never publish framework stdout/stderr. Its sanitized TRX has only
         // the generic outer failure; result.json is the allowlisted native observation.
@@ -433,6 +480,7 @@ internal static class GatewayHandlerTrustProbeSupport
         ChildResult? childResult = null;
         await RunWithCleanupAsync(failures, async () =>
         {
+            ProbeDiagnostic.Current?.At(ProbeOperation.ChildWait, name);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
             if (killAfterReceipt)
             {
@@ -445,17 +493,22 @@ internal static class GatewayHandlerTrustProbeSupport
             }
             await process.WaitForExitAsync(timeout.Token);
             await Task.WhenAll(stdout, stderr);
+            ProbeDiagnostic.Current?.ChildObservation(directory, process.ExitCode);
+            ProbeDiagnostic.Current?.At(ProbeOperation.ChildExit, name);
             if (!killAfterReceipt)
             {
                 Check(process.ExitCode == 0, "child-nonzero-exit");
+                ProbeDiagnostic.Current?.At(ProbeOperation.ChildAccounting, name);
                 var trx = XDocument.Load(Path.Combine(directory, "result.trx"));
                 var counters = trx.Descendants().Single(node => node.Name.LocalName == "Counters");
                 Check((string?)counters.Attribute("total") == "1" && (string?)counters.Attribute("passed") == "1"
                     && (string?)counters.Attribute("executed") == "1" && (string?)counters.Attribute("notExecuted") == "0", "child-exact-test-accounting");
+                ProbeDiagnostic.Current?.Counters(counters);
             }
             else Check(process.ExitCode != 0, "abnormal-child-termination-exit");
             Write(Path.Combine(directory, "process.json"), new { exitCode = process.ExitCode, killedBySupervisor = killAfterReceipt,
                 expectedExecutedTests = 1, testIdentity = TestIdentity, noCredentialsInherited = true });
+            ProbeDiagnostic.Current?.At(ProbeOperation.ChildResult, name);
             childResult = Read<ChildResult>(Path.Combine(directory, "result.json"));
         }, [new("child-process-kill", () =>
             {
@@ -463,9 +516,156 @@ internal static class GatewayHandlerTrustProbeSupport
                 return Task.CompletedTask;
             }),
             new("child-process-wait", async () => await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)))],
-            [], _ => { });
+            [], _ => ProbeDiagnostic.Current?.ChildObservation(directory, process.HasExited ? process.ExitCode : null));
         return childResult!;
     }
+
+    // Fixed vocabulary only: never serialize exception messages, streams, targets or input.json.
+    internal enum ProbeOperation
+    {
+        Unknown, EnvironmentAdmission, SourceIdentity, CertificateSetup, TrustedEndpointStart,
+        UntrustedEndpointStart, TrustedAddress, UntrustedAddress, ControlSocket, ControlAssertions,
+        ChildInput, ChildCertificates, ChildApplication, ChildOcelot, ChildRequest, ChildResult,
+        ChildPrepare, ChildLaunch, ChildWait, ChildExit, ChildAccounting
+    }
+    internal sealed record DiagnosticSource(string checkedOutCommit, string checkedOutTree,
+        string testAssemblySha256, string? workflowHead);
+
+    internal sealed class ProbeDiagnostic(string scope, Action<object> persist, Action<object>? output = null)
+    {
+        private static readonly AsyncLocal<ProbeDiagnostic?> Ambient = new();
+        internal static ProbeDiagnostic? Current => Ambient.Value;
+        internal string? Directory { get; set; }
+        internal DiagnosticSource? Source { get; set; }
+        private ProbeOperation operation;
+        private string control = "none";
+        private object? firstFailure;
+        private readonly List<object> cleanup = [];
+        private readonly List<object> observations = [];
+        private readonly HashSet<string> limitations = [];
+        private int? childExit;
+        private bool? resultPresent, trxPresent;
+        private Dictionary<string, int>? counters;
+        private static readonly HashSet<string> Controls = new(StringComparer.Ordinal)
+        {
+            "terminated-child", "before-normal", "trusted-normal", "untrusted-normal", "after-normal",
+            "before-startup-failure", "after-startup-failure", "before-abnormal-child", "trusted-abnormal-child",
+            "untrusted-abnormal-child", "after-abnormal-child"
+        };
+        private static readonly HashSet<string> Assertions = new(StringComparer.Ordinal)
+        {
+            "matched-validity", "startup-failure-observed", "unexpected-TLS-outcome", "control-configuration",
+            "diagnostic-chain-outcome", "certificate-specific-rejection", "correlated-downstream-count",
+            "listener-address-unverified", "correlation-format", "endpoint-request", "local-HTTPS-only",
+            "real-pool-registration", "normal-route-creation", "default-validation-required", "downstream-response",
+            "abnormal-control-early-exit", "child-nonzero-exit", "child-exact-test-accounting",
+            "abnormal-child-termination-exit", "windows-store-only", "unique-root-before-import", "root-import-observed",
+            "owned-root-removed", "net8-runtime", "pinned-ocelot", "supported-platform", "hosted-windows-2022-required",
+            "dedicated-hosted-account", "new-owned-evidence-directory", "source-identity"
+        };
+        private static readonly HashSet<string> CleanupCodes = new(StringComparer.Ordinal)
+        {
+            "owned-root-cleanup", "ca-file-cleanup", "ca-directory-cleanup", "endpoint-startup-dispose",
+            "trusted-endpoint-address", "trusted-endpoint-stop", "trusted-endpoint-dispose",
+            "untrusted-endpoint-address", "untrusted-endpoint-stop", "untrusted-endpoint-dispose",
+            "child-process-kill", "child-process-wait", "root-absent", "ca-file-absent", "ca-directory-absent",
+            "parent-environment-unchanged", "trusted-listener-closed", "untrusted-listener-closed"
+        };
+        internal IDisposable Activate()
+        {
+            var previous = Ambient.Value;
+            Ambient.Value = this;
+            return new DiagnosticScope(previous);
+        }
+        private sealed class DiagnosticScope(ProbeDiagnostic? previous) : IDisposable
+        {
+            public void Dispose() => Ambient.Value = previous;
+        }
+        internal void At(ProbeOperation stage, string? name = null)
+        {
+            operation = Enum.IsDefined(stage) ? stage : ProbeOperation.Unknown;
+            if (name is not null) control = Controls.Contains(name) ? name : "unknown";
+            if (stage == ProbeOperation.ChildPrepare)
+            { childExit = null; resultPresent = null; trxPresent = null; counters = null; }
+        }
+        internal void Capture(Exception error, string? assertion = null) => firstFailure ??= new
+        {
+            operation = operation.ToString(), control,
+            assertion = assertion is not null && Assertions.Contains(assertion) ? assertion : "unknown",
+            exceptionKind = Kind(error)
+        };
+        private static string Kind(Exception? error) => error switch
+        {
+            null => "none", InvalidOperationException => "invalid-operation", SocketException => "socket",
+            TimeoutException => "timeout", OperationCanceledException => "cancelled", IOException => "io",
+            UnauthorizedAccessException => "access", CryptographicException => "cryptographic",
+            AuthenticationException => "authentication", JsonException => "json", System.Xml.XmlException => "xml",
+            _ => "unknown"
+        };
+        internal void Cleanup(string stage, bool succeeded, Exception? error) => cleanup.Add(new
+        {
+            stage = CleanupCodes.Contains(stage) ? stage : "unknown", succeeded, exceptionKind = Kind(error)
+        });
+        internal void ObserveCleanup(IReadOnlyDictionary<string, bool?> values)
+        {
+            foreach (var value in values)
+                observations.Add(new { stage = CleanupCodes.Contains(value.Key) ? value.Key : "unknown", observed = value.Value });
+        }
+        internal void ChildObservation(string directory, int? exit)
+        {
+            childExit = exit;
+            try
+            {
+                // Attributes distinguish absence from unreadable/unverifiable presence.
+                resultPresent = Present(Path.Combine(directory, "result.json"));
+                trxPresent = Present(Path.Combine(directory, "result.trx"));
+                if (trxPresent == true)
+                    Counters(XDocument.Load(Path.Combine(directory, "result.trx")).Descendants().Single(x => x.Name.LocalName == "Counters"));
+            }
+            catch { limitations.Add("child-observation-unavailable"); }
+        }
+        private static bool Present(string path)
+        {
+            try { return (File.GetAttributes(path) & FileAttributes.Directory) == 0; }
+            catch (FileNotFoundException) { return false; }
+            catch (DirectoryNotFoundException) { return false; }
+        }
+        internal void Counters(XElement element)
+        {
+            var values = new Dictionary<string, int>();
+            foreach (var key in new[] { "total", "executed", "passed", "failed", "notExecuted" })
+            {
+                if (!int.TryParse((string?)element.Attribute(key), out var value) || value < 0 || value > 1)
+                { limitations.Add("child-counters-unverified"); return; }
+                values[key] = value;
+            }
+            if (values["total"] != 1 || values["executed"] + values["notExecuted"] != 1
+                || values["passed"] + values["failed"] != values["executed"])
+            { limitations.Add("child-counters-unverified"); return; }
+            counters = values;
+        }
+        private static string? Hash(string? value, int length) => value?.Length == length && value.All(Uri.IsHexDigit) ? value : null;
+        private object Record() => new
+        {
+            schema = 1, phase = "diagnostic", scope = scope is "supervisor" or "child" ? scope : "unknown", test = TestIdentity,
+            source = new { checkedOutCommit = Hash(Source?.checkedOutCommit, 40), checkedOutTree = Hash(Source?.checkedOutTree, 40),
+                testAssemblySha256 = Hash(Source?.testAssemblySha256, 64), workflowHead = Hash(Source?.workflowHead, 40) },
+            control, lastOperation = operation.ToString(), firstFailure,
+            child = new { exitCode = childExit, resultPresent, trxPresent, counters },
+            cleanupAttempts = cleanup, cleanupObservations = observations, evidenceLimitations = limitations.ToArray()
+        };
+        internal void Emit()
+        {
+            // Diagnostic sink failure never replaces the real primary/cleanup failure.
+            try { persist(Record()); } catch { limitations.Add("diagnostic-persistence-unavailable"); }
+            try { output?.Invoke(Record()); } catch { limitations.Add("diagnostic-output-unavailable"); }
+            if (limitations.Count != 0)
+                try { persist(Record()); } catch { /* No safe sink remains; preserve primary. */ }
+        }
+    }
+    private static void AppendDiagnostic(string? diagnosticDirectory, object value) =>
+        File.AppendAllText(Path.Combine(diagnosticDirectory ?? throw new IOException(), "diagnostic.jsonl"),
+            JsonSerializer.Serialize(value, Json) + Environment.NewLine);
 
     private static X509Certificate2 CreateRoot(RSA key, string commonName)
     {
@@ -553,7 +753,7 @@ internal static class GatewayHandlerTrustProbeSupport
         return path;
     }
 
-    private static object SourceIdentity()
+    private static DiagnosticSource SourceIdentity()
     {
         // Git emits only immutable identities, never status, remotes, environment or credentials.
         string Git(string argument)
@@ -563,14 +763,20 @@ internal static class GatewayHandlerTrustProbeSupport
             using var process = Process.Start(start)!; var value = process.StandardOutput.ReadToEnd().Trim();
             process.WaitForExit(); Check(process.ExitCode == 0 && value.Length == 40 && value.All(Uri.IsHexDigit), "source-identity"); return value;
         }
-        return new { checkedOutCommit = Git("HEAD"), checkedOutTree = Git("HEAD^{tree}"),
-            testAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(GatewayHandlerTrustProbeTests).Assembly.Location))),
-            workflowHead = Environment.GetEnvironmentVariable("GITHUB_SHA") };
+        return new(Git("HEAD"), Git("HEAD^{tree}"),
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(GatewayHandlerTrustProbeTests).Assembly.Location))),
+            Environment.GetEnvironmentVariable("GITHUB_SHA"));
     }
 
     private static string OcelotVersion() => typeof(MessageInvokerPool).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
     private static Uri Address(WebApplication app) => new(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
-    private static void Check(bool condition, string reason) { if (!condition) throw new InvalidOperationException(reason); }
+    private static void Check(bool condition, string reason)
+    {
+        if (condition) return;
+        var error = new InvalidOperationException(reason);
+        ProbeDiagnostic.Current?.Capture(error, reason);
+        throw error;
+    }
     private static void Write<T>(string path, T value)
     {
         var temporary = path + ".pending";
@@ -579,7 +785,7 @@ internal static class GatewayHandlerTrustProbeSupport
     private static T Read<T>(string path) => JsonSerializer.Deserialize<T>(File.ReadAllText(path), Json)!;
     private sealed class PlannedStartupFailure : Exception;
     private sealed record EnvironmentIdentity(string Boundary, string? AccountSid, string? ImageOS, string? ImageVersion);
-    private sealed record ChildInput(string Target, string Correlation, string LeafFile, string IssuerFile, bool PauseAfterReceipt);
+    private sealed record ChildInput(string Target, string Correlation, string LeafFile, string IssuerFile, bool PauseAfterReceipt, DiagnosticSource? Source);
     private sealed record ChildResult(bool Accepted, bool CertificateFailure, string HttpError, bool AuthenticationException,
         bool NameValid, bool TimeValid, bool ChainValid, string[] ChainStatuses, bool RealPool);
 }
