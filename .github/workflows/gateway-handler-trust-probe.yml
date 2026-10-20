@@ -93,7 +93,7 @@ jobs:
             }
             $hashes = @{
               'GatewayHandlerTrustProbeTests.cs' = '47a646a76d89df5c0f7bbff492228dbe9f238f69808989b944f126f7a1dcfc52'
-              'GatewayHandlerTrustProbeSupport.cs' = '67df9f85688839a785dea7127fd8a974fcdc88fe75e1e62abb11532a53314e23'
+              'GatewayHandlerTrustProbeSupport.cs' = '90ccd1dcaa6889761ac9e6a0c0fa88151f58eed48b459395e6c3aab34943d766'
             }
             foreach ($name in @('GatewayHandlerTrustProbeTests.cs','GatewayHandlerTrustProbeSupport.cs')) {
               $path = 'Services/AuthManager/Tests/Infrastructure.IntegrationTests/' + $name
@@ -145,10 +145,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Reviewed diagnostic ancestry mismatch' }
           git merge-base --is-ancestor 115725533c7a1f027019dd0da5ad819cad687521 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Accepted hosted candidate ancestry mismatch' }
-          $normalModeDelta = @(git diff --name-status 115725533c7a1f027019dd0da5ad819cad687521 HEAD)
-          $approvedNormalModeDelta = @("M`t.github/workflows/gateway-handler-trust-probe.yml")
-          if ($LASTEXITCODE -ne 0 -or $normalModeDelta.Count -ne 1 -or
-              ($normalModeDelta -join "`n") -cne ($approvedNormalModeDelta -join "`n")) { throw 'Workflow-only normal-mode scope mismatch' }
+          git merge-base --is-ancestor f9eb55d19cd47c278ebe1526d838a7cf8976fb64 HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Reviewed normal-mode candidate ancestry mismatch' }
+          $diagnosticDelta = @(git diff --name-status f9eb55d19cd47c278ebe1526d838a7cf8976fb64 HEAD)
+          $approvedDiagnosticDelta = @("M`t.github/workflows/gateway-handler-trust-probe.yml",
+              "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeSupport.cs")
+          if ($LASTEXITCODE -ne 0 -or $diagnosticDelta.Count -ne 2 -or
+              ($diagnosticDelta -join "`n") -cne ($approvedDiagnosticDelta -join "`n")) { throw 'Two-path Windows diagnostic scope mismatch' }
           $corrected = @(git diff --name-status f008859487039e81f2a9555778f7204b39d33f9d HEAD)
           $approvedCorrection = @("M`t.github/workflows/gateway-handler-trust-probe.yml",
               "M`tServices/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayHandlerTrustProbeSupport.cs")
@@ -169,7 +172,7 @@ jobs:
           $source = 'Services/AuthManager/Tests/Infrastructure.IntegrationTests/'
           $hashes = @{
             'GatewayHandlerTrustProbeTests.cs' = '47a646a76d89df5c0f7bbff492228dbe9f238f69808989b944f126f7a1dcfc52'
-            'GatewayHandlerTrustProbeSupport.cs' = '67df9f85688839a785dea7127fd8a974fcdc88fe75e1e62abb11532a53314e23'
+            'GatewayHandlerTrustProbeSupport.cs' = '90ccd1dcaa6889761ac9e6a0c0fa88151f58eed48b459395e6c3aab34943d766'
           }
           foreach ($name in $hashes.Keys) {
             if ((Get-FileHash -LiteralPath ($source + $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hashes[$name]) {
@@ -456,13 +459,13 @@ jobs:
             }
           }
           Copy-Evidence (Join-Path $env:PROBE_OUTER 'outer.trx') 'outer.trx'
-          foreach ($name in @('receipts.jsonl','ownership.json','public-root.cer','untrusted-root.cer','trusted-leaf.cer','untrusted-leaf.cer')) {
+          foreach ($name in @('diagnostic.jsonl','receipts.jsonl','ownership.json','public-root.cer','untrusted-root.cer','trusted-leaf.cer','untrusted-leaf.cer')) {
             Copy-Evidence (Join-Path $env:ZEKA_TRUST_PROBE_EVIDENCE $name) $name
           }
           $names = @('before-normal','trusted-normal','untrusted-normal','after-normal','before-startup-failure','after-startup-failure',
               'before-abnormal-child','trusted-abnormal-child','untrusted-abnormal-child','terminated-child','after-abnormal-child')
           foreach ($name in $names) {
-            foreach ($file in @('result.json','process.json','result.trx')) {
+            foreach ($file in @('diagnostic.jsonl','result.json','process.json','result.trx')) {
               $relative = "child-$name/$file"
               Copy-Evidence (Join-Path $env:ZEKA_TRUST_PROBE_EVIDENCE $relative) $relative
             }

@@ -278,7 +278,11 @@ internal static class GatewayHandlerTrustProbeSupport
                     failures.PostconditionFailures.Add(new(check.Stage,
                         ExceptionDispatchInfo.Capture(new InvalidOperationException("probe-postcondition-failed"))));
             }
-            catch (Exception error) { failures.PostconditionFailures.Add(new(check.Stage, ExceptionDispatchInfo.Capture(error))); }
+            catch (Exception error)
+            {
+                ProbeDiagnostic.Current?.ObservationFailure(check.Stage, error);
+                failures.PostconditionFailures.Add(new(check.Stage, ExceptionDispatchInfo.Capture(error)));
+            }
         }
         ProbeDiagnostic.Current?.ObserveCleanup(observed);
         try { receipt(observed); }
@@ -437,6 +441,7 @@ internal static class GatewayHandlerTrustProbeSupport
         }
         catch (HttpRequestException error)
         {
+            diagnostic.RequestException(error);
             var authentication = false;
             for (Exception? inner = error; inner is not null; inner = inner.InnerException)
                 authentication |= inner is AuthenticationException;
@@ -542,6 +547,8 @@ internal static class GatewayHandlerTrustProbeSupport
         private object? firstFailure;
         private readonly List<object> cleanup = [];
         private readonly List<object> observations = [];
+        private readonly Dictionary<string, string> observationErrors = new(StringComparer.Ordinal);
+        private object? requestException;
         private readonly HashSet<string> limitations = [];
         private int? childExit;
         private bool? resultPresent, trxPresent;
@@ -596,20 +603,43 @@ internal static class GatewayHandlerTrustProbeSupport
         };
         private static string Kind(Exception? error) => error switch
         {
-            null => "none", InvalidOperationException => "invalid-operation", SocketException => "socket",
+            null => "none", HttpRequestException => "http-request", InvalidOperationException => "invalid-operation", SocketException => "socket",
             TimeoutException => "timeout", OperationCanceledException => "cancelled", IOException => "io",
             UnauthorizedAccessException => "access", CryptographicException => "cryptographic",
             AuthenticationException => "authentication", JsonException => "json", System.Xml.XmlException => "xml",
+            System.ComponentModel.Win32Exception => "native",
             _ => "unknown"
         };
+        internal void RequestException(Exception error)
+        {
+            // Inner-chain order only, capped at eight categories; never export messages,
+            // arbitrary type names, native error codes or exception data.
+            var categories = new List<string>();
+            Exception? current = error;
+            while (current is not null && categories.Count < 8)
+            {
+                categories.Add(Kind(current));
+                current = current.InnerException;
+            }
+            requestException = new { operation = operation.ToString(), control, categories, truncated = current is not null };
+        }
         internal void Cleanup(string stage, bool succeeded, Exception? error) => cleanup.Add(new
         {
             stage = CleanupCodes.Contains(stage) ? stage : "unknown", succeeded, exceptionKind = Kind(error)
         });
+        internal void ObservationFailure(string stage, Exception error) =>
+            observationErrors[CleanupCodes.Contains(stage) ? stage : "unknown"] = Kind(error);
         internal void ObserveCleanup(IReadOnlyDictionary<string, bool?> values)
         {
             foreach (var value in values)
-                observations.Add(new { stage = CleanupCodes.Contains(value.Key) ? value.Key : "unknown", observed = value.Value });
+            {
+                var stage = CleanupCodes.Contains(value.Key) ? value.Key : "unknown";
+                var listener = stage is "trusted-listener-closed" or "untrusted-listener-closed";
+                observations.Add(new { stage, observed = value.Value,
+                    outcome = value.Value is null ? "unknown" : value.Value.Value
+                        ? (listener ? "closed" : "satisfied") : (listener ? "open" : "unsatisfied"),
+                    exceptionKind = observationErrors.GetValueOrDefault(stage, value.Value is null ? "unknown" : "none") });
+            }
         }
         internal void ChildObservation(string directory, int? exit)
         {
@@ -650,7 +680,7 @@ internal static class GatewayHandlerTrustProbeSupport
             schema = 1, phase = "diagnostic", scope = scope is "supervisor" or "child" ? scope : "unknown", test = TestIdentity,
             source = new { checkedOutCommit = Hash(Source?.checkedOutCommit, 40), checkedOutTree = Hash(Source?.checkedOutTree, 40),
                 testAssemblySha256 = Hash(Source?.testAssemblySha256, 64), workflowHead = Hash(Source?.workflowHead, 40) },
-            control, lastOperation = operation.ToString(), firstFailure,
+            control, lastOperation = operation.ToString(), firstFailure, requestException,
             child = new { exitCode = childExit, resultPresent, trxPresent, counters },
             cleanupAttempts = cleanup, cleanupObservations = observations, evidenceLimitations = limitations.ToArray()
         };
