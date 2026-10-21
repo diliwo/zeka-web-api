@@ -133,7 +133,7 @@ jobs:
           mkdir "$raw" "$safe" "$raw/results" "$raw/receipts"
           printf 'GATEWAY_RAW=%s\nGATEWAY_SAFE=%s\n' "$raw" "$safe" >> "$GITHUB_ENV"
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git rev-parse HEAD^)" = a4f0634d047f2570003e5fac1407de0382866eff
+          test "$(git rev-parse HEAD^)" = f75fd2772b7a4e9906c56faea2282f817997aaa3
           test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/mvp-validation.yml
           test "$EXPECTED_BASE" = 4da3954774dfffa4f9f865f47f08da75768d5f0e
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
@@ -281,10 +281,137 @@ jobs:
               entries = tree.findall('.//t:TestEntries/t:TestEntry', ns)
               check(collections.Counter((x.get('testId'),x.get('executionId')) for x in entries) == collections.Counter((x.get('testId'),x.get('executionId')) for x in results), 'trx-entry-mismatch')
           def discovery():
-              lines = (raw/'discovery.stdout').read_text().splitlines()
-              found = [line.strip() for line in lines if line.strip().startswith(CLASS+'.')]
-              check(collections.Counter(found) == collections.Counter(expected), 'discovery-identity-mismatch')
-              write('discovery.sanitized.json', {'derivative':'allowlisted-discovery-v1','originalSha256':digest(raw/'discovery.stdout'),'filter':'FullyQualifiedName~'+CLASS+'.','tests':found,'originalSeven':{CLASS+'.'+name:target for name,target in rows if target}})
+              # Listing admission proves explicit method coverage, never execution/theory expansion.
+              limits = {'bytes':2000000, 'lines':10000, 'identityCharacters':1024, 'retainedUnknowns':128}
+              project = 'Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj'
+              command = ['dotnet','test',project,'--configuration','Release','--no-build','--no-restore','--list-tests']
+              groups = {CLASS+'.'+method: [name for name in expected if name.split('(')[0] == CLASS+'.'+method] for method in methods}
+              report = {'derivative':'allowlisted-native-discovery-v2', 'discoveryIsExecutionEvidence':False,
+                'nativeCommand':{'argv':command,'filter':None,'exitCode':None},
+                'originalOutput':{'bytes':None,'sha256':None,'hashStatus':'unavailable'}, 'limits':limits,
+                'parserStatus':'rejected','firstRejectionCode':None,'rejectionCodes':[],
+                'counts':{'outputLines':0,'listingHeaders':0,'observedEntries':0,'gatewayAttributableEntries':0,
+                          'observedGatewayMethods':0,'enumeratedTheoryRows':0,'foldedTheoryMethods':0,'otherQualifiedEntries':0,'unknownEntries':0},
+                'gatewayClass':CLASS,'safeIdentities':[], 'unknownEntries':[], 'unknownRecordsTruncated':False,
+                'expectedCoverage':{'methods':sorted(groups),'executionRows':expected,'methodCount':12,'executionRowCount':21,
+                  'originalSeven':{CLASS+'.'+name:target for name,target in rows if target}},
+                'observedMethods':[], 'foldedTheories':[], 'enumeratedTheoryRows':[], 'notEnumeratedByListing':[],
+                'missingMethods':[], 'missingEnumeratedRows':[], 'duplicateEntries':[], 'unexpectedEntries':[]}
+              def reject(code):
+                  if code not in report['rejectionCodes']: report['rejectionCodes'].append(code)
+              def unknown(line, category, unexpected=False):
+                  # ASCII alone is not a privacy allowlist; unknown names/arguments are never copied.
+                  value = {'category':category,'characters':len(line),'sha256':hashlib.sha256(line.encode('utf-8')).hexdigest()}
+                  if len(report['unknownEntries']) < limits['retainedUnknowns']: report['unknownEntries'].append(value)
+                  else: report['unknownRecordsTruncated'] = True
+                  if unexpected and len(report['unexpectedEntries']) < limits['retainedUnknowns']: report['unexpectedEntries'].append(value)
+              def normalized(text):
+                  # Ignore rendering whitespace and Boolean case only OUTSIDE quoted string values.
+                  matches = list(re.finditer(r'"(?:[^"\\]|\\.)*"|[^"\s]+', text))
+                  cursor=0; tokens=[]
+                  for match in matches:
+                      if text[cursor:match.start()].strip(): return None
+                      tokens.append(match[0]); cursor=match.end()
+                  if text[cursor:].strip(): return None
+                  return ''.join(re.sub(r'\b(True|False)\b',lambda m:m[0].lower(),t) if not t.startswith('"') else t for t in tokens)
+              display_rows = {normalized(name):name for name in expected}
+              seen, folded, enumerated, observed_methods = collections.Counter(), set(), set(), set()
+              status = raw/'discovery.exit'
+              if status.is_file():
+                  try:
+                      with status.open('rb') as stream: data=stream.read(9)
+                      value=data.decode('ascii').strip() if len(data)<=8 else ''
+                  except (OSError,UnicodeDecodeError): value=''
+                  if re.fullmatch(r'[0-9]{1,3}',value): report['nativeCommand']['exitCode']=int(value)
+              if report['nativeCommand']['exitCode'] is None: reject('DISCOVERY_NATIVE_STATUS_UNAVAILABLE')
+              elif report['nativeCommand']['exitCode'] != 0: reject('DISCOVERY_NATIVE_FAILURE')
+              path=raw/'discovery.stdout'; lines=[]
+              if not path.is_file(): reject('DISCOVERY_OUTPUT_MISSING')
+              else:
+                  size=path.stat().st_size; report['originalOutput']['bytes']=size
+                  try:
+                      with path.open('rb') as stream: data=stream.read(limits['bytes']+1)
+                  except OSError:
+                      data=None; reject('DISCOVERY_OUTPUT_UNREADABLE')
+                  if data is None:
+                      report['originalOutput']['hashStatus']='unavailable-read-failure'
+                  elif size > limits['bytes'] or len(data)>limits['bytes']:
+                      report['originalOutput'].update(hashStatus='unavailable-over-limit',prefixSha256=hashlib.sha256(data[:limits['bytes']]).hexdigest())
+                      reject('DISCOVERY_OUTPUT_LIMIT')
+                  else:
+                      report['originalOutput'].update(sha256=hashlib.sha256(data).hexdigest(),hashStatus='complete')
+                      try: lines=data.decode('utf-8-sig').splitlines()
+                      except UnicodeDecodeError: reject('DISCOVERY_ENCODING_INVALID')
+              report['counts']['outputLines']=len(lines)
+              if len(lines)>limits['lines']: reject('DISCOVERY_LINE_LIMIT')
+              lines=lines[:limits['lines']]
+              headers=[i for i,line in enumerate(lines) if line.strip().lower()=='the following tests are available:']
+              report['counts']['listingHeaders']=len(headers)
+              if not headers: reject('DISCOVERY_LIST_HEADER_MISSING')
+              elif len(headers)>1: reject('DISCOVERY_LIST_HEADER_DUPLICATE')
+              if headers:
+                for line in lines[headers[0]+1:]:
+                  text=line.strip()
+                  if not text or text.lower()=='the following tests are available:': continue
+                  if re.match(r'^\[xUnit\.net [0-9:.]+\]',text):
+                      unknown(text,'runner-diagnostic'); continue
+                  report['counts']['observedEntries']+=1
+                  if len(text)>limits['identityCharacters']:
+                      unknown(text,'overlong-list-entry'); reject('DISCOVERY_IDENTITY_LIMIT'); continue
+                  if not text.isascii() or any(ord(c)<32 or ord(c)==127 for c in text):
+                      unknown(text,'unsupported-character-list-entry'); reject('DISCOVERY_UNSAFE_OR_UNKNOWN_IDENTITY'); continue
+                  if text.startswith(CLASS+'.'):
+                      report['counts']['gatewayAttributableEntries']+=1
+                      suffix=text[len(CLASS)+1:]
+                      match=re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*)(\(.*\))?',suffix)
+                      method=CLASS+'.'+match[1] if match else None
+                      if method not in groups:
+                          unknown(text,'unexpected-gateway-method',True); reject('DISCOVERY_UNEXPECTED_GATEWAY_IDENTITY'); continue
+                      observed_methods.add(method)
+                      if match[2] is None or match[2]=='()':
+                          identity=method; kind='folded-theory-method' if len(groups[method])>1 else 'fact-method'
+                          if len(groups[method])>1: folded.add(method)
+                      else:
+                          identity=display_rows.get(normalized(text))
+                          if identity is None:
+                              unknown(text,'unexpected-gateway-display',True); reject('DISCOVERY_UNEXPECTED_GATEWAY_IDENTITY'); continue
+                          kind='enumerated-theory-row'; enumerated.add(identity)
+                      seen[identity]+=1
+                      if len(report['safeIdentities'])<64:
+                          report['safeIdentities'].append({'method':method,'displayName':text,'canonicalIdentity':identity,'kind':kind})
+                  elif text.startswith('GatewayBrowserTransportTests.') or text.split('(')[0] in methods:
+                      report['counts']['unknownEntries']+=1
+                      unknown(text,'gateway-class-attribution-ambiguous'); reject('DISCOVERY_AMBIGUOUS_GATEWAY_IDENTITY')
+                  elif re.fullmatch(r'(?:[A-Za-z_][A-Za-z0-9_+`]*\.){2,}[A-Za-z_][A-Za-z0-9_]*(?:\(.*\))?',text):
+                      report['counts']['otherQualifiedEntries']+=1
+                      unknown(text,'other-class-identity')
+                  else:
+                      report['counts']['unknownEntries']+=1
+                      unknown(text,'unattributable-list-entry'); reject('DISCOVERY_AMBIGUOUS_IDENTITY')
+              report['observedMethods']=sorted(observed_methods)
+              report['foldedTheories']=sorted(folded)
+              report['enumeratedTheoryRows']=sorted(enumerated)
+              report['counts'].update(observedGatewayMethods=len(observed_methods),enumeratedTheoryRows=len(enumerated),foldedTheoryMethods=len(folded))
+              report['missingMethods']=sorted(set(groups)-observed_methods)
+              report['duplicateEntries']=[{'identity':name,'count':count} for name,count in sorted(seen.items()) if count>1]
+              if not observed_methods: reject('DISCOVERY_ZERO_GATEWAY_METHODS')
+              if report['missingMethods']: reject('DISCOVERY_MISSING_METHODS')
+              if report['duplicateEntries']: reject('DISCOVERY_DUPLICATE_IDENTITY')
+              for method,names in sorted(groups.items()):
+                  if len(names)==1: continue
+                  actual=set(names)&enumerated
+                  if method in folded:
+                      report['notEnumeratedByListing'].extend(names)
+                      if actual: reject('DISCOVERY_MIXED_THEORY_REPRESENTATION')
+                  elif actual and actual!=set(names):
+                      report['missingEnumeratedRows'].extend(sorted(set(names)-actual)); reject('DISCOVERY_PARTIAL_THEORY_ENUMERATION')
+              report['firstRejectionCode']=next(iter(report['rejectionCodes']),None)
+              if not report['rejectionCodes']:
+                  report['parserStatus']='admitted-method-coverage' if not enumerated else ('admitted-mixed-coverage' if folded else 'admitted-enumerated-coverage')
+              # This file MUST exist before an admission error can escape to step/export gates.
+              write('discovery.sanitized.json',report)
+              check(not report['rejectionCodes'],report['firstRejectionCode'])
+              return report
           def receipts():
               paths = list((raw/'receipts').rglob('gateway-receipts.jsonl')); records = []
               schemas = {
@@ -369,7 +496,7 @@ jobs:
                 write('original-byte-hashes.json', manifest)
                 head, tree, parent = (raw/'source.txt').read_text().splitlines()
                 check(all(re.fullmatch('[0-9a-f]{40}',x) for x in [head,tree,parent]), 'source-format')
-                check(head == os.environ['ZEKA_GATEWAY_SHA'] and parent == 'a4f0634d047f2570003e5fac1407de0382866eff', 'source-binding')
+                check(head == os.environ['ZEKA_GATEWAY_SHA'] and parent == 'f75fd2772b7a4e9906c56faea2282f817997aaa3', 'source-binding')
                 path=raw/'assembly.sha256'; value=path.read_text().strip() if path.is_file() else ''
                 assembly=value if re.fullmatch('[0-9a-f]{64}',value) else None
                 write('source-assembly.json', {'head':head,'tree':tree,'parent':parent,'assemblySha256':assembly,'sdk':'8.0.129','runId':os.environ['GITHUB_RUN_ID'],'attempt':os.environ['GITHUB_RUN_ATTEMPT'],'otherJobsExactHead':False})
@@ -531,10 +658,9 @@ jobs:
           set -euo pipefail
           status=0
           date -u +%FT%TZ > "$GATEWAY_RAW/discovery.start"
-          timeout --signal=TERM --kill-after=10s 300s dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configuration Release --no-build --no-restore --list-tests --filter 'FullyQualifiedName~Infrastructure.IntegrationTests.GatewayBrowserTransportTests.' > "$GATEWAY_RAW/discovery.stdout" 2> "$GATEWAY_RAW/discovery.stderr" || status=$?
+          timeout --signal=TERM --kill-after=10s 300s dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configuration Release --no-build --no-restore --list-tests > "$GATEWAY_RAW/discovery.stdout" 2> "$GATEWAY_RAW/discovery.stderr" || status=$?
           date -u +%FT%TZ > "$GATEWAY_RAW/discovery.end"
           printf '%s\n' "$status" > "$GATEWAY_RAW/discovery.exit"
-          test "$status" -eq 0
           python3 "$GATEWAY_RAW/evidence.py" discovery
 
       - name: Run the gateway class once with native TLS and cleanup receipts
