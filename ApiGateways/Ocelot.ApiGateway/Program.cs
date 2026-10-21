@@ -53,6 +53,7 @@ namespace Zeka.Gateway
     // The isolated single-hop profile is opt-in. It is not a production ingress topology.
     public static class BrowserTransport
     {
+        public const string DiagnosticCategory = "Zeka.Gateway.Safe";
         private const string Prefix = "GatewayBrowserTransport";
         private static readonly (string Method, string Path)[] Routes =
         [
@@ -72,9 +73,14 @@ namespace Zeka.Gateway
             {
                 if (policy.Valid) cors.WithOrigins(policy.Origin!).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
             }));
-            // Ocelot logs URLs and errors. Browser credentials/IDs must not enter those logs.
-            builder.Logging.AddFilter("Ocelot", LogLevel.None);
-            builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.None);
+            // Raw framework/dependency categories include URLs and exception contents.
+            // Gateway diagnostics have one source allowlist and a route-aware producer below.
+            builder.Services.PostConfigure<LoggerFilterOptions>(options =>
+            {
+                options.Rules.Clear();
+                options.Rules.Add(new LoggerFilterRule(null, null, LogLevel.Information,
+                    (_, category, _) => category == DiagnosticCategory));
+            });
             builder.Services.AddOcelot(builder.Configuration);
             builder.Services.PostConfigure<Ocelot.Configuration.File.FileConfiguration>(file =>
             {
@@ -99,6 +105,27 @@ namespace Zeka.Gateway
         public static void UseBrowserTransport(this WebApplication app)
         {
             var policy = app.Services.GetRequiredService<Policy>();
+            var diagnostic = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(DiagnosticCategory);
+            app.Use(async (http, next) =>
+            {
+                var path = http.Request.Path.Value ?? "";
+                var routeClass = path.StartsWith("/api/v1/", StringComparison.OrdinalIgnoreCase) ? "browser"
+                    : path.StartsWith("/clients/", StringComparison.Ordinal) ? "legacy-clients"
+                    : path == "/login" ? "legacy-login" : "other";
+                var method = http.Request.Method is "GET" or "POST" or "PUT" or "PATCH" or "DELETE" or "HEAD" or "OPTIONS"
+                    ? http.Request.Method : "other";
+                var correlation = Guid.NewGuid().ToString("N"); // Never trust a caller's correlation value.
+                var failed = false;
+                try { await next(http); }
+                catch { failed = true; throw; }
+                finally
+                {
+                    diagnostic.LogInformation(new EventId(8901, "GatewayRequest"),
+                        "GatewayRequest route={RouteClass} method={MethodClass} status={Status} outcome={Outcome} dependency={DependencyClass} correlation={Correlation}",
+                        routeClass, method, http.Response.StatusCode, failed ? "exception" : "completed",
+                        failed || http.Response.StatusCode >= 500 ? "unavailable" : "none", correlation);
+                }
+            });
             app.UseWhen(context => context.Request.Path.Value?.StartsWith("/api/v1/", StringComparison.OrdinalIgnoreCase) == true,
                 branch =>
                 {

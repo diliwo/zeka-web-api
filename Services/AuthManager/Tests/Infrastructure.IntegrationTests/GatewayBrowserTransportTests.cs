@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Data.Common;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -33,6 +34,8 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 using Ocelot.Configuration;
 using Ocelot.Configuration.File;
+using Ocelot.DependencyInjection;
+using Ocelot.Configuration.Repository;
 using Ocelot.Middleware;
 using Ocelot.Requester;
 using Zeka.Authentication.Tests;
@@ -56,6 +59,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [InlineData("ben", 1)]
     public async Task Real_ocelot_provider_flow_keeps_choices_distinct_from_live_access_and_revokes_session(string user, int choices)
     {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Real_ocelot_provider_flow_keeps_choices_distinct_from_live_access_and_revokes_session), new object?[] { user, choices }, output)) return;
         await using var host = await StartAsync();
         var token = await host.SignInAsync(user);
         using (var list = await host.GetAsync(Eligible, token))
@@ -108,6 +112,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [Fact]
     public async Task Exact_route_and_credential_matrix_exposes_only_six_method_path_pairs()
     {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Exact_route_and_credential_matrix_exposes_only_six_method_path_pairs), new object?[] {  }, output)) return;
         await using var host = await StartAsync();
         var token = await host.SignInAsync("ada");
         var paths = new[] { Session + "csrf", Session + "sign-in", Session + "restore", Session + "logout", Eligible, "/api/v1/tenant-access/" + host.Alpha };
@@ -168,6 +173,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [Fact]
     public async Task Ordinary_URI_normalization_and_literal_TLS_target_are_observed_at_the_unchanged_gateway()
     {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Ordinary_URI_normalization_and_literal_TLS_target_are_observed_at_the_unchanged_gateway), new object?[] {  }, output)) return;
         await using var host = await StartAsync();
         const string encoded = "/api/v1/browser-session/%63srf";
         using (var ordinary = await host.ObserveOrdinaryAsync("normalization-control", encoded, output))
@@ -198,6 +204,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [InlineData(false)] [InlineData(true)]
     public async Task Owned_legacy_listener_is_disposed_on_success_and_startup_failure(bool failStartup)
     {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Owned_legacy_listener_is_disposed_on_success_and_startup_failure), new object?[] { failStartup }, output)) return;
         WebApplication? listener = null;
         var original = new InvalidOperationException("Synthetic fixture startup failure after legacy acquisition");
         if (failStartup)
@@ -219,6 +226,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [InlineData(true)] [InlineData(false)]
     public async Task Exact_json_headers_cookies_and_framing_cross_real_ocelot(bool knownLength)
     {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Exact_json_headers_cookies_and_framing_cross_real_ocelot), new object?[] { knownLength }, output)) return;
         await using var host = await StartAsync();
         var csrf = await host.CsrfAsync();
         var body = "{\"email\":\"ada.gateway@example.invalid\",\"password\":\"" + Password + "\"}";
@@ -237,6 +245,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [Fact]
     public async Task Attribution_is_exact_peer_fail_closed_and_backend_budgets_remain_independent_and_bounded()
     {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Attribution_is_exact_peer_fail_closed_and_backend_budgets_remain_independent_and_bounded), new object?[] {  }, output)) return;
         await using var host = await StartAsync(perAddress: 3, aggregate: 30, partitions: 4);
         foreach (var value in new[] { "", "not-an-address", "198.51.100.1, 198.51.100.2", "198.51.100.1" })
         {
@@ -280,6 +289,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [Fact]
     public async Task Aggregate_budget_does_not_replace_per_address_admission()
     {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Aggregate_budget_does_not_replace_per_address_admission), new object?[] {  }, output)) return;
         await using var host = await StartAsync(perAddress: 2, aggregate: 2);
         using (var response = await host.Http.GetAsync(Session + "csrf")) await Success(response, HttpStatusCode.OK);
         using var second = host.Client("127.0.0.3"); using var third = host.Client("127.0.0.4");
@@ -296,6 +306,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [InlineData("GatewayBrowserTransport:ClientPeers:0", "invalid")]
     public async Task Missing_or_invalid_required_configuration_disables_routes_without_legacy_fallback(string key, string? value)
     {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Missing_or_invalid_required_configuration_disables_routes_without_legacy_fallback), new object?[] { key, value }, output)) return;
         await using var host = await StartAsync(configure: values => values[key] = value);
         using var response = await host.Http.GetAsync(Session + "csrf"); await Error(response, HttpStatusCode.ServiceUnavailable);
         Assert.Empty(host.Received);
@@ -306,6 +317,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [Fact]
     public async Task Unavailable_database_overflow_and_downstream_emit_generic_no_store_without_cached_choices()
     {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Unavailable_database_overflow_and_downstream_emit_generic_no_store_without_cached_choices), new object?[] {  }, output)) return;
         await using var host = await StartAsync(); var token = await host.SignInAsync("ada");
         using (var response = await host.GetAsync(Eligible, token)) await Success(response, HttpStatusCode.OK);
         host.DatabaseFailure.Armed = true;
@@ -329,7 +341,8 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     [InlineData("logout")]
     public async Task Lost_mutation_response_is_not_transparently_replayed_and_requires_explicit_recovery(string action)
     {
-        await using var host = await StartAsync(); var token = await host.SignInAsync("ada");
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Lost_mutation_response_is_not_transparently_replayed_and_requires_explicit_recovery), new object?[] { action }, output)) return;
+        await using var host = await StartAsync(lostResponse: true); var token = await host.SignInAsync("ada");
         var cookie = host.RefreshCookie;
         host.Pool.DropPath = Session + action;
         using (var response = await host.PostAsync(action, await host.CsrfAsync())) await Error(response, HttpStatusCode.ServiceUnavailable);
@@ -343,6 +356,48 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
         Assert.Equal(2, host.Received.Count(x => x.Path == Session + action));
         using (var denied = await host.GetAsync(Eligible, token)) await Error(denied, HttpStatusCode.Unauthorized);
         output.WriteLine($"lost_{action}_response=true sent_once=true explicit_fresh_csrf_recovery=true old_session_denied=true final_assertions=true");
+    }
+
+
+    [Fact]
+    public async Task Isolated_gateway_case_and_real_handler_controls()
+    {
+        var mode = Environment.GetEnvironmentVariable(GatewayLinuxValidation.Mode);
+        if (mode == "browser")
+        {
+            var input = GatewayLinuxValidation.ReadCase();
+            var method = typeof(GatewayBrowserTransportTests).GetMethod(input.Method)!;
+            GatewayLinuxValidation.Check(method is not null && method.Name != nameof(Isolated_gateway_case_and_real_handler_controls), "child-method");
+            var parameters = method!.GetParameters();
+            var args = input.Arguments.Select((value, index) => value.Deserialize(parameters[index].ParameterType)).ToArray();
+            try { await (Task)method.Invoke(this, args)!; }
+            catch { throw new InvalidOperationException("isolated-browser-assertion-failed"); }
+        }
+        else if (mode == "transport") await GatewayLinuxValidation.TransportChildAsync();
+        else await GatewayLinuxValidation.ProveControlsAsync(output);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Safe_legacy_diagnostics_are_attributable_with_profile_on_and_off(bool enabled)
+    {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Safe_legacy_diagnostics_are_attributable_with_profile_on_and_off), new object?[] { enabled }, output)) return;
+        await using var host = await StartAsync(configure: values => { if (!enabled) values["GatewayBrowserTransport:Origin"] = null; });
+        var before = host.Logs.Events.Count;
+        await host.AssertLegacyForwardingAsync(output);
+        var events = host.Logs.Events.Skip(before).Where(e => e.Category == BrowserTransport.DiagnosticCategory && e.Event == 8901).ToArray();
+        var completed = Assert.Single(events);
+        Assert.Contains("route=legacy-clients", completed.Text); Assert.Contains("status=404", completed.Text);
+        Assert.Contains("dependency=none", completed.Text); Assert.Contains("correlation=", completed.Text);
+        var marker = "synthetic-private-diagnostic-" + Guid.NewGuid().ToString("N");
+        host.Gateway.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Unexpected.Raw.Source").LogError(new Exception(marker), "{Private}", marker);
+        GatewayLinuxValidation.RequireNoLeaks(host.Logs.Messages, new[] { marker });
+        await host.Legacy.StopAsync();
+        using var unavailable = await host.Http.GetAsync("/clients/search");
+        Assert.True((int)unavailable.StatusCode >= 500);
+        Assert.Contains(host.Logs.Events, e => e.Category == BrowserTransport.DiagnosticCategory && e.Event == 8901 && e.Text.Contains("route=legacy-clients") && e.Text.Contains("dependency=unavailable"));
+        host.AssertRedacted("synthetic-unused-bearer");
     }
 
     private static async Task Success(HttpResponseMessage response, HttpStatusCode status)
@@ -365,7 +420,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     }
 
     private async Task<Fixture> StartAsync(int perAddress = 60, int aggregate = 256, int partitions = 16,
-        Action<Dictionary<string, string?>>? configure = null, Action<WebApplication>? legacyAcquired = null)
+        Action<Dictionary<string, string?>>? configure = null, Action<WebApplication>? legacyAcquired = null, bool lostResponse = false)
     {
         var owned = new Fixture();
         try
@@ -392,11 +447,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
             owned.Auth = new AuthenticationFixture();
             owned.KeyPath = Path.Combine(Path.GetTempPath(), "fictional-gateway-" + Guid.NewGuid().ToString("N") + ".key");
             await File.WriteAllBytesAsync(owned.KeyPath, RandomNumberGenerator.GetBytes(32));
-            using var rsa = RSA.Create(2048);
-            var request = new CertificateRequest("CN=browser.example.invalid", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-            var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("browser.example.invalid"); san.AddIpAddress(IPAddress.Loopback); request.CertificateExtensions.Add(san.Build());
-            using var temporary = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
-            owned.Certificate = new X509Certificate2(temporary.Export(X509ContentType.Pfx));
+            owned.Certificate = GatewayLinuxValidation.BrowserCertificate();
             var backend = WebApplication.CreateBuilder(); backend.Logging.ClearProviders();
             backend.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(owned.Certificate)));
             backend.Configuration.AddConfiguration(owned.Auth.Configuration());
@@ -478,9 +529,10 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
             values[$"Routes:{legacyIndex}:DownstreamHostAndPorts:0:Port"] = destination.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
             for (var peer = 2; peer <= 8; peer++) values["GatewayBrowserTransport:ClientPeers:" + (peer - 2)] = "127.0.0." + peer;
             configure?.Invoke(values); gateway.Configuration.AddInMemoryCollection(values); BrowserTransport.Add(gateway);
-            // Test-only TLS pin at Ocelot's transport-pool seam. The real route/middleware/requester and TCP/TLS hosts remain in use.
-            gateway.Services.AddSingleton<IMessageInvokerPool>(_ => owned.Pool = new PinnedPool(owned.Certificate));
+            // The replacement is confined to the pre-existing lost-response injection.
+            if (lostResponse) gateway.Services.AddSingleton<IMessageInvokerPool>(_ => owned.Pool = new PinnedPool(owned.Certificate));
             owned.Gateway = gateway.Build();
+            if (!lostResponse) Assert.IsType<MessageInvokerPool>(owned.Gateway.Services.GetRequiredService<IMessageInvokerPool>());
             // Observe before the real guard without rewriting any request feature or header.
             owned.Gateway.Use(async (http, next) =>
             {
@@ -554,13 +606,18 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     private sealed class LogCapture : ILoggerProvider
     {
         internal ConcurrentQueue<string> Messages { get; } = new();
-        public ILogger CreateLogger(string category) => new Capture(this);
+        internal ConcurrentQueue<(string Category, int Event, string Text)> Events { get; } = new();
+        public ILogger CreateLogger(string category) => new Capture(this, category);
         public void Dispose() { }
-        private sealed class Capture(LogCapture owner) : ILogger
+        private sealed class Capture(LogCapture owner, string category) : ILogger
         {
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
             public bool IsEnabled(LogLevel level) => true;
-            public void Log<TState>(LogLevel level, EventId id, TState state, Exception? error, Func<TState, Exception?, string> format) => owner.Messages.Enqueue(format(state, error));
+            public void Log<TState>(LogLevel level, EventId id, TState state, Exception? error, Func<TState, Exception?, string> format)
+            {
+                var text = format(state, error) + (error is null ? "" : " " + error.ToString());
+                owner.Messages.Enqueue(text); owner.Events.Enqueue((category, id.Id, text));
+            }
         }
     }
     private sealed class Fixture : IAsyncDisposable
@@ -582,6 +639,31 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
         internal string LegacyRouteOptionsHash = "";
         private readonly List<HttpClient> clients = new();
         private readonly Dictionary<HttpClient, CookieContainer> cookies = new();
+        private readonly HashSet<string> historical = new(StringComparer.Ordinal);
+        private void Remember(string? value) { if (!string.IsNullOrEmpty(value)) historical.Add(value); }
+        private sealed class Tracking(Fixture owner) : DelegatingHandler
+        {
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+            {
+                owner.Remember(request.Headers.Authorization?.Parameter);
+                if (request.Headers.TryGetValues("X-Zeka-CSRF", out var values)) foreach (var value in values) owner.Remember(value);
+                var path = request.RequestUri!.AbsolutePath;
+                const string selector = "/api/v1/tenant-access/";
+                if (path.StartsWith(selector, StringComparison.Ordinal)) owner.Remember(path[selector.Length..]);
+                return await owner.TrackAsync(await base.SendAsync(request, token));
+            }
+        }
+        private async Task<HttpResponseMessage> TrackAsync(HttpResponseMessage response)
+        {
+            foreach (var jar in cookies.Values) foreach (Cookie cookie in jar.GetAllCookies()) Remember(cookie.Value);
+            if (response.Content.Headers.ContentType?.MediaType == "application/json")
+            {
+                using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                foreach (var key in new[] { "accessToken", "csrfToken" })
+                    if (json.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String) Remember(value.GetString());
+            }
+            return response;
+        }
         internal BrowserSessionEndpoints.BrowserSessionAdmission Admission => Backend.Services.GetRequiredService<BrowserSessionEndpoints.BrowserSessionAdmission>();
         internal string? RefreshCookie => cookies[Http].GetCookies(new Uri(Origin + Session))[BrowserSessionEndpoints.CookieName]?.Value;
         internal AuthDbContext Administrator() => new(new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(AdminConnection).Options);
@@ -703,13 +785,13 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
                     try { socket.Bind(new IPEndPoint(IPAddress.Parse(peer), 0)); await socket.ConnectAsync(IPAddress.Loopback, address.Port, token); return new NetworkStream(socket, ownsSocket: true); }
                     catch { socket.Dispose(); throw; }
                 } };
-            var client = new HttpClient(handler) { BaseAddress = new Uri(Origin), Timeout = TimeSpan.FromSeconds(15) }; clients.Add(client); cookies[client] = jar; return client;
+            var client = new HttpClient(new Tracking(this) { InnerHandler = handler }) { BaseAddress = new Uri(Origin), Timeout = TimeSpan.FromSeconds(15) }; clients.Add(client); cookies[client] = jar; return client;
         }
         internal async Task<string> CsrfAsync(HttpClient? client = null)
         {
-            using var response = await (client ?? Http).GetAsync(Session + "csrf");
+            using var response = await TrackAsync(await (client ?? Http).GetAsync(Session + "csrf"));
             var configured = Gateway.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<FileConfiguration>>().Value.Routes.Count(x => x.Key?.StartsWith("GatewayBrowserTransport:") == true);
-            Assert.True(response.StatusCode == HttpStatusCode.OK, $"csrf_status={(int)response.StatusCode} configured_routes={configured} pool_calls={Pool.Calls} backend_requests={Received.Count} backend_client={Received.LastOrDefault()?.Client}");
+            Assert.True(response.StatusCode == HttpStatusCode.OK, $"csrf_status={(int)response.StatusCode} configured_routes={configured} pool_calls={Pool?.Calls ?? 0} backend_requests={Received.Count} backend_client={Received.LastOrDefault()?.Client}");
             await Success(response, HttpStatusCode.OK);
             if (response.Headers.Contains("Set-Cookie")) AssertCookie(response, "__Secure-ZekaCSRF");
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()); return json.RootElement.GetProperty("csrfToken").GetString()!;
@@ -721,7 +803,8 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
         }
         internal async Task<HttpResponseMessage> GetAsync(string path, string? token = null)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, path); if (token is not null) request.Headers.Authorization = new("Bearer", token); return await Http.SendAsync(request);
+            Remember(token);
+            using var request = new HttpRequestMessage(HttpMethod.Get, path); if (token is not null) request.Headers.Authorization = new("Bearer", token); return await TrackAsync(await Http.SendAsync(request));
         }
         internal async Task<HttpResponseMessage> PostAsync(string action, string csrf, string? origin = Origin, string? body = null,
             bool knownLength = true, string contentType = "application/json; charset=utf-8", HttpClient? client = null)
@@ -731,12 +814,19 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
             request.Content = knownLength ? new ByteArrayContent(Encoding.UTF8.GetBytes(body)) : new ChunkedJson(body);
             request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
             if (origin is not null) request.Headers.Add("Origin", origin); request.Headers.Add("X-Zeka-CSRF", csrf);
-            return await (client ?? Http).SendAsync(request);
+            Remember(csrf);
+            return await TrackAsync(await (client ?? Http).SendAsync(request));
         }
         internal void AssertRedacted(string token)
         {
-            foreach (var message in Logs.Messages)
-            { Assert.DoesNotContain(Password, message); Assert.DoesNotContain(token, message); Assert.DoesNotContain("ada.gateway@example.invalid", message); Assert.DoesNotContain(Alpha.ToString(), message); if (RefreshCookie is { } cookie) Assert.DoesNotContain(cookie, message); }
+            Remember(token); Remember(Password); Remember(Alpha.ToString()); Remember(Beta.ToString());
+            foreach (var user in Users) { Remember(user.Value.ToString()); Remember(user.Key + ".gateway@example.invalid"); }
+            Assert.Contains(Logs.Events, e => e.Category == BrowserTransport.DiagnosticCategory && e.Event == 8901);
+            GatewayLinuxValidation.RequireNoLeaks(Logs.Messages, historical);
+            // Prove every retained generation is detectable without printing any value.
+            foreach (var secret in historical)
+                Assert.Throws<InvalidOperationException>(() => GatewayLinuxValidation.RequireNoLeaks(new[] { "synthetic-event " + secret }, historical));
+            Assert.True(historical.Count >= 8, "historical privacy inventory is incomplete");
         }
         public ValueTask DisposeAsync() => DisposeOwnedAsync(false);
         internal async ValueTask DisposeOwnedAsync(bool suppressErrors)
@@ -756,5 +846,366 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     {
         protected override bool TryComputeLength(out long length) { length = 0; return false; }
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => stream.WriteAsync(Encoding.UTF8.GetBytes(body)).AsTask();
+    }
+}
+
+// Dedicated Linux child startup is the trust boundary. No store imports, handler
+// certificate callbacks, shared-testhost trust mutations or inherited package secrets.
+internal static class GatewayLinuxValidation
+{
+    internal const string Mode = "ZEKA_GATEWAY_CHILD_MODE";
+    private const string Owner = "ZEKA_GATEWAY_CHILD_OWNER";
+    private const string ChildTest = "Infrastructure.IntegrationTests.GatewayBrowserTransportTests.Isolated_gateway_case_and_real_handler_controls";
+    internal sealed record CaseInput(string Method, JsonElement[] Arguments);
+    private sealed record TransportInput(string Target, string Correlation, string Leaf, string Issuer, string Proxy, bool Pause);
+    private sealed record Result(bool Accepted, bool CertificateSpecific, bool NameValid, bool TimeValid,
+        bool UntrustedRoot, bool CookiesDisabled, bool RedirectDisabled, bool ProxyBypassed, string[] ExceptionKinds);
+
+    internal static void Check(bool condition, string stage)
+    { if (!condition) throw new InvalidOperationException("gateway-control-" + stage); }
+
+    internal static void RequireNoLeaks(IEnumerable<string> events, IEnumerable<string> historical)
+    {
+        foreach (var text in events)
+            foreach (var value in historical.Where(value => !string.IsNullOrEmpty(value)))
+                if (text.Contains(value, StringComparison.Ordinal)) throw new InvalidOperationException("gateway-privacy-violation");
+    }
+
+    internal static CaseInput ReadCase() => JsonSerializer.Deserialize<CaseInput>(File.ReadAllText(Path.Combine(
+        Environment.GetEnvironmentVariable(Owner)!, "case.json")))!;
+
+    private static string DirectoryOwned()
+    {
+        Check(OperatingSystem.IsLinux(), "linux-required");
+        var path = Path.Combine(Path.GetTempPath(), "zeka-gateway-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return path;
+    }
+
+    private static X509Certificate2 Root(RSA key)
+    {
+        var request = new CertificateRequest("CN=Zeka-Local-Gateway-" + Guid.NewGuid().ToString("N"), key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+        return request.CreateSelfSigned(DateTimeOffset.UtcNow.Date.AddDays(-1), DateTimeOffset.UtcNow.Date.AddDays(2));
+    }
+
+    private static X509Certificate2 Leaf(X509Certificate2 issuer, RSA key)
+    {
+        var request = new CertificateRequest("CN=browser.example.invalid", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new("1.3.6.1.5.5.7.3.1") }, true));
+        var names = new SubjectAlternativeNameBuilder(); names.AddDnsName("browser.example.invalid"); names.AddIpAddress(IPAddress.Loopback);
+        request.CertificateExtensions.Add(names.Build());
+        using var certificate = request.Create(issuer, DateTimeOffset.UtcNow.Date.AddHours(-1), DateTimeOffset.UtcNow.Date.AddDays(1), RandomNumberGenerator.GetBytes(16));
+        return certificate.CopyWithPrivateKey(key);
+    }
+
+    internal static X509Certificate2 BrowserCertificate()
+    {
+        Check(Environment.GetEnvironmentVariable(Mode) == "browser", "browser-child-required");
+        using var root = new X509Certificate2(File.ReadAllBytes(Path.Combine(Environment.GetEnvironmentVariable(Owner)!, "root.pfx")));
+        using var key = RSA.Create(2048);
+        using var certificate = Leaf(root, key);
+        return new X509Certificate2(certificate.Export(X509ContentType.Pfx));
+    }
+
+    internal static async Task<bool> RunCaseAsync(string method, object?[] arguments, ITestOutputHelper output)
+    {
+        if (Environment.GetEnvironmentVariable(Mode) == "browser") return false;
+        var directory = DirectoryOwned();
+        var parentFile = Environment.GetEnvironmentVariable("SSL_CERT_FILE");
+        var parentDirectory = Environment.GetEnvironmentVariable("SSL_CERT_DIR");
+        using var key = RSA.Create(2048); using var root = Root(key);
+        try
+        {
+            File.WriteAllBytes(Path.Combine(directory, "root.pfx"), root.Export(X509ContentType.Pfx));
+            File.SetUnixFileMode(Path.Combine(directory, "root.pfx"), UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.WriteAllText(Path.Combine(directory, "ca.pem"), root.ExportCertificatePem());
+            Directory.CreateDirectory(Path.Combine(directory, "empty-ca"));
+            File.WriteAllText(Path.Combine(directory, "case.json"), JsonSerializer.Serialize(new { Method = method, Arguments = arguments }));
+            await ChildAsync(directory, "browser", true, false, method, output);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+            var absent = Absent(directory);
+            Receipt(output, new { phase = "browser-child-cleanup", method, directoryAbsent = absent,
+                parentTrustUnchanged = parentFile == Environment.GetEnvironmentVariable("SSL_CERT_FILE") && parentDirectory == Environment.GetEnvironmentVariable("SSL_CERT_DIR") });
+            Check(absent == true, "browser-owned-directory-absence");
+        }
+        return true;
+    }
+
+    private static string Evidence()
+    {
+        var path = Environment.GetEnvironmentVariable("ZEKA_GATEWAY_EVIDENCE") ?? Path.Combine(AppContext.BaseDirectory, "TestResults", "gateway-local");
+        Directory.CreateDirectory(path); return path;
+    }
+    private static void Receipt(ITestOutputHelper output, object value)
+    {
+        var line = JsonSerializer.Serialize(value);
+        File.AppendAllText(Path.Combine(Evidence(), "gateway-receipts.jsonl"), line + Environment.NewLine);
+        output.WriteLine(line);
+    }
+
+    private static async Task<Result?> ChildAsync(string directory, string mode, bool trust, bool kill, string identity, ITestOutputHelper output)
+    {
+        var run = Guid.NewGuid().ToString("N");
+        var resultFile = Path.Combine(directory, "result-" + run + ".json");
+        var native = Path.Combine(Evidence(), "child-" + run); Directory.CreateDirectory(native);
+        var dotnet = Path.GetFullPath(Path.Combine(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", "..", "dotnet"));
+        var start = new ProcessStartInfo(dotnet) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = directory };
+        foreach (var argument in new[] { "vstest", typeof(GatewayBrowserTransportTests).Assembly.Location,
+            "/TestCaseFilter:FullyQualifiedName=" + ChildTest, "/Logger:trx;LogFileName=child.trx", "/ResultsDirectory:" + native }) start.ArgumentList.Add(argument);
+        start.Environment.Clear();
+        foreach (var name in new[] { "PATH", "HOME", "TMPDIR", "DOTNET_ROOT", "NUGET_PACKAGES", "DOCKER_HOST", "TESTCONTAINERS_HOST_OVERRIDE" })
+            if (Environment.GetEnvironmentVariable(name) is { } value) start.Environment[name] = value;
+        start.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+        start.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+        start.Environment[Mode] = mode; start.Environment[Owner] = directory;
+        start.Environment["ZEKA_GATEWAY_RESULT"] = resultFile;
+        start.Environment["ZEKA_GATEWAY_EVIDENCE"] = native;
+        if (mode == "transport")
+        {
+            var input = JsonSerializer.Deserialize<TransportInput>(File.ReadAllText(Path.Combine(directory, "transport.json")))!;
+            foreach (var variable in new[] { "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY" }) start.Environment[variable] = input.Proxy;
+            start.Environment["NO_PROXY"] = "";
+        }
+        if (trust) { start.Environment["SSL_CERT_FILE"] = Path.Combine(directory, "ca.pem"); start.Environment["SSL_CERT_DIR"] = Path.Combine(directory, "empty-ca"); }
+        File.WriteAllText(Path.Combine(native, "command.json"), JsonSerializer.Serialize(new { executable = dotnet, arguments = start.ArgumentList.ToArray(), identity, mode, trust, kill,
+            source = Environment.GetEnvironmentVariable("ZEKA_GATEWAY_SHA"), expectedNativeTest = ChildTest }));
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("gateway-child-start");
+        var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+        var started = DateTimeOffset.UtcNow;
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            if (kill)
+            {
+                while (!File.Exists(resultFile)) { Check(!process.HasExited, "abnormal-premature-exit"); await Task.Delay(50, deadline.Token); }
+                process.Kill(entireProcessTree: true);
+            }
+            await process.WaitForExitAsync(deadline.Token);
+            await Task.WhenAll(stdout, stderr);
+            var trxPath = Path.Combine(native, "child.trx");
+            int? executed = null, passed = null;
+            if (!kill)
+            {
+                Check(process.ExitCode == 0, "child-exit");
+                var trx = System.Xml.Linq.XDocument.Load(trxPath);
+                var counters = trx.Descendants().Single(x => x.Name.LocalName == "Counters");
+                executed = int.Parse(counters.Attribute("executed")!.Value); passed = int.Parse(counters.Attribute("passed")!.Value);
+                Check(executed == 1 && passed == 1 && counters.Attribute("failed")!.Value == "0" && counters.Attribute("notExecuted")!.Value == "0", "child-native-accounting");
+            }
+            else Check(process.ExitCode != 0, "abnormal-nonzero-exit");
+            Receipt(output, new { phase = "child-process", identity, mode, started, finished = DateTimeOffset.UtcNow,
+                exitCode = process.ExitCode, killed = kill, executed, passed, trxPresent = File.Exists(trxPath),
+                stdoutBytes = Encoding.UTF8.GetByteCount(await stdout), stderrBytes = Encoding.UTF8.GetByteCount(await stderr),
+                assemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(GatewayBrowserTransportTests).Assembly.Location))),
+                credentialEnvironmentInherited = false });
+            return mode == "transport" ? JsonSerializer.Deserialize<Result>(File.ReadAllText(resultFile)) : null;
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            await Task.WhenAll(stdout, stderr);
+            Receipt(output, new { phase = "child-final-absence", identity, exited = process.HasExited, exitCode = process.ExitCode,
+                stdoutBytes = Encoding.UTF8.GetByteCount(await stdout), stderrBytes = Encoding.UTF8.GetByteCount(await stderr) });
+        }
+    }
+
+    internal static async Task TransportChildAsync()
+    {
+        var directory = Environment.GetEnvironmentVariable(Owner)!;
+        var input = JsonSerializer.Deserialize<TransportInput>(File.ReadAllText(Path.Combine(directory, "transport.json")))!;
+        using var leaf = new X509Certificate2(File.ReadAllBytes(input.Leaf)); using var issuer = new X509Certificate2(File.ReadAllBytes(input.Issuer));
+        using var chain = new X509Chain(); chain.ChainPolicy.ExtraStore.Add(issuer); chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        _ = chain.Build(leaf); // Diagnostic only. Never assigned to the Ocelot handler.
+        var nameValid = leaf.MatchesHostname("127.0.0.1", false, false);
+        var timeValid = DateTime.UtcNow > leaf.NotBefore.ToUniversalTime() && DateTime.UtcNow < leaf.NotAfter.ToUniversalTime();
+        var untrustedRoot = chain.ChainStatus.Any(x => x.Status.HasFlag(X509ChainStatusFlags.UntrustedRoot));
+        var target = new Uri(input.Target); Check(target.Scheme == "https" && target.AbsolutePath == "/probe", "https-target");
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] }); builder.Logging.ClearProviders(); builder.Configuration.Sources.Clear();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Routes:0:Key"] = "GatewayDefaultHandler", ["Routes:0:UpstreamPathTemplate"] = "/probe", ["Routes:0:UpstreamHttpMethod:0"] = "GET",
+            ["Routes:0:DownstreamPathTemplate"] = "/probe", ["Routes:0:DownstreamScheme"] = "https",
+            ["Routes:0:DownstreamHostAndPorts:0:Host"] = "127.0.0.1", ["Routes:0:DownstreamHostAndPorts:0:Port"] = target.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:0:DangerousAcceptAnyServerCertificateValidator"] = "false", ["Routes:0:HttpHandlerOptions:AllowAutoRedirect"] = "false",
+            ["Routes:0:HttpHandlerOptions:UseCookieContainer"] = "false", ["Routes:0:HttpHandlerOptions:UseProxy"] = "false"
+        });
+        builder.Services.AddOcelot(builder.Configuration); await using var app = builder.Build(); await app.UseOcelot();
+        var pool = app.Services.GetRequiredService<IMessageInvokerPool>(); Check(pool.GetType() == typeof(MessageInvokerPool), "real-pool");
+        var route = app.Services.GetRequiredService<IInternalConfigurationRepository>().Get().Data.Routes.Single().DownstreamRoute.Single();
+        Check(!route.DangerousAcceptAnyServerCertificateValidator && route.DownstreamScheme == "https", "default-certificate-policy");
+        using var invoker = pool.Get(route); using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Result result;
+        try
+        {
+            async Task<HttpResponseMessage> Send(string control)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, target); request.Headers.Add("X-Zeka-Control", control); request.Headers.Add("X-Zeka-Receipt", input.Correlation);
+                return await invoker.SendAsync(request, timeout.Token);
+            }
+            using var first = await Send("cookie"); Check((int)first.StatusCode == 204 && first.Headers.GetValues("X-Zeka-Receipt").Single() == input.Correlation, "trusted-receipt");
+            using var second = await Send("cookie-check"); var cookiesDisabled = second.Headers.GetValues("X-Zeka-Cookie").Single() == "absent";
+            using var redirect = await Send("redirect"); var redirectDisabled = redirect.StatusCode == HttpStatusCode.Redirect;
+            // Discriminating cookie/redirect controls retain normal default TLS validation.
+            using var controlHandler = new SocketsHttpHandler { UseCookies = true, AllowAutoRedirect = true, UseProxy = false };
+            using var controlClient = new HttpClient(controlHandler);
+            using var cookieRequest = new HttpRequestMessage(HttpMethod.Get, target); cookieRequest.Headers.Add("X-Zeka-Control", "cookie");
+            using var cookieResponse = await controlClient.SendAsync(cookieRequest, timeout.Token);
+            using var checkRequest = new HttpRequestMessage(HttpMethod.Get, target); checkRequest.Headers.Add("X-Zeka-Control", "cookie-check");
+            using var checkResponse = await controlClient.SendAsync(checkRequest, timeout.Token);
+            Check(checkResponse.Headers.GetValues("X-Zeka-Cookie").Single() == "present", "cookie-positive-control");
+            using var redirectRequest = new HttpRequestMessage(HttpMethod.Get, target); redirectRequest.Headers.Add("X-Zeka-Control", "redirect");
+            using var redirectResponse = await controlClient.SendAsync(redirectRequest, timeout.Token);
+            Check(redirectResponse.Headers.GetValues("X-Zeka-Redirect").Single() == "followed", "redirect-positive-control");
+            using var proxyHandler = new SocketsHttpHandler { UseProxy = true, Proxy = new ForcedProxy(new Uri(input.Proxy)) };
+            using var proxyClient = new HttpClient(proxyHandler);
+            var proxyRejected = false;
+            try { using var ignored = await proxyClient.GetAsync(target, timeout.Token); }
+            catch (HttpRequestException error) { proxyRejected = error.HttpRequestError == HttpRequestError.ProxyTunnelError; }
+            Check(proxyRejected, "proxy-positive-control");
+            result = new(true, false, nameValid, timeValid, untrustedRoot, cookiesDisabled, redirectDisabled, proxyRejected, []);
+        }
+        catch (HttpRequestException error)
+        {
+            var kinds = new List<string>(); var authentication = false;
+            for (Exception? current = error; current is not null; current = current.InnerException)
+            {
+                authentication |= current is System.Security.Authentication.AuthenticationException;
+                kinds.Add(current switch { HttpRequestException => "http", System.Security.Authentication.AuthenticationException => "authentication", IOException => "io", SocketException => "socket", _ => "other" });
+            }
+            result = new(false, error.HttpRequestError == HttpRequestError.SecureConnectionError && authentication,
+                nameValid, timeValid, untrustedRoot, false, false, false, kinds.ToArray());
+        }
+        var path = Environment.GetEnvironmentVariable("ZEKA_GATEWAY_RESULT")!;
+        File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(result)); File.Move(path + ".tmp", path);
+        if (input.Pause) await Task.Delay(Timeout.InfiniteTimeSpan);
+    }
+
+    internal static async Task ProveControlsAsync(ITestOutputHelper output)
+    {
+        Check(OperatingSystem.IsLinux(), "linux-required");
+        var parentFile = Environment.GetEnvironmentVariable("SSL_CERT_FILE"); var parentDirectory = Environment.GetEnvironmentVariable("SSL_CERT_DIR");
+        foreach (var lifecycle in new[] { "normal", "startup-failure", "abnormal-child" })
+        {
+            var directory = DirectoryOwned(); using var rootKey = RSA.Create(2048); using var otherKey = RSA.Create(2048); using var leafKey = RSA.Create(2048);
+            using var root = Root(rootKey); using var otherRoot = Root(otherKey); using var trusted = Leaf(root, leafKey); using var untrusted = Leaf(otherRoot, leafKey);
+            Check(trusted.NotBefore == untrusted.NotBefore && trusted.NotAfter == untrusted.NotAfter, "matched-validity");
+            var received = new ConcurrentDictionary<string, int>(); WebApplication? good = null, bad = null, proxy = null;
+            int? goodPort = null, badPort = null, proxyPort = null; var proxyHits = 0;
+            var planned = false; Exception? failure = null; var cleanup = new Dictionary<string, bool?>();
+            try
+            {
+                File.WriteAllBytes(Path.Combine(directory, "root.cer"), root.RawData); File.WriteAllBytes(Path.Combine(directory, "other.cer"), otherRoot.RawData);
+                File.WriteAllBytes(Path.Combine(directory, "good.cer"), trusted.RawData); File.WriteAllBytes(Path.Combine(directory, "bad.cer"), untrusted.RawData);
+                good = await EndpointAsync(trusted, received); bad = await EndpointAsync(untrusted, received);
+                goodPort = new Uri(Address(good)).Port; badPort = new Uri(Address(bad)).Port;
+                var proxyBuilder = WebApplication.CreateBuilder(); proxyBuilder.Logging.ClearProviders();
+                proxyBuilder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+                proxy = proxyBuilder.Build(); proxy.Run(http => { Interlocked.Increment(ref proxyHits); http.Response.StatusCode = 502; return Task.CompletedTask; });
+                await proxy.StartAsync(); proxyPort = new Uri(Address(proxy)).Port;
+                await Control("before", good, false, false, false);
+                File.WriteAllText(Path.Combine(directory, "ca.pem"), root.ExportCertificatePem()); Directory.CreateDirectory(Path.Combine(directory, "empty-ca"));
+                try
+                {
+                    if (lifecycle == "startup-failure") throw new PlannedStartupFailure();
+                    await Control("trusted", good, true, true, false);
+                    await Control("untrusted", bad, false, true, false);
+                    if (lifecycle == "abnormal-child") await Control("terminated", good, true, true, true);
+                }
+                catch (PlannedStartupFailure) { planned = true; }
+                File.Delete(Path.Combine(directory, "ca.pem")); Directory.Delete(Path.Combine(directory, "empty-ca"));
+                await Control("after", good, false, false, false);
+            }
+            catch (Exception error) { failure = error; }
+            finally
+            {
+                async Task Clean(string name, Func<Task> action)
+                { try { await action(); cleanup[name] = true; } catch { cleanup[name] = false; } }
+                await Clean("trusted-dispose", async () => { if (good is not null) await good.DisposeAsync(); });
+                await Clean("untrusted-dispose", async () => { if (bad is not null) await bad.DisposeAsync(); });
+                await Clean("proxy-dispose", async () => { if (proxy is not null) await proxy.DisposeAsync(); });
+                cleanup["trusted-listener-absent"] = await ClosedAsync(goodPort); cleanup["untrusted-listener-absent"] = await ClosedAsync(badPort);
+                cleanup["proxy-listener-absent"] = await ClosedAsync(proxyPort);
+                await Clean("owned-directory-remove", () => { Directory.Delete(directory, true); return Task.CompletedTask; });
+                cleanup["owned-directory-absent"] = Absent(directory); cleanup["root-store-absent"] = RootAbsent(root);
+                cleanup["ca-file-absent"] = Absent(Path.Combine(directory, "ca.pem"));
+                cleanup["ca-directory-absent"] = Absent(Path.Combine(directory, "empty-ca"));
+                cleanup["parent-trust-unchanged"] = parentFile == Environment.GetEnvironmentVariable("SSL_CERT_FILE") && parentDirectory == Environment.GetEnvironmentVariable("SSL_CERT_DIR");
+                Receipt(output, new { phase = "lifecycle-cleanup", lifecycle, plannedStartupFailure = planned, cleanup,
+                    failureKind = failure is null ? "none" : "control-failure", unknownOutcomes = cleanup.Count(x => x.Value is null) });
+            }
+            Check(failure is null, "lifecycle-primary"); Check(cleanup.Values.All(x => x == true), "lifecycle-cleanup");
+            Check(planned == (lifecycle == "startup-failure"), "planned-startup-failure");
+
+            async Task Control(string name, WebApplication endpoint, bool accepted, bool scoped, bool kill)
+            {
+                var correlation = Guid.NewGuid().ToString("N"); var target = new Uri(new Uri(Address(endpoint)), "/probe");
+                File.WriteAllText(Path.Combine(directory, "transport.json"), JsonSerializer.Serialize(new TransportInput(target.AbsoluteUri, correlation,
+                    Path.Combine(directory, accepted || name is "before" or "after" ? "good.cer" : "bad.cer"),
+                    Path.Combine(directory, accepted || name is "before" or "after" ? "root.cer" : "other.cer"), Address(proxy!), kill)));
+                var proxyBefore = proxyHits;
+                var result = await ChildAsync(directory, "transport", scoped, kill, lifecycle + "-" + name, output);
+                Check(result is not null && result.Accepted == accepted && result.NameValid && result.TimeValid, "TLS-outcome");
+                if (accepted) Check(result!.CookiesDisabled && result.RedirectDisabled && result.ProxyBypassed, "handler-flags");
+                else Check(result!.CertificateSpecific && result.UntrustedRoot, "certificate-specific-rejection");
+                Check(accepted ? proxyHits == proxyBefore + 1 : proxyHits == proxyBefore, "proxy-receipt-accounting");
+                var count = received.GetValueOrDefault(correlation); Check(accepted ? count > 0 : count == 0, "downstream-accounting");
+                Receipt(output, new { phase = "TLS-control", lifecycle, name, accepted, downstreamHttpReceipts = count, result });
+            }
+        }
+    }
+
+    private static async Task<WebApplication> EndpointAsync(X509Certificate2 certificate, ConcurrentDictionary<string, int> receipts)
+    {
+        var builder = WebApplication.CreateBuilder(); builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(certificate)));
+        var app = builder.Build(); app.Run(http =>
+        {
+            var correlation = http.Request.Headers["X-Zeka-Receipt"].ToString(); if (correlation.Length != 0) receipts.AddOrUpdate(correlation, 1, (_, n) => n + 1);
+            http.Response.Headers["X-Zeka-Receipt"] = correlation; http.Response.StatusCode = 204;
+            if (http.Request.Path == "/redirected") http.Response.Headers["X-Zeka-Redirect"] = "followed";
+            else if (http.Request.Headers["X-Zeka-Control"] == "redirect") { http.Response.StatusCode = 302; http.Response.Headers.Location = "/redirected"; }
+            else if (http.Request.Headers["X-Zeka-Control"] == "cookie") http.Response.Headers.SetCookie = "ZekaHandlerControl=synthetic; Path=/; Secure; HttpOnly";
+            else if (http.Request.Headers["X-Zeka-Control"] == "cookie-check") http.Response.Headers["X-Zeka-Cookie"] = http.Request.Headers.Cookie.Count == 0 ? "absent" : "present";
+            return Task.CompletedTask;
+        });
+        try { await app.StartAsync(); return app; } catch { await app.DisposeAsync(); throw; }
+    }
+    private static string Address(WebApplication app) => app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+    private static bool? Absent(string path)
+    {
+        try { _ = File.GetAttributes(path); return false; }
+        catch (FileNotFoundException) { return true; } catch (DirectoryNotFoundException) { return true; } catch { return null; }
+    }
+    private static async Task<bool?> ClosedAsync(int? port)
+    {
+        if (port is null) return null;
+        try { using var client = new TcpClient(); await client.ConnectAsync(IPAddress.Loopback, port.Value).WaitAsync(TimeSpan.FromSeconds(3)); return false; }
+        catch (SocketException error) when (error.SocketErrorCode == SocketError.ConnectionRefused) { return true; } catch { return null; }
+    }
+    private static bool? RootAbsent(X509Certificate2 root)
+    {
+        try
+        {
+            using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser); store.Open(OpenFlags.ReadOnly);
+            var certificates = store.Certificates; try { return !certificates.Cast<X509Certificate2>().Any(certificate => certificate.RawData.AsSpan().SequenceEqual(root.RawData)); }
+            finally { foreach (var certificate in certificates) certificate.Dispose(); }
+        }
+        catch { return null; }
+    }
+    private sealed class PlannedStartupFailure : Exception;
+    private sealed class ForcedProxy(Uri endpoint) : IWebProxy
+    {
+        public ICredentials? Credentials { get; set; }
+        public Uri GetProxy(Uri destination) => endpoint;
+        public bool IsBypassed(Uri host) => false;
     }
 }
