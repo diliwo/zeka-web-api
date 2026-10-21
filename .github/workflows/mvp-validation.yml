@@ -132,19 +132,24 @@ jobs:
           test ! -e "$raw" && test ! -e "$safe"
           mkdir "$raw" "$safe" "$raw/results" "$raw/receipts"
           printf 'GATEWAY_RAW=%s\nGATEWAY_SAFE=%s\n' "$raw" "$safe" >> "$GITHUB_ENV"
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ && "$EXPECTED_BASE" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git rev-parse HEAD^)" = f75fd2772b7a4e9906c56faea2282f817997aaa3
-          test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/mvp-validation.yml
-          test "$EXPECTED_BASE" = 4da3954774dfffa4f9f865f47f08da75768d5f0e
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          printf '%s  %s\n' \
-            656c9254653276f1ea99f5bbc5f81139c678d4d5e1fc0467ada21c8e0f39b2a0 ApiGateways/Ocelot.ApiGateway/Program.cs \
-            1a5b167c28edb71f5f6106288c89e41b914a5e3503e00983b62df1b4efa4a0f3 Services/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayBrowserTransportTests.cs \
-            f8833aba10c2ce25163890f50184946ed84be3004334f1c3ed6f9191b424d125 Services/AuthManager/Tests/Infrastructure.IntegrationTests/PostgreSqlFixture.cs \
-            | sha256sum --check > "$raw/source-check.log" 2>&1
+          sources=(
+            ApiGateways/Ocelot.ApiGateway/Program.cs
+            Services/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayBrowserTransportTests.cs
+            Services/AuthManager/Tests/Infrastructure.IntegrationTests/PostgreSqlFixture.cs
+          )
+          : > "$raw/source-check.log"
+          for source in "${sources[@]}"; do
+            test -f "$source"
+            test "$(git hash-object -- "$source")" = "$(git rev-parse "HEAD:$source")"
+            sha256sum -- "$source" >> "$raw/source-check.log"
+          done
           test "$(dotnet --version)" = 8.0.129
           dotnet --info > "$raw/sdk.log" 2>&1
           git show -s --format='%H%n%T%n%P' HEAD > "$raw/source.txt"
+          printf '%s\n' "$EXPECTED_BASE" >> "$raw/source.txt"
           cat > "$raw/expected.json" <<'JSON'
           [
             [
@@ -234,7 +239,7 @@ jobs:
           ]
           JSON
           cat > "$raw/evidence.py" <<'PY'
-          import collections, datetime, hashlib, json, os, pathlib, re, sys, xml.etree.ElementTree as ET
+          import collections, datetime, hashlib, json, os, pathlib, re, subprocess, sys, xml.etree.ElementTree as ET
           raw, safe = pathlib.Path(os.environ['GATEWAY_RAW']), pathlib.Path(os.environ['GATEWAY_SAFE'])
           CLASS = 'Infrastructure.IntegrationTests.GatewayBrowserTransportTests'
           rows = json.loads((raw/'expected.json').read_text())
@@ -494,12 +499,29 @@ jobs:
                     known=re.fullmatch(r'(build|discovery|focused)\.(stdout|stderr|exit|start|end)|source\.(txt|check.log)|source-check.log|sdk.log|assembly.sha256|expected.json|evidence.py|observe.py|observer-(ready|stop)|observer\.(stdout|stderr)|docker-events\.(private.jsonl|stderr)|results/focused.trx|receipts/gateway-receipts.jsonl|receipts/child-[0-9a-f]{32}/(command.json|child.trx|gateway-receipts.jsonl)',relative)
                     manifest.append({'path':relative if known else 'unrecognized-path-sha256:'+hashlib.sha256(relative.encode()).hexdigest(),'bytes':path.stat().st_size,'sha256':digest(path),'retention':'original-not-uploaded'})
                 write('original-byte-hashes.json', manifest)
-                head, tree, parent = (raw/'source.txt').read_text().splitlines()
-                check(all(re.fullmatch('[0-9a-f]{40}',x) for x in [head,tree,parent]), 'source-format')
-                check(head == os.environ['ZEKA_GATEWAY_SHA'] and parent == 'f75fd2772b7a4e9906c56faea2282f817997aaa3', 'source-binding')
+                source_lines = (raw/'source.txt').read_text().splitlines()
+                check(len(source_lines) == 4, 'source-format')
+                head, tree, parents, event_base = source_lines
+                check(all(re.fullmatch('[0-9a-f]{40}',x) for x in [head,tree,event_base,*parents.split()]) and parents, 'source-format')
+                def git(*args):
+                  return subprocess.run(['git',*args],check=True,capture_output=True,text=True).stdout.strip()
+                check(head == os.environ['ZEKA_GATEWAY_SHA'] and event_base == os.environ['ZEKA_EVENT_BASE_SHA'], 'source-binding')
+                check(head == git('rev-parse','HEAD') and tree == git('rev-parse','HEAD^{tree}') and parents == git('show','-s','--format=%P','HEAD'), 'checkout-provenance')
+                source_paths = [
+                  'ApiGateways/Ocelot.ApiGateway/Program.cs',
+                  'Services/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayBrowserTransportTests.cs',
+                  'Services/AuthManager/Tests/Infrastructure.IntegrationTests/PostgreSqlFixture.cs']
+                source_hashes = {}
+                lines = (raw/'source-check.log').read_text().splitlines()
+                check(len(lines) == len(source_paths), 'source-hash-inventory')
+                for path, line in zip(source_paths, lines):
+                  match = re.fullmatch(r'([0-9a-f]{64})  (.+)', line)
+                  check(match is not None and match.group(2) == path, 'source-hash-format')
+                  check(match.group(1) == digest(pathlib.Path(path)) and git('hash-object','--',path) == git('rev-parse','HEAD:'+path), 'source-integrity')
+                  source_hashes[path] = match.group(1)
                 path=raw/'assembly.sha256'; value=path.read_text().strip() if path.is_file() else ''
                 assembly=value if re.fullmatch('[0-9a-f]{64}',value) else None
-                write('source-assembly.json', {'head':head,'tree':tree,'parent':parent,'assemblySha256':assembly,'sdk':'8.0.129','runId':os.environ['GITHUB_RUN_ID'],'attempt':os.environ['GITHUB_RUN_ATTEMPT'],'otherJobsExactHead':False})
+                write('source-assembly.json', {'head':head,'tree':tree,'parent':parents,'parents':parents.split(),'eventBase':event_base,'sourceSha256':source_hashes,'assemblySha256':assembly,'sdk':'8.0.129','runId':os.environ['GITHUB_RUN_ID'],'attempt':os.environ['GITHUB_RUN_ATTEMPT'],'otherJobsExactHead':False})
                 status, times = {}, {}
                 for name in ['build','discovery','focused']:
                   path = raw/(name+'.exit'); value = path.read_text().strip() if path.is_file() else ''
@@ -700,6 +722,7 @@ jobs:
         shell: bash
         env:
           ZEKA_GATEWAY_SHA: ${{ github.event.pull_request.head.sha }}
+          ZEKA_EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           python3 "$GATEWAY_RAW/evidence.py" export
