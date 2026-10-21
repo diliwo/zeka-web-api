@@ -104,6 +104,9 @@ jobs:
     steps:
       - name: Check out pull-request code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
 
       - name: Install pinned .NET SDK
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
@@ -112,6 +115,388 @@ jobs:
 
       - name: Verify Docker daemon availability
         run: docker info
+
+
+      # This job alone uses the reviewed PR head. Other jobs retain their existing refs.
+      - name: Record exact gateway source and prepare private evidence paths
+        id: gateway_setup
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          raw="${RUNNER_TEMP}/pr93-gateway-private"
+          safe="${RUNNER_TEMP}/pr93-gateway-safe"
+          test ! -e "$raw" && test ! -e "$safe"
+          mkdir "$raw" "$safe" "$raw/results" "$raw/receipts"
+          printf 'GATEWAY_RAW=%s\nGATEWAY_SAFE=%s\n' "$raw" "$safe" >> "$GITHUB_ENV"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^)" = a4f0634d047f2570003e5fac1407de0382866eff
+          test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/mvp-validation.yml
+          test "$EXPECTED_BASE" = 4da3954774dfffa4f9f865f47f08da75768d5f0e
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          printf '%s  %s\n' \
+            656c9254653276f1ea99f5bbc5f81139c678d4d5e1fc0467ada21c8e0f39b2a0 ApiGateways/Ocelot.ApiGateway/Program.cs \
+            1a5b167c28edb71f5f6106288c89e41b914a5e3503e00983b62df1b4efa4a0f3 Services/AuthManager/Tests/Infrastructure.IntegrationTests/GatewayBrowserTransportTests.cs \
+            f8833aba10c2ce25163890f50184946ed84be3004334f1c3ed6f9191b424d125 Services/AuthManager/Tests/Infrastructure.IntegrationTests/PostgreSqlFixture.cs \
+            | sha256sum --check > "$raw/source-check.log" 2>&1
+          test "$(dotnet --version)" = 8.0.129
+          dotnet --info > "$raw/sdk.log" 2>&1
+          git show -s --format='%H%n%T%n%P' HEAD > "$raw/source.txt"
+          cat > "$raw/expected.json" <<'JSON'
+          [
+            [
+              "Real_ocelot_provider_flow_keeps_choices_distinct_from_live_access_and_revokes_session(user: \"ada\", choices: 2)",
+              "B"
+            ],
+            [
+              "Real_ocelot_provider_flow_keeps_choices_distinct_from_live_access_and_revokes_session(user: \"ben\", choices: 1)",
+              "B"
+            ],
+            [
+              "Exact_route_and_credential_matrix_exposes_only_six_method_path_pairs",
+              null
+            ],
+            [
+              "Ordinary_URI_normalization_and_literal_TLS_target_are_observed_at_the_unchanged_gateway",
+              null
+            ],
+            [
+              "Owned_legacy_listener_is_disposed_on_success_and_startup_failure(failStartup: False)",
+              "C-listener"
+            ],
+            [
+              "Owned_legacy_listener_is_disposed_on_success_and_startup_failure(failStartup: True)",
+              "C-listener"
+            ],
+            [
+              "Exact_json_headers_cookies_and_framing_cross_real_ocelot(knownLength: True)",
+              null
+            ],
+            [
+              "Exact_json_headers_cookies_and_framing_cross_real_ocelot(knownLength: False)",
+              null
+            ],
+            [
+              "Attribution_is_exact_peer_fail_closed_and_backend_budgets_remain_independent_and_bounded",
+              null
+            ],
+            [
+              "Aggregate_budget_does_not_replace_per_address_admission",
+              null
+            ],
+            [
+              "Missing_or_invalid_required_configuration_disables_routes_without_legacy_fallback(key: \"GatewayBrowserTransport:Origin\", value: null)",
+              null
+            ],
+            [
+              "Missing_or_invalid_required_configuration_disables_routes_without_legacy_fallback(key: \"GatewayBrowserTransport:Origin\", value: \"http://browser.example.invalid\")",
+              null
+            ],
+            [
+              "Missing_or_invalid_required_configuration_disables_routes_without_legacy_fallback(key: \"GatewayBrowserTransport:DownstreamOrigin\", value: null)",
+              null
+            ],
+            [
+              "Missing_or_invalid_required_configuration_disables_routes_without_legacy_fallback(key: \"GatewayBrowserTransport:DownstreamOrigin\", value: \"https://target.example.invalid/prefix\")",
+              null
+            ],
+            [
+              "Missing_or_invalid_required_configuration_disables_routes_without_legacy_fallback(key: \"GatewayBrowserTransport:ClientPeers:0\", value: \"invalid\")",
+              null
+            ],
+            [
+              "Unavailable_database_overflow_and_downstream_emit_generic_no_store_without_cached_choices",
+              null
+            ],
+            [
+              "Lost_mutation_response_is_not_transparently_replayed_and_requires_explicit_recovery(action: \"restore\")",
+              null
+            ],
+            [
+              "Lost_mutation_response_is_not_transparently_replayed_and_requires_explicit_recovery(action: \"logout\")",
+              null
+            ],
+            [
+              "Isolated_gateway_case_and_real_handler_controls",
+              "C-real-handler"
+            ],
+            [
+              "Safe_legacy_diagnostics_are_attributable_with_profile_on_and_off(enabled: True)",
+              "A"
+            ],
+            [
+              "Safe_legacy_diagnostics_are_attributable_with_profile_on_and_off(enabled: False)",
+              "A"
+            ]
+          ]
+          JSON
+          cat > "$raw/evidence.py" <<'PY'
+          import collections, datetime, hashlib, json, os, pathlib, re, sys, xml.etree.ElementTree as ET
+          raw, safe = pathlib.Path(os.environ['GATEWAY_RAW']), pathlib.Path(os.environ['GATEWAY_SAFE'])
+          CLASS = 'Infrastructure.IntegrationTests.GatewayBrowserTransportTests'
+          rows = json.loads((raw/'expected.json').read_text())
+          expected = [CLASS+'.'+name for name, _ in rows]
+          methods = {name.split('(')[0] for name, _ in rows}
+          umbrella = 'Isolated_gateway_case_and_real_handler_controls'
+          tls = {life+'-'+name for life, names in {
+              'normal': ['before','trusted','untrusted','after'],
+              'startup-failure': ['before','after'],
+              'abnormal-child': ['before','trusted','untrusted','terminated','after']}.items() for name in names}
+          def check(ok, stage):
+              if not ok: raise AssertionError(stage)
+          def write(name, value):
+              (safe/name).write_text(json.dumps(value, indent=2)+'\n')
+          def digest(path):
+              value=hashlib.sha256()
+              with path.open('rb') as stream:
+                for chunk in iter(lambda:stream.read(1048576),b''): value.update(chunk)
+              return value.hexdigest()
+          def trx(path, names, output):
+              check(path.is_file() and path.stat().st_size < 20000000, 'trx-missing-or-size')
+              tree = ET.parse(path); ns = {'t':'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
+              defs = {x.attrib['id']: x for x in tree.findall('.//t:TestDefinitions/t:UnitTest', ns)}
+              results = tree.findall('.//t:Results/t:UnitTestResult', ns)
+              counters = tree.find('.//t:ResultSummary/t:Counters', ns)
+              check(counters is not None, 'trx-counters-missing')
+              actual = []
+              for result in results:
+                  definition = defs.get(result.get('testId')); check(definition is not None, 'trx-definition-missing')
+                  method = definition.find('t:TestMethod', ns); check(method is not None, 'trx-method-missing')
+                  name = result.get('testName')
+                  check(name in names and definition.get('name') == name, 'trx-wrong-identity')
+                  check(method.get('className','').split(',')[0] == CLASS and method.get('name') == name[len(CLASS)+1:].split('(')[0], 'trx-wrong-method')
+                  outcome = result.get('outcome')
+                  check(outcome in {'Passed','Failed','NotExecuted','Inconclusive','Timeout','Aborted','Error'}, 'trx-outcome-schema')
+                  actual.append({'name':name,'outcome':outcome})
+              counts = {key:int(counters.get(key,'-1')) for key in ['total','executed','passed','failed','notExecuted']}
+              write(output, {'derivative':'allowlisted-native-trx-identities-v1','originalSha256':digest(path),'counters':counts,'tests':actual})
+              n = len(names)
+              check(collections.Counter(x['name'] for x in actual) == collections.Counter(names), 'trx-selection-mismatch')
+              check(all(x['outcome']=='Passed' for x in actual), 'trx-failure-or-skip')
+              for key, value in {'total':n,'executed':n,'passed':n,'failed':0,'notExecuted':0}.items():
+                  check(int(counters.get(key,'-1')) == value, 'trx-count-mismatch')
+              entries = tree.findall('.//t:TestEntries/t:TestEntry', ns)
+              check(collections.Counter((x.get('testId'),x.get('executionId')) for x in entries) == collections.Counter((x.get('testId'),x.get('executionId')) for x in results), 'trx-entry-mismatch')
+          def discovery():
+              lines = (raw/'discovery.stdout').read_text().splitlines()
+              found = [line.strip() for line in lines if line.strip().startswith(CLASS+'.')]
+              check(collections.Counter(found) == collections.Counter(expected), 'discovery-identity-mismatch')
+              write('discovery.sanitized.json', {'derivative':'allowlisted-discovery-v1','originalSha256':digest(raw/'discovery.stdout'),'filter':'FullyQualifiedName~'+CLASS+'.','tests':found,'originalSeven':{CLASS+'.'+name:target for name,target in rows if target}})
+          def receipts():
+              paths = list((raw/'receipts').rglob('gateway-receipts.jsonl')); records = []
+              schemas = {
+                'child-process': {'phase','identity','mode','started','finished','exitCode','killed','executed','passed','trxPresent','stdoutBytes','stderrBytes','assemblySha256','credentialEnvironmentInherited'},
+                'child-final-absence': {'phase','identity','exited','exitCode','stdoutBytes','stderrBytes'},
+                'browser-child-cleanup': {'phase','method','directoryAbsent','parentTrustUnchanged'},
+                'TLS-control': {'phase','lifecycle','name','accepted','downstreamHttpReceipts','result'},
+                'lifecycle-cleanup': {'phase','lifecycle','plannedStartupFailure','cleanup','failureKind','unknownOutcomes'}}
+              cleanup = {'trusted-dispose','untrusted-dispose','proxy-dispose','trusted-listener-absent','untrusted-listener-absent','proxy-listener-absent','owned-directory-remove','owned-directory-absent','root-store-absent','ca-file-absent','ca-directory-absent','parent-trust-unchanged'}
+              result_keys = {'Accepted','CertificateSpecific','NameValid','TimeValid','UntrustedRoot','CookiesDisabled','RedirectDisabled','ProxyBypassed','ExceptionKinds'}
+              assembly = (raw/'assembly.sha256').read_text().strip()
+              for path in paths:
+                check(path.stat().st_size < 2000000, 'receipt-size')
+                for line in path.read_text().splitlines():
+                  r = json.loads(line); phase = r.get('phase')
+                  check(phase in schemas and set(r) == schemas[phase], 'receipt-schema')
+                  for key in ['identity','method']:
+                    if key in r: check(r[key] in methods | tls, 'receipt-identity')
+                  if 'lifecycle' in r: check(r['lifecycle'] in {'normal','startup-failure','abnormal-child'}, 'receipt-lifecycle')
+                  if phase == 'TLS-control':
+                    check(r['lifecycle']+'-'+r['name'] in tls and type(r['accepted']) is bool and type(r['downstreamHttpReceipts']) is int, 'tls-schema')
+                    value = r['result']; check(set(value) == result_keys and all(type(value[k]) is bool for k in result_keys-{'ExceptionKinds'}), 'tls-result-schema')
+                    check(type(value['ExceptionKinds']) is list and len(value['ExceptionKinds']) <= 10 and all(x in {'http','authentication','io','socket','other'} for x in value['ExceptionKinds']), 'tls-exception-category')
+                  if phase == 'lifecycle-cleanup':
+                    check(set(r['cleanup']) == cleanup and all(type(x) is bool or x is None for x in r['cleanup'].values()) and r['failureKind'] in {'none','control-failure'} and type(r['unknownOutcomes']) is int and type(r['plannedStartupFailure']) is bool, 'cleanup-schema')
+                  for key in ['killed','trxPresent','credentialEnvironmentInherited','exited','directoryAbsent','parentTrustUnchanged']:
+                    if key in r: check(type(r[key]) is bool or r[key] is None, 'receipt-boolean')
+                  for key in ['exitCode','executed','passed','stdoutBytes','stderrBytes']:
+                    if key in r: check(type(r[key]) is int or r[key] is None, 'receipt-integer')
+                  if phase == 'child-process':
+                    check(r['mode'] in {'browser','transport'} and re.fullmatch('[0-9a-fA-F]{64}', r['assemblySha256']) and r['assemblySha256'].lower() == assembly, 'child-assembly')
+                    for key in ['started','finished']:
+                      check(re.fullmatch(r'[0-9T:+.Z-]{20,40}', r[key]) is not None, 'child-timestamp')
+                  records.append(r)
+              # Only validated fixed-schema records reach the safe artifact; no raw test output.
+              write('gateway-receipts.sanitized.json', {'derivative':'allowlisted-gateway-receipts-v1','records':records})
+              by = lambda phase: [r for r in records if r['phase'] == phase]
+              children = by('child-process'); final = by('child-final-absence'); browsers = by('browser-child-cleanup')
+              want = collections.Counter(name.split('(')[0] for name,_ in rows if name != umbrella) + collections.Counter(tls)
+              check(collections.Counter(r['identity'] for r in children) == want and collections.Counter(r['identity'] for r in final) == want, 'child-inventory')
+              check(collections.Counter(r['method'] for r in browsers) == collections.Counter(name.split('(')[0] for name,_ in rows if name != umbrella), 'browser-cleanup-inventory')
+              check(all(r['directoryAbsent'] is True and r['parentTrustUnchanged'] is True for r in browsers), 'browser-cleanup-failure')
+              check(all(r['exited'] is True and type(r['exitCode']) is int for r in final), 'child-final-unknown')
+              for r in children:
+                killed = r['identity'] == 'abnormal-child-terminated'
+                check(r['killed'] is killed and r['credentialEnvironmentInherited'] is False, 'child-boundary')
+                check(r['mode']==('browser' if r['identity'] in methods else 'transport'), 'child-mode')
+                check(type(r['exitCode']) is int and r['exitCode'] != 0 if killed else r['exitCode'] == 0 and r['executed'] == 1 and r['passed'] == 1 and r['trxPresent'] is True, 'child-native-failure')
+              commands = list((raw/'receipts').glob('child-*/command.json'))
+              check(len(commands) == 31, 'child-command-inventory')
+              command_ids = []
+              for path in commands:
+                r = json.loads(path.read_text()); check(r['source'] == os.environ['ZEKA_GATEWAY_SHA'] and r['identity'] in methods | tls and r['expectedNativeTest'] == CLASS+'.'+umbrella, 'child-command-source')
+                check(r['mode'] == ('browser' if r['identity'] in methods else 'transport') and r['kill'] == (r['identity'] == 'abnormal-child-terminated'), 'child-command-mode')
+                command_ids.append(r['identity'])
+                if not r['kill']:
+                  trx(path.parent/'child.trx', [CLASS+'.'+umbrella],path.parent.name+'.trx.sanitized.json')
+              check(collections.Counter(command_ids) == want, 'child-command-attribution')
+              controls = by('TLS-control')
+              check(collections.Counter(r['lifecycle']+'-'+r['name'] for r in controls) == collections.Counter(tls), 'tls-inventory')
+              for r in controls:
+                accepted = r['name'] in {'trusted','terminated'}; v = r['result']
+                check(r['accepted'] is accepted and v['Accepted'] is accepted and v['NameValid'] and v['TimeValid'], 'tls-outcome')
+                check(all(v[k] for k in ['CookiesDisabled','RedirectDisabled','ProxyBypassed']) if accepted else v['CertificateSpecific'] and v['UntrustedRoot'] and 'authentication' in v['ExceptionKinds'], 'tls-controls')
+                check(r['downstreamHttpReceipts'] > 0 if accepted else r['downstreamHttpReceipts'] == 0, 'tls-downstream-receipt')
+              lifecycles = by('lifecycle-cleanup')
+              check(collections.Counter(r['lifecycle'] for r in lifecycles) == collections.Counter(['normal','startup-failure','abnormal-child']), 'cleanup-inventory')
+              check(all(r['failureKind']=='none' and r['unknownOutcomes']==0 and all(x is True for x in r['cleanup'].values()) and r['plannedStartupFailure'] == (r['lifecycle']=='startup-failure') for r in lifecycles), 'cleanup-failure-or-unknown')
+
+          if __name__ == '__main__':
+            stage = 'discovery' if sys.argv[1] == 'discovery' else 'export'
+            try:
+              if stage == 'discovery': discovery()
+              else:
+                # Original bytes remain private. Only hashes and labeled derivatives are uploaded.
+                manifest = []
+                for path in sorted(raw.rglob('*')):
+                  if path.is_file() and not path.is_symlink():
+                    relative=path.relative_to(raw).as_posix()
+                    known=re.fullmatch(r'(build|discovery|focused)\.(stdout|stderr|exit|start|end)|source\.(txt|check.log)|source-check.log|sdk.log|assembly.sha256|expected.json|evidence.py|observe.py|observer-(ready|stop)|observer\.(stdout|stderr)|docker-events\.(private.jsonl|stderr)|results/focused.trx|receipts/gateway-receipts.jsonl|receipts/child-[0-9a-f]{32}/(command.json|child.trx|gateway-receipts.jsonl)',relative)
+                    manifest.append({'path':relative if known else 'unrecognized-path-sha256:'+hashlib.sha256(relative.encode()).hexdigest(),'bytes':path.stat().st_size,'sha256':digest(path),'retention':'original-not-uploaded'})
+                write('original-byte-hashes.json', manifest)
+                head, tree, parent = (raw/'source.txt').read_text().splitlines()
+                check(all(re.fullmatch('[0-9a-f]{40}',x) for x in [head,tree,parent]), 'source-format')
+                check(head == os.environ['ZEKA_GATEWAY_SHA'] and parent == 'a4f0634d047f2570003e5fac1407de0382866eff', 'source-binding')
+                path=raw/'assembly.sha256'; value=path.read_text().strip() if path.is_file() else ''
+                assembly=value if re.fullmatch('[0-9a-f]{64}',value) else None
+                write('source-assembly.json', {'head':head,'tree':tree,'parent':parent,'assemblySha256':assembly,'sdk':'8.0.129','runId':os.environ['GITHUB_RUN_ID'],'attempt':os.environ['GITHUB_RUN_ATTEMPT'],'otherJobsExactHead':False})
+                status, times = {}, {}
+                for name in ['build','discovery','focused']:
+                  path = raw/(name+'.exit'); value = path.read_text().strip() if path.is_file() else ''
+                  status[name] = int(value) if re.fullmatch('[0-9]{1,3}',value) else None
+                  times[name] = {}
+                  for suffix in ['start','end']:
+                    p=raw/(name+'.'+suffix); value=p.read_text().strip() if p.is_file() else ''
+                    times[name][suffix] = value if re.fullmatch(r'[0-9T:Z-]{20}',value) else None
+                write('native-exits.json',{'exitCodes':status,'utc':times,'missingMeans':'unknown-not-success'})
+                failures = [] if all(x == 0 for x in status.values()) and all(v is not None for t in times.values() for v in t.values()) else ['native-command-failure-or-incomplete']
+                if assembly is None: failures.append('assembly-missing-or-invalid')
+                # Independently export available observations even after an earlier native failure.
+                for operation in [discovery, lambda:trx(raw/'results/focused.trx',expected,'focused.trx.sanitized.json'),receipts]:
+                  try: operation()
+                  except Exception as error:
+                    failures.append(str(error) if type(error) is AssertionError else 'malformed-or-missing-input')
+                try:
+                  docker=json.loads((safe/'docker.sanitized.json').read_text())
+                  check(docker['gate']=='complete', 'docker-incomplete-or-residual')
+                except Exception: failures.append('docker-incomplete-or-residual')
+                if failures:
+                  write('export-gate.json',{'outcome':'failed','firstFailure':failures[0],'failures':failures})
+                  sys.exit(1)
+              write(stage+'-gate.json', {'outcome':'passed','stage':stage,'scope':'hosted-runtime' if stage=='export' else 'native-discovery'})
+            except Exception as error:
+              # Never serialize exception messages from XML/JSON/native tools.
+              failure = str(error) if type(error) is AssertionError else 'malformed-or-missing-input'
+              write(stage+'-gate.json', {'outcome':'failed','stage':stage,'firstFailure':failure})
+              sys.exit(1)
+          PY
+          cat > "$raw/observe.py" <<'PY'
+          # Dedicated read-only observer for this focused interval; never deletes resources.
+          import datetime, hashlib, json, os, pathlib, re, select, subprocess, time
+          raw, safe = pathlib.Path(os.environ['GATEWAY_RAW']), pathlib.Path(os.environ['GATEWAY_SAFE'])
+          def native(args):
+              p = subprocess.run(['docker',*args],capture_output=True,timeout=5,check=False)
+              if p.returncode: raise RuntimeError('docker-observation-failed')
+              return p.stdout
+          def ids(): return native(['ps','-aq','--no-trunc']).decode().split()
+          def utc(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
+          def full(value): return bool(re.fullmatch('[0-9a-f]{64}',value or ''))
+          records, snapshots, baseline, errors = [], {}, [], []
+          stream = None; start = utc()
+          try:
+              baseline = ids()
+              daemon = json.loads(native(['info','--format','{{json .}}']))
+              daemon = {k:daemon.get(k) for k in ['ID','ServerVersion','OSType','Architecture']}
+              # Existing containers are never attributed or removed; nonempty TC baseline fails.
+              if native(['ps','-aq','--filter','label=org.testcontainers=true']).strip(): raise RuntimeError('testcontainers-baseline-not-empty')
+              stream = subprocess.Popen(['docker','events','--since',start,'--filter','type=container','--filter','label=org.testcontainers=true','--format','{{json .}}'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,bufsize=0)
+              (raw/'observer-ready').write_text('ready')
+              deadline = time.monotonic()+5400
+              pending=b''
+              with (raw/'docker-events.private.jsonl').open('wb') as original:
+                while not (raw/'observer-stop').exists() and time.monotonic()<deadline:
+                  if stream.poll() is not None: raise RuntimeError('event-stream-ended')
+                  if b'\n' not in pending:
+                    if not select.select([stream.stdout],[],[],0.25)[0]: continue
+                    chunk=os.read(stream.stdout.fileno(),65536)
+                    if not chunk or len(pending)+len(chunk)>1000000: raise RuntimeError('event-line-unavailable-or-size')
+                    pending+=chunk
+                    continue
+                  line,pending=pending.split(b'\n',1); line+=b'\n'
+                  original.write(line); original.flush()
+                  if original.tell()>10000000 or len(records)>20000: raise RuntimeError('event-limit')
+                  event=json.loads(line); action=event.get('Action'); actor=event.get('Actor',{}); cid=actor.get('ID'); a=actor.get('Attributes',{})
+                  if action not in {'create','start','stop','die','destroy','kill'}: continue
+                  if not full(cid) or cid in baseline or a.get('org.testcontainers')!='true': raise RuntimeError('event-attribution')
+                  name=a.get('name',''); image=a.get('image','')
+                  if not re.fullmatch('[a-zA-Z0-9_.-]{1,160}',name): raise RuntimeError('container-name')
+                  if image!='postgres:17-alpine' and not image.startswith('testcontainers/ryuk:'): raise RuntimeError('unexpected-testcontainer-image')
+                  labels={k:a[k] for k in ['org.testcontainers','org.testcontainers.lang','org.testcontainers.version','org.testcontainers.session-id','org.testcontainers.resource-reaper-session'] if k in a}
+                  if any(not re.fullmatch('[a-zA-Z0-9.+-]{1,100}',v) for v in labels.values()): raise RuntimeError('label-format')
+                  exit_code=a.get('exitCode'); exit_code=int(exit_code) if exit_code is not None and re.fullmatch('-?[0-9]{1,10}',exit_code) else None
+                  records.append({'id':cid,'action':action,'timeNano':int(event['timeNano']),'name':name,'image':image,'labels':labels,'exitCode':exit_code})
+                  if action=='start':
+                    try:
+                      data=json.loads(native(['inspect',cid]))[0]
+                      if data['Id']!=cid or data['Name'].lstrip('/')!=name or data['Config']['Image']!=image or any(data['Config']['Labels'].get(k)!=v for k,v in labels.items()) or not data['State']['Running']:
+                        raise RuntimeError('post-start-identity')
+                      ports=data['NetworkSettings']['Ports']
+                      if not ports or any(not bindings for bindings in ports.values()): raise RuntimeError('ports-unresolved')
+                      for port,bindings in ports.items():
+                        if not re.fullmatch('[0-9]{1,5}/(tcp|udp)',port): raise RuntimeError('port-format')
+                        for b in bindings:
+                          if set(b)!={'HostIp','HostPort'} or not re.fullmatch('[0-9a-fA-F:.]{1,45}',b['HostIp']) or not re.fullmatch('[0-9]{1,5}',b['HostPort']): raise RuntimeError('binding-format')
+                      image_id=data['Image']
+                      if not re.fullmatch('sha256:[0-9a-f]{64}',image_id): raise RuntimeError('image-id')
+                      digests=json.loads(native(['image','inspect',image_id,'--format','{{json .RepoDigests}}']))
+                      if not digests or any(not re.fullmatch('[a-zA-Z0-9./_-]+@sha256:[0-9a-f]{64}',d) for d in digests): raise RuntimeError('image-digest')
+                      mounts=[{'type':m['Type'],'destination':m['Destination'] if m['Destination'] in {'/var/run/docker.sock','/var/lib/postgresql/data','/var/lib/postgresql'} else 'other','rw':m['RW'],'sourceSha256':hashlib.sha256(m.get('Source','').encode()).hexdigest(),'dockerSocket':m['Destination']=='/var/run/docker.sock'} for m in data['Mounts']]
+                      snapshots[cid]={'id':cid,'observedUtc':utc(),'name':name,'image':image,'imageId':image_id,'repoDigests':digests,'labels':labels,'ports':ports,'privileged':data['HostConfig']['Privileged'],'readOnlyRoot':data['HostConfig']['ReadonlyRootfs'],'networkMode':data['HostConfig']['NetworkMode'] if data['HostConfig']['NetworkMode'] in {'default','bridge'} else 'other','mounts':mounts,'state':'running'}
+                    except Exception: errors.append({'id':cid,'stage':'post-start-observation-unknown'})
+                if time.monotonic()>=deadline: errors.append({'stage':'observer-deadline'})
+          except Exception:
+              errors.append({'stage':'docker-observation-unavailable'})
+          finally:
+              if stream is not None:
+                stream.terminate()
+                try: out,err=stream.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                  stream.kill(); out,err=stream.communicate(timeout=10); errors.append({'stage':'event-stream-forced-kill'})
+                # Tail not processed is unknown, never credited as completed observations.
+                if out.strip() or locals().get('pending',b'').strip(): errors.append({'stage':'unprocessed-event-tail'})
+                (raw/'docker-events.stderr').write_bytes(err)
+              try:
+                final=ids()
+                daemon_post=json.loads(native(['info','--format','{{json .}}']))
+                daemon_post={k:daemon_post.get(k) for k in ['ID','ServerVersion','OSType','Architecture']}
+                if daemon_post!=daemon: errors.append({'stage':'daemon-drift'})
+              except Exception: final=None; daemon_post=None; errors.append({'stage':'final-inventory-unknown'})
+              children={r['id'] for r in records}
+              residual=None if final is None else sorted(children & set(final))
+              if final is not None and set(final)-set(baseline)-children: errors.append({'stage':'unattributed-new-resources'})
+              for cid in children:
+                actions={r['action'] for r in records if r['id']==cid}
+                if cid not in snapshots or not {'create','start','die','destroy'}<=actions or not any(r['id']==cid and r['action']=='die' and r['exitCode'] is not None for r in records): errors.append({'id':cid,'stage':'incomplete-lifecycle'})
+              sessions={s['labels'].get('org.testcontainers.resource-reaper-session') for s in snapshots.values() if s['image']=='postgres:17-alpine'}
+              ryuk={s['name'].removeprefix('testcontainers-ryuk-') for s in snapshots.values() if s['image'].startswith('testcontainers/ryuk:')}
+              if not sessions or None in sessions or sessions!=ryuk: errors.append({'stage':'session-attribution-incomplete'})
+              value={'schema':'allowlisted-docker-observation-v1','startedUtc':start,'finishedUtc':utc(),'daemonPre':locals().get('daemon'),'daemonPost':daemon_post,'baselineIds':baseline,'finalIds':final,'events':records,'postStartSnapshots':list(snapshots.values()),'residualIds':residual,'errors':errors,'localOnlyExposure':'UNKNOWN_LOCAL_ONLY_EXPOSURE','cleanup':'Testcontainers-owned disposal and Ryuk only; observer performs no mutation','gate':'complete' if children and not errors and residual==[] else 'incomplete'}
+              (safe/'docker.sanitized.json').write_text(json.dumps(value,indent=2)+'\n')
+          PY
+
 
       - name: Restore container-backed test projects with ephemeral package authentication
         env:
@@ -125,6 +510,82 @@ jobs:
           dotnet restore Services/AdminAreaManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --configfile nuget.config
           dotnet restore Services/ClientManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --configfile nuget.config
           dotnet restore Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
+
+      - name: Build exact-head AuthManager gateway test assembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          project=Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj
+          status=0
+          date -u +%FT%TZ > "$GATEWAY_RAW/build.start"
+          timeout --signal=TERM --kill-after=10s 1800s dotnet build "$project" --configuration Release --no-restore -m:1 > "$GATEWAY_RAW/build.stdout" 2> "$GATEWAY_RAW/build.stderr" || status=$?
+          date -u +%FT%TZ > "$GATEWAY_RAW/build.end"
+          printf '%s\n' "$status" > "$GATEWAY_RAW/build.exit"
+          test "$status" -eq 0
+          sha256sum Services/AuthManager/Tests/Infrastructure.IntegrationTests/bin/Release/net8.0/Infrastructure.IntegrationTests.dll | cut -d ' ' -f 1 > "$GATEWAY_RAW/assembly.sha256"
+
+      - name: Discover the exact gateway class cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          date -u +%FT%TZ > "$GATEWAY_RAW/discovery.start"
+          timeout --signal=TERM --kill-after=10s 300s dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configuration Release --no-build --no-restore --list-tests --filter 'FullyQualifiedName~Infrastructure.IntegrationTests.GatewayBrowserTransportTests.' > "$GATEWAY_RAW/discovery.stdout" 2> "$GATEWAY_RAW/discovery.stderr" || status=$?
+          date -u +%FT%TZ > "$GATEWAY_RAW/discovery.end"
+          printf '%s\n' "$status" > "$GATEWAY_RAW/discovery.exit"
+          test "$status" -eq 0
+          python3 "$GATEWAY_RAW/evidence.py" discovery
+
+      - name: Run the gateway class once with native TLS and cleanup receipts
+        shell: bash
+        env:
+          ZEKA_GATEWAY_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -z "${PACKAGE_READ_TOKEN+x}${NuGetPackageSourceCredentials_github+x}"
+          export ZEKA_GATEWAY_EVIDENCE="$GATEWAY_RAW/receipts"
+          python3 "$GATEWAY_RAW/observe.py" > "$GATEWAY_RAW/observer.stdout" 2> "$GATEWAY_RAW/observer.stderr" &
+          observer=$!
+          finish_observer() {
+            touch "$GATEWAY_RAW/observer-stop"
+            # The observer's Docker calls and stream drains are independently bounded.
+            wait "$observer" || true
+          }
+          trap finish_observer EXIT
+          for attempt in {1..100}; do
+            test ! -e "$GATEWAY_SAFE/docker.sanitized.json" || exit 1
+            test ! -e "$GATEWAY_RAW/observer-ready" || break
+            sleep 0.25
+          done
+          test -e "$GATEWAY_RAW/observer-ready"
+          status=0
+          date -u +%FT%TZ > "$GATEWAY_RAW/focused.start"
+          timeout --signal=TERM --kill-after=10s 4800s dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configuration Release --no-build --no-restore --filter 'FullyQualifiedName~Infrastructure.IntegrationTests.GatewayBrowserTransportTests.' --logger 'trx;LogFileName=focused.trx' --results-directory "$GATEWAY_RAW/results" > "$GATEWAY_RAW/focused.stdout" 2> "$GATEWAY_RAW/focused.stderr" || status=$?
+          date -u +%FT%TZ > "$GATEWAY_RAW/focused.end"
+          printf '%s\n' "$status" > "$GATEWAY_RAW/focused.exit"
+          # Allow only Testcontainers' own teardown; no Docker mutation or broad prune.
+          sleep 30
+          exit "$status"
+
+      - name: Export and enforce safe candidate-bound focused evidence
+        if: ${{ always() && steps.gateway_setup.outcome == 'success' }}
+        shell: bash
+        env:
+          ZEKA_GATEWAY_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python3 "$GATEWAY_RAW/evidence.py" export
+
+      - name: Retain allowlisted gateway evidence on success or failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pr93-gateway-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr93-gateway-safe/
+          if-no-files-found: error
+          retention-days: 14
 
       # AuthenticationStartupTests owns its RabbitMQ/API containers and private network;
       # the runner needs Docker only, with no pre-provisioned broker or credentials.
