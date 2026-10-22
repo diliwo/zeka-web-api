@@ -1058,3 +1058,212 @@ jobs:
             fi
           done
           exit "${aggregate_status}"
+
+  # Additional diagnostics only. Existing protected jobs and required aggregate are unchanged.
+  trust_probe_diagnostic:
+    name: Exact-head trust probe diagnostic
+    needs: source_policy
+    if: >-
+      needs.source_policy.outputs.trusted == 'true' &&
+      github.event_name == 'pull_request' && github.repository == 'diliwo/zeka-web-api' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'diagnostic/89-ocelot-trust-probe' &&
+      github.event.pull_request.draft == true && github.event.pull_request.base.ref == 'develop'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+      PROBE_PROJECT: Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj
+      PROBE_TEST: Infrastructure.IntegrationTests.GatewayHandlerTrustProbeTests.Real_pool_default_validation_fixed_package
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+      DOTNET_CLI_USE_MSBUILD_SERVER: '0'
+      MSBUILDDISABLENODEREUSE: '1'
+    steps:
+      - name: Check out exact diagnostic head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Prepare separate diagnostic evidence
+        id: prepare
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:EXPECTED_HEAD) { throw 'Exact head mismatch' }
+          $tree = (git rev-parse 'HEAD^{tree}').Trim()
+          if ($LASTEXITCODE -ne 0 -or $tree -cnotmatch '^[a-f0-9]{40}$') { throw 'Exact tree unavailable' }
+          $suffix = [guid]::NewGuid().ToString('N')
+          $export = Join-Path $env:RUNNER_TEMP "zeka-linux-export-$suffix"
+          $outer = Join-Path $env:RUNNER_TEMP "zeka-linux-results-$suffix"
+          $probe = Join-Path $env:RUNNER_TEMP "zeka-trust-probe-$suffix"
+          if ((Test-Path $export) -or (Test-Path $outer) -or (Test-Path $probe)) { throw 'Evidence path exists' }
+          New-Item -ItemType Directory -Path $export,$outer | Out-Null
+          "PROBE_EXPORT=$export" >> $env:GITHUB_ENV
+          "PROBE_OUTER=$outer" >> $env:GITHUB_ENV
+          "ZEKA_TRUST_PROBE_EVIDENCE=$probe" >> $env:GITHUB_ENV
+          'ready=true' >> $env:GITHUB_OUTPUT
+          @{ schema = 1; head = $head; tree = $tree; workflowMergeSha = $env:GITHUB_SHA;
+             checkout = 'exact-PR-head'; independentAcceptance = $false;
+             sourceSha256 = @('GatewayHandlerTrustProbeTests.cs','GatewayHandlerTrustProbeSupport.cs') | ForEach-Object {
+               @{ path = $_; sha256 = (Get-FileHash -LiteralPath ("Services/AuthManager/Tests/Infrastructure.IntegrationTests/" + $_) -Algorithm SHA256).Hash }
+             } } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $export 'source.json')
+
+      - name: Install pinned diagnostic SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - name: Restore diagnostic project with existing read-only mechanism
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = 1
+          try {
+            if (!$env:PACKAGE_READ_TOKEN) { throw 'Existing package-read credential unavailable' }
+            $env:NuGetPackageSourceCredentials_github = "Username=$env:PACKAGE_USERNAME;Password=$env:PACKAGE_READ_TOKEN;ValidAuthenticationTypes=Basic"
+            & dotnet restore $env:PROBE_PROJECT --configfile nuget.config --disable-build-servers -p:UseSharedCompilation=false
+            $status = $LASTEXITCODE
+          } finally {
+            Remove-Item Env:NuGetPackageSourceCredentials_github,Env:PACKAGE_READ_TOKEN,Env:PACKAGE_USERNAME -ErrorAction SilentlyContinue
+            @{ command = 'dotnet restore probe project existing ephemeral read-only credential'; exitCode = $status; credentialsPersisted = $false } |
+              ConvertTo-Json | Set-Content (Join-Path $env:PROBE_EXPORT 'restore.json')
+          }
+          exit $status
+
+      - name: Compile diagnostic and record actual toolchain
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = (& dotnet --version).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sdk -cne '8.0.129') { throw 'Pinned SDK mismatch' }
+          & dotnet build $env:PROBE_PROJECT --configuration Release --no-restore --disable-build-servers -p:UseSharedCompilation=false -m:1 -p:BuildInParallel=false
+          $status = $LASTEXITCODE
+          $assembly = 'Services/AuthManager/Tests/Infrastructure.IntegrationTests/bin/Release/net8.0/Infrastructure.IntegrationTests.dll'
+          @{ schema = 1; command = 'serial Release build no-restore'; exitCode = $status; sdk = $sdk;
+             runtimes = @(& dotnet --list-runtimes | ForEach-Object { ($_ -split ' \[')[0] });
+             head = $env:EXPECTED_HEAD; tree = (git rev-parse 'HEAD^{tree}').Trim();
+             testAssemblySha256 = if ($status -eq 0) { (Get-FileHash -LiteralPath $assembly -Algorithm SHA256).Hash } else { $null };
+             historicalEnvironmentEquality = $false } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $env:PROBE_EXPORT 'build.json')
+          exit $status
+
+      - name: Account for unfiltered discovery without claiming execution
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $listing = @(& dotnet test $env:PROBE_PROJECT --configuration Release --no-build --no-restore --list-tests 2>&1)
+          $status = $LASTEXITCODE
+          $count = @($listing | Where-Object { $_.ToString().Trim() -ceq $env:PROBE_TEST }).Count
+          @{ exitCode = $status; test = $env:PROBE_TEST; exactIdentityOccurrences = $count; executionClaim = $false } |
+            ConvertTo-Json | Set-Content (Join-Path $env:PROBE_EXPORT 'discovery.json')
+          if ($status -ne 0 -or $count -ne 1) { throw 'Exact discovery gate failed' }
+
+      - name: Execute one exact diagnostic test with credential-free environment
+        id: execute
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = 1; $timedOut = $false; $started = $false; $process = $null
+          try {
+            $start = [Diagnostics.ProcessStartInfo]::new((Get-Command dotnet).Source)
+            $start.UseShellExecute = $false; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+            $start.WorkingDirectory = $env:GITHUB_WORKSPACE; $start.Environment.Clear()
+            foreach ($key in @('PATH','HOME','TMPDIR','TMP','TEMP','DOTNET_ROOT','DOTNET_ROOT_X64','RUNNER_TEMP',
+                'GITHUB_ACTIONS','RUNNER_ENVIRONMENT','GITHUB_REPOSITORY','GITHUB_SHA','ImageOS','ImageVersion','ZEKA_TRUST_PROBE_EVIDENCE')) {
+              $value = [Environment]::GetEnvironmentVariable($key)
+              if ($null -ne $value) { $start.Environment[$key] = $value }
+            }
+            $start.Environment['DOTNET_CLI_TELEMETRY_OPTOUT'] = '1'
+            $start.Environment['DOTNET_SKIP_FIRST_TIME_EXPERIENCE'] = '1'
+            $start.Environment['MSBUILDDISABLENODEREUSE'] = '1'
+            $start.Environment['DOTNET_CLI_USE_MSBUILD_SERVER'] = '0'
+            foreach ($argument in @('test',$env:PROBE_PROJECT,'--configuration','Release','--no-build','--no-restore',
+                '--filter',"FullyQualifiedName=$env:PROBE_TEST",'--logger','trx;LogFileName=outer.trx','--results-directory',$env:PROBE_OUTER)) {
+              $start.ArgumentList.Add($argument)
+            }
+            $process = [Diagnostics.Process]::Start($start); $started = $true
+            $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
+            if (!$process.WaitForExit(1200000)) { $timedOut = $true; $process.Kill($true); $process.WaitForExit(10000) | Out-Null }
+            [Threading.Tasks.Task]::WaitAll(@($stdout,$stderr))
+            $status = if ($timedOut) { 124 } else { $process.ExitCode }
+          } finally {
+            try { if ($process -and !$process.HasExited) { $process.Kill($true); $process.WaitForExit(10000) | Out-Null } }
+            finally {
+              @{ schema = 1; test = $env:PROBE_TEST; filter = "FullyQualifiedName=$env:PROBE_TEST"; exitCode = $status;
+                 started = $started; timedOut = $timedOut; credentialFreeEnvironment = $true; rawStreamsExported = $false } |
+                ConvertTo-Json | Set-Content (Join-Path $env:PROBE_EXPORT 'execution.json')
+              if ($process) { $process.Dispose() }
+            }
+          }
+          exit $status
+
+      - name: Export allowlisted native evidence including failed execution
+        if: ${{ always() && steps.prepare.outputs.ready == 'true' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Copy-Evidence([string]$source,[string]$relative) {
+            if (!(Test-Path -LiteralPath $source -PathType Leaf)) { return }
+            $node = Get-Item -LiteralPath $source
+            while ($node -and $node.FullName -cne $env:RUNNER_TEMP) {
+              if ($node.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Evidence reparse point forbidden' }
+              $node = if ($node -is [IO.FileInfo]) { $node.Directory } else { $node.Parent }
+            }
+            if (!$node) { throw 'Evidence outside temporary boundary' }
+            $destination = Join-Path $env:PROBE_EXPORT $relative
+            New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($destination)) -Force | Out-Null
+            Copy-Item -LiteralPath $source -Destination $destination
+          }
+          # Native TRX uses Tests.cs's existing safe outer wrapper; never export raw stdout/stderr or input.json.
+          Copy-Evidence (Join-Path $env:PROBE_OUTER 'outer.trx') 'outer.trx'
+          foreach ($file in @('receipts.jsonl','diagnostic.jsonl')) {
+            Copy-Evidence (Join-Path $env:ZEKA_TRUST_PROBE_EVIDENCE $file) $file
+          }
+          foreach ($control in @('before-normal','trusted-normal','untrusted-normal','after-normal','before-startup-failure',
+              'after-startup-failure','before-abnormal-child','trusted-abnormal-child','untrusted-abnormal-child','terminated-child','after-abnormal-child')) {
+            foreach ($file in @('result.json','process.json','result.trx','diagnostic.jsonl')) {
+              $relative = "child-$control/$file"
+              Copy-Evidence (Join-Path $env:ZEKA_TRUST_PROBE_EVIDENCE $relative) $relative
+            }
+          }
+          $accounting = @{ schema = 1; test = $env:PROBE_TEST; trxPresent = $false; selectionVerified = $false; counters = $null; limitation = 'native-trx-unavailable' }
+          $path = Join-Path $env:PROBE_EXPORT 'outer.trx'
+          if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $accounting.trxPresent = $true
+            try {
+              [xml]$xml = Get-Content -Raw -LiteralPath $path
+              $nodes = @($xml.SelectNodes('//*[local-name()="Counters"]'))
+              $results = @($xml.SelectNodes('//*[local-name()="UnitTestResult"]'))
+              if ($nodes.Count -ne 1 -or $results.Count -ne 1 -or $results[0].testName -cne $env:PROBE_TEST) { throw 'selection' }
+              $counts = @{}
+              foreach ($key in @('total','executed','passed','failed','notExecuted')) {
+                $value = 0
+                if (![int]::TryParse($nodes[0].GetAttribute($key),[ref]$value) -or $value -lt 0 -or $value -gt 1) { throw 'counters' }
+                $counts[$key] = $value
+              }
+              if ($counts.total -ne 1 -or $counts.executed -ne 1 -or $counts.notExecuted -ne 0 -or $counts.passed+$counts.failed -ne 1) { throw 'accounting' }
+              $accounting.counters = $counts; $accounting.selectionVerified = $true; $accounting.limitation = $null
+            } catch { $accounting.limitation = 'native-accounting-unverified' }
+          }
+          $accounting | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $env:PROBE_EXPORT 'accounting.json')
+          $artifacts = @(Get-ChildItem -LiteralPath $env:PROBE_EXPORT -File -Recurse | Sort-Object FullName | ForEach-Object {
+            @{ path = [IO.Path]::GetRelativePath($env:PROBE_EXPORT,$_.FullName); bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+          })
+          @{ schema = 1; head = $env:EXPECTED_HEAD; tree = (git rev-parse 'HEAD^{tree}').Trim(); artifacts = $artifacts;
+             ordinaryProtectedSuites = 'separate unchanged jobs'; historicalEnvironmentEquality = $false; independentAcceptance = $false } |
+            ConvertTo-Json -Depth 8 | Set-Content (Join-Path $env:PROBE_EXPORT 'manifest.json')
+          if (!$accounting.selectionVerified) { throw 'Exact native accounting unverified' }
+
+      - name: Retain separate Linux diagnostic evidence
+        if: ${{ always() && steps.prepare.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gateway-linux-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PROBE_EXPORT }}
+          if-no-files-found: error
+          retention-days: 14
