@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using System.Reflection;
 using ClientManagement.Application.ActionWrites;
 using ClientManagement.Application.BeneficiaryB1;
@@ -444,6 +446,133 @@ public sealed class LinkedInteractionContractTests
         Assert.Equal(1, f.Store.RecordCalls);
         Assert.Equal(0, f.Store.ReconcileCalls);
         Assert.Equal(0, f.Publisher.Published);
+    }
+
+    [Theory]
+    [InlineData("eligible")]
+    [InlineData("ineligible")]
+    [InlineData("timezone_failure")]
+    [InlineData("eligibility_failure")]
+    public async Task Combined_remote_metric_records_only_outcome_without_payload_or_identity(string outcome)
+    {
+        var f = new Fixture();
+        var noteCanary = "synthetic-private-note-" + Guid.NewGuid().ToString("N");
+        var purposeCanary = "synthetic-private-purpose-" + Guid.NewGuid().ToString("N");
+        f.Command = f.Command with
+        {
+            Note = noteCanary,
+            Action = new(purposeCanary, f.Command.Action!.DueLocalDate, f.Target)
+        };
+        var prohibited = new[]
+        {
+            noteCanary, purposeCanary, f.Subject.ToString("D"), f.Organisation.ToString("D"),
+            f.Membership.ToString("D"), f.Target.ToString("D"), f.Command.IdempotencyKey
+        };
+        var observed = new ConcurrentQueue<RemoteMeasurement>();
+        var ownExecution = new AsyncLocal<bool>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, subscriber) =>
+            {
+                if (instrument.Meter.Name == "ClientManagement.ActionAuthority.v1"
+                    && instrument.Name == "action_authority.combined_remote_duration_ms")
+                    subscriber.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
+        {
+            if (ownExecution.Value)
+                observed.Enqueue(new(instrument.Meter.Name, instrument.Name, instrument.Unit,
+                    value, tags.ToArray()));
+        });
+        listener.Start();
+
+        if (outcome == "ineligible") f.Authority.Decision = null;
+        if (outcome == "timezone_failure")
+            f.Authority.TimeZoneFailure = new TenantAccessException(AccessFailure.Unavailable);
+        if (outcome == "eligibility_failure")
+            f.Authority.EligibilityFailure = new TenantAccessException(AccessFailure.Unavailable);
+
+        ownExecution.Value = true;
+        try
+        {
+            if (outcome == "eligible")
+            {
+                var result = await f.DynamicAsync();
+                Assert.True(result == f.Store.Result, "The observed executor must complete the linked write.");
+                Assert.True(ReferenceEquals(f.Command, f.Store.LastCommand),
+                    "The actual write must receive the command carrying the synthetic privacy canaries.");
+            }
+            else if (outcome == "ineligible")
+            {
+                var error = await Assert.ThrowsAsync<ActionWriteConflictException>(() => f.DynamicAsync());
+                Assert.True(error.Code == "INVALID_ASSIGNEE", "The ineligible execution must fail closed.");
+            }
+            else
+            {
+                var error = await Assert.ThrowsAsync<TenantAccessException>(() => f.DynamicAsync());
+                Assert.True(error.Failure == AccessFailure.Unavailable,
+                    "An authority outage must remain unavailable.");
+            }
+        }
+        finally
+        {
+            ownExecution.Value = false;
+        }
+
+        Assert.True(f.Access.Calls == 1 && f.Authority.ZoneCalls == 1,
+            "A real authorized executor path must reach the timezone authority exactly once.");
+        Assert.True(f.Authority.EligibilityCalls == (outcome == "timezone_failure" ? 0 : 1),
+            "The actual authority sequence must match the measured outcome.");
+        Assert.True(f.Store.RecordCalls == (outcome == "eligible" ? 1 : 0),
+            "Failed authority must not enter the linked write.");
+        Assert.True(f.Publisher.Published == (outcome == "eligible" ? 1 : 0),
+            "Only the successful committed path may publish.");
+        Assert.True(observed.Count == 1,
+            "Privacy evidence requires exactly one actual combined-remote measurement, not an empty capture.");
+        Assert.True(observed.TryDequeue(out var measurement), "The actual measurement must be available.");
+        Assert.NotNull(measurement);
+        Assert.True(IsSafeRemoteMeasurement(measurement!, outcome, prohibited),
+            "The real metric must contain only finite duration and its exact harmless outcome tag.");
+
+        // Detector controls use synthetic values and boolean assertions, never value-bearing diagnostics.
+        Assert.False(IsSafeRemoteMeasurement(measurement! with
+        {
+            Tags = [new("outcome", noteCanary)]
+        }, outcome, prohibited), "The privacy detector must reject a note-bearing tag.");
+        Assert.False(IsSafeRemoteMeasurement(measurement! with
+        {
+            Tags = [new("outcome", purposeCanary)]
+        }, outcome, prohibited), "The privacy detector must reject a purpose-bearing tag.");
+        Assert.False(IsSafeRemoteMeasurement(measurement! with
+        {
+            Tags = [new("outcome", f.Command)]
+        }, outcome, prohibited), "The privacy detector must reject retained request objects.");
+        Assert.False(IsSafeRemoteMeasurement(measurement! with
+        {
+            Tags = [new("outcome", outcome), new("request", f.Command)]
+        }, outcome, prohibited), "The privacy detector must reject additional structured payload.");
+        Assert.False(IsSafeRemoteMeasurement(measurement! with
+        {
+            InstrumentName = noteCanary
+        }, outcome, prohibited), "The privacy detector must reject payload-bearing instrument metadata.");
+    }
+
+    private sealed record RemoteMeasurement(string MeterName, string InstrumentName, string? Unit,
+        double Value, KeyValuePair<string, object?>[] Tags);
+
+    private static bool IsSafeRemoteMeasurement(RemoteMeasurement measurement, string outcome,
+        IEnumerable<string> prohibited)
+    {
+        if (measurement.MeterName != "ClientManagement.ActionAuthority.v1"
+            || measurement.InstrumentName != "action_authority.combined_remote_duration_ms"
+            || measurement.Unit != "ms" || !double.IsFinite(measurement.Value) || measurement.Value < 0
+            || measurement.Tags.Length != 1)
+            return false;
+        var tag = measurement.Tags[0];
+        return tag.Key == "outcome" && tag.Value is string value && value == outcome
+            && !prohibited.Any(item => tag.Key.Contains(item, StringComparison.Ordinal)
+                || value.Contains(item, StringComparison.Ordinal));
     }
 
     private static void InvalidAction(FollowUpActionInput? action)

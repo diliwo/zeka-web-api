@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Reflection;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -26,6 +29,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Xunit;
+using Xunit.Abstractions;
 using Zeka.Extensions.MultiTenancy.AspNetCore;
 using Zeka.PersistenceSecurity;
 using ActionHistory = ClientManagement.Core.Entities.ActionChange;
@@ -34,7 +38,7 @@ namespace Infrastructure.IntegrationTests;
 
 [Trait("Feature", "B2")]
 [Trait("Evidence", "ProviderReal")]
-public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase database)
+public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase database, ITestOutputHelper output)
     : IClassFixture<PostgreSqlClientRuntimeDatabase>
 {
     private static int sequence = 9200;
@@ -535,6 +539,156 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
     }
 
     [Fact]
+    public void Canonical_timezone_policy_matches_all_340_reviewed_members_and_manifest_checksum()
+    {
+        var type = typeof(IActionAuthorityServiceCredential).Assembly.GetType(
+            "ClientManagement.Infrastructure.Authorization.ActionAuthorityClient", throwOnError: true)!;
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;
+        var members = Assert.IsAssignableFrom<IEnumerable<string>>(
+            type.GetField("CanonicalIanaIds", flags)!.GetValue(null)).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        Assert.Equal(340, members.Length);
+        Assert.Equal(340, members.Distinct(StringComparer.Ordinal).Count());
+        var bytes = Encoding.UTF8.GetBytes(string.Join("\n", members) + "\n");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+        Assert.Equal("6916cb132692f2b2c990b3b8da7ead8819e3ca606acc9b1a093143f80c7c733d", hash);
+        var membership = type.GetMethod("IsCanonicalIanaId", flags)!;
+        Assert.NotNull(membership);
+        Assert.All(members, id => Assert.True((bool)membership.Invoke(null, new object?[] { id })!,
+            "Every reviewed canonical member must be admitted by the private membership predicate."));
+        var manifest = Assert.IsType<string>(type.GetField("CanonicalIanaManifest", flags)!.GetRawConstantValue());
+        Assert.Equal(members, manifest.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .OrderBy(x => x, StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public void Canonical_timezone_membership_rejects_null_overlength_controls_and_normalization()
+    {
+        var type = typeof(IActionAuthorityServiceCredential).Assembly.GetType(
+            "ClientManagement.Infrastructure.Authorization.ActionAuthorityClient", throwOnError: true)!;
+        var membership = type.GetMethod("IsCanonicalIanaId", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var invalid = new string?[] { null, "", new string('x', 129), "Europe/Brussels\0",
+            "europe/brussels", " Europe/Brussels", "Europe/Brussels ", "Europe/Brussels\n",
+            "Europe/Amsterdam", "Europe/Kiev", "Asia/Calcutta", "US/Eastern", "UTC", "GMT" };
+        Assert.All(invalid, id => Assert.False((bool)membership.Invoke(null, new object?[] { id })!,
+            "Unreviewed IDs must fail exact membership without trimming, casing or alias conversion."));
+    }
+    [Theory]
+    [InlineData("Europe/Kyiv", true)]
+    [InlineData("Asia/Kolkata", true)]
+    [InlineData("Europe/Brussels", true)]
+    [InlineData("America/New_York", true)]
+    [InlineData("Etc/UTC", true)]
+    [InlineData("Etc/GMT", true)]
+    [InlineData("Europe/Amsterdam", false)]
+    [InlineData("Europe/Kiev", false)]
+    [InlineData("Asia/Calcutta", false)]
+    [InlineData("US/Eastern", false)]
+    [InlineData("UTC", false)]
+    [InlineData("GMT", false)]
+    [InlineData("Romance Standard Time", false)]
+    [InlineData("europe/brussels", false)]
+    [InlineData(" Europe/Brussels", false)]
+    [InlineData("Europe/Brussels ", false)]
+    [InlineData("Europe/Brussels\n", false)]
+    [InlineData("Europe/Not_A_Zone", false)]
+    [InlineData("", false)]
+    public async Task Actual_HTTP_timezone_policy_admits_exact_canonical_members_and_rejects_aliases(
+        string zoneId, bool accepted)
+    {
+        var org = Guid.NewGuid(); var actor = Guid.NewGuid(); var subject = Guid.NewGuid();
+        var seed = await Seed(org, actor); var transport = new AuthorityTransport(org, actor, "success", zoneId);
+        await using var app = await Host(Grant(subject, org, actor), new AuthorityProbe(), transport: transport);
+        using var client = Client(app, org, subject);
+        var response = await Post(client, seed.ClientId, Payload(actor));
+        if (accepted) Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        else await Problem(response, HttpStatusCode.ServiceUnavailable);
+        Assert.Equal(1, transport.ZoneCalls);
+        Assert.Equal(accepted ? 1 : 0, transport.EligibilityCalls);
+        await Counts(org, accepted ? 1 : 0, accepted ? 1 : 0, accepted ? 1 : 0, accepted ? 1 : 0);
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("replay")]
+    [InlineData("conflict")]
+    [InlineData("malformed")]
+    [InlineData("denied")]
+    [InlineData("hidden")]
+    [InlineData("authority-failure")]
+    [InlineData("rollback")]
+    public async Task Composed_B2_observability_keeps_private_input_out_of_ordinary_channels(string scenario)
+    {
+        var org = Guid.NewGuid(); var actor = Guid.NewGuid(); var subject = Guid.NewGuid();
+        var suffix = Guid.NewGuid().ToString("N");
+        var privateNote = "B2-private-note-" + suffix;
+        var privatePurpose = "B2-private-purpose-" + suffix;
+        var privateBeneficiary = "B2-private-beneficiary-" + suffix;
+        var privateHeader = "synthetic-b2-header-" + suffix;
+        var seed = await Seed(org, actor, privateBeneficiary);
+        var access = Grant(subject, org, actor, scenario == "denied" ? "Clients.ViewAll" : "Clients.EditAll");
+        using var capture = new PrivacyCapture();
+        var transport = new AuthorityTransport(org, actor, scenario == "authority-failure" ? "dependency-auth" : "success");
+        await using var app = await Host(access, new AuthorityProbe(), transport: transport,
+            saveFailure: scenario == "rollback" ? new SaveFailure("history") : null, privacy: capture);
+        capture.ProveDetectorAndChannelControls(app.Services.GetRequiredService<ILoggerFactory>());
+        using var client = Client(app, org, subject);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", privateHeader);
+        var body = Payload(actor, note: privateNote, purpose: privatePurpose);
+        var forbidden = new[] { privateNote, privatePurpose, privateBeneficiary, privateHeader,
+            "synthetic-service-token", body };
+        var target = scenario == "hidden" ? int.MaxValue : seed.ClientId;
+        if (scenario is "replay" or "conflict")
+            Assert.Equal(HttpStatusCode.Created, (await Post(client, target, body)).StatusCode);
+        var request = scenario == "conflict" ? body.Replace(privatePurpose, privatePurpose + "-changed")
+            : scenario == "malformed" ? body[..^1] + ",\"unknown\":true}" : body;
+        var response = await Post(client, target, request);
+        var expected = scenario switch
+        {
+            "create" or "replay" => HttpStatusCode.Created,
+            "conflict" => HttpStatusCode.Conflict,
+            "malformed" => HttpStatusCode.BadRequest,
+            "denied" => HttpStatusCode.Forbidden,
+            "hidden" => HttpStatusCode.NotFound,
+            _ => HttpStatusCode.ServiceUnavailable
+        };
+        Assert.Equal(expected, response.StatusCode);
+        var responseText = await response.Content.ReadAsStringAsync();
+        Assert.False(PrivacyCapture.ContainsAny(new[] { responseText }, forbidden),
+            "Response must not expose private synthetic input.");
+        var rows = scenario is "create" or "replay" or "conflict" ? 1 : 0;
+        capture.AssertOrdinaryChannelsSafe(forbidden);
+        var actualActivityObserved = capture.ActualActivityObserved;
+        await Counts(org, rows, rows, rows, rows);
+        Assert.Equal(scenario is "malformed" or "denied" or "hidden" ? 0 : 1, transport.ZoneCalls);
+        Assert.Equal(scenario is "malformed" or "denied" or "hidden" ? 0 : 1, transport.EligibilityCalls);
+
+        await using var db = Context(org);
+        var seedClient = await db.Clients.SingleAsync();
+        await db.Interactions.LoadAsync(); await db.FollowUpActions.LoadAsync();
+        await db.ActionChanges.LoadAsync(); await db.IdempotencyReceipts.LoadAsync();
+        // Inspect actual structural audit columns only. Business Note/Purpose and the
+        // protected RecordMetadata receipt payload intentionally remain persisted.
+        var audit = db.ChangeTracker.Entries().SelectMany(entry => entry.Properties
+            .Where(p => p.Metadata.Name is "CreatedBy" or "Created" or "LastModifiedBy" or "LastModified")
+            .Select(p => p.Metadata.Name + "=" + Convert.ToString(p.CurrentValue, CultureInfo.InvariantCulture)))
+            .ToArray();
+        Assert.True(seedClient.Created > DateTime.MinValue && seedClient.CreatedBy == "ZeKa",
+            "Actual persistence audit interceptor must supply the harmless audit positive control.");
+        Assert.NotEmpty(audit);
+        Assert.True(PrivacyCapture.ContainsAny(audit, new[] { "CreatedBy=ZeKa" }),
+            "Persisted audit capture must contain the actual interceptor's structural value.");
+        Assert.True(PrivacyCapture.ContainsAny(audit.Append("audit-detector-control"), new[] { "audit-detector-control" }),
+            "Audit privacy detector must detect a deliberately introduced in-memory control.");
+        Assert.False(PrivacyCapture.ContainsAny(audit, forbidden),
+            "Structural audit metadata must not retain private synthetic input.");
+        output.WriteLine("B2 privacy: ordinary_log_observed=true; structural_audit_observed=true; "
+            + "actual_activity_observed=" + actualActivityObserved.ToString().ToLowerInvariant()
+            + "; private_input_absent=true; detector_controls_passed=true");
+        if (!actualActivityObserved)
+            output.WriteLine("LIMITATION: no actual B2 request/provider Activity was emitted; Activity privacy is untested. "
+                + "The harmless test Activity control proves collector sensitivity only.");
+    }
+    [Fact]
     public async Task Cancellation_during_authority_is_not_success_and_creates_no_rows()
     {
         var org = Guid.NewGuid(); var actor = Guid.NewGuid(); var subject = Guid.NewGuid();
@@ -640,11 +794,20 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
 
     private async Task<WebApplication> Host(Access access, AuthorityProbe authority, LinkedGate? gate = null,
         SaveFailure? saveFailure = null, AmbiguityProbe? ambiguity = null, bool productionGate = false,
-        TimeProvider? clock = null, AttemptProbe? attempts = null, AuthorityTransport? transport = null)
+        TimeProvider? clock = null, AttemptProbe? attempts = null, AuthorityTransport? transport = null,
+        PrivacyCapture? privacy = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.WebHost.UseTestServer();
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
+        if (privacy is not null)
+        {
+            // Test-host-only memory observer. Sensitive-data logging remains disabled.
+            builder.Logging.ClearProviders();
+            builder.Logging.SetMinimumLevel(LogLevel.Information);
+            builder.Logging.AddProvider(privacy);
+            builder.Logging.AddFilter<PrivacyCapture>("Microsoft.AspNetCore", LogLevel.Information);
+        }
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:ClientApiConnection"] = database.RuntimeConnectionString,
@@ -788,7 +951,7 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
         Assert.DoesNotContain("synthetic-service-token", text, StringComparison.Ordinal);
     }
 
-    private async Task<(int ClientId, int CaseId, int WorkerId)> Seed(Guid org, Guid actor)
+    private async Task<(int ClientId, int CaseId, int WorkerId)> Seed(Guid org, Guid actor, string? privateReference = null)
     {
         await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
         await connection.OpenAsync(); await using var tx = await connection.BeginTransactionAsync();
@@ -798,7 +961,7 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
         await db.Database.UseTransactionAsync(tx);
         var client = ClientManagement.Tests.Common.SyntheticClient.Create(
             ClientManagement.Tests.Common.SyntheticClient.Niss(sequence: Interlocked.Increment(ref sequence)));
-        client.ReferenceNumber = $"b2-{Guid.NewGuid():N}";
+        client.ReferenceNumber = privateReference ?? $"b2-{Guid.NewGuid():N}";
         var worker = new SocialWorker();
         worker.ApplyProjection(actor, 1, Guid.NewGuid(), true, "Synthetic", "Worker",
             Guid.NewGuid().ToString("N"), "Team", "T");
@@ -1034,10 +1197,141 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
             stream.WriteAsync(Encoding.UTF8.GetBytes(text)).AsTask();
     }
 
+    private sealed class PrivacyCapture : ILoggerProvider, ISupportExternalScope
+    {
+        private const string ControlSource = "Zeka.B2.Privacy.Control";
+        private readonly ConcurrentQueue<LogObservation> logs = new();
+        private readonly ConcurrentQueue<ActivityObservation> activities = new();
+        private readonly ActivityListener listener;
+        private IExternalScopeProvider scopes = new LoggerExternalScopeProvider();
+        private int disposed;
+
+        public PrivacyCapture()
+        {
+            listener = new ActivityListener
+            {
+                ShouldListenTo = _ => true,
+                Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+                SampleUsingParentId = (ref ActivityCreationOptions<string> _) => ActivitySamplingResult.AllDataAndRecorded,
+                ActivityStopped = activity => activities.Enqueue(new ActivityObservation(activity.Source.Name,
+                    activity.OperationName, activity.DisplayName, activity.Status.ToString(), activity.StatusDescription,
+                    string.Join(";", activity.TagObjects.Select(p => p.Key + "=" + Render(p.Value))),
+                    string.Join(";", activity.Events.Select(e => e.Name + ":" + string.Join(",",
+                        e.Tags.Select(p => p.Key + "=" + Render(p.Value))))),
+                    string.Join(";", activity.Baggage.Select(p => p.Key + "=" + p.Value))))
+            };
+            ActivitySource.AddActivityListener(listener);
+        }
+
+        public bool ActualActivityObserved => activities.Any(a => a.Source != ControlSource);
+        public ILogger CreateLogger(string categoryName) => new MemoryLogger(this, categoryName);
+        public void SetScopeProvider(IExternalScopeProvider scopeProvider) => scopes = scopeProvider;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) == 0) listener.Dispose();
+        }
+
+        public void ProveDetectorAndChannelControls(ILoggerFactory factory)
+        {
+            // Deliberately harmless controls, never the request's private markers.
+            const string control = "b2-detector-positive-control";
+            var logger = factory.CreateLogger("B2.Privacy.Control");
+            using (logger.BeginScope(new Dictionary<string, object?> { ["control.scope"] = control }))
+                logger.LogInformation(new InvalidOperationException(control),
+                    "B2 " + control + " {ControlValue}", control);
+            var observed = logs.ToArray();
+            Assert.True(observed.Any(e => e.Formatted.Contains(control, StringComparison.Ordinal)
+                && e.Structured.Contains(control, StringComparison.Ordinal)
+                && e.Template.Contains(control, StringComparison.Ordinal)
+                && e.Scopes.Contains(control, StringComparison.Ordinal)
+                && e.Exception.Contains(control, StringComparison.Ordinal)),
+                "The real logging provider must observe formatted, structured, template, scope and exception controls.");
+            Assert.True(ContainsAny(observed.SelectMany(e => e.AllValues()), new[] { control }),
+                "The ordinary-log privacy detector must detect the deliberate control.");
+            using (var source = new ActivitySource(ControlSource))
+            {
+                using var activity = source.StartActivity("b2.activity." + control);
+                Assert.NotNull(activity);
+                activity!.DisplayName = "b2.display." + control;
+                activity.SetTag("control.tag", control);
+                activity.AddBaggage("control.baggage", control);
+                activity.AddEvent(new ActivityEvent(control, tags: new ActivityTagsCollection { { "control.event", control } }));
+                activity.SetStatus(ActivityStatusCode.Error, control);
+            }
+            Assert.True(activities.Any(a => a.Source == ControlSource
+                && a.Operation.Contains(control, StringComparison.Ordinal)
+                && a.Display.Contains(control, StringComparison.Ordinal)
+                && a.Tags.Contains(control, StringComparison.Ordinal)
+                && a.Events.Contains(control, StringComparison.Ordinal)
+                && a.Baggage.Contains(control, StringComparison.Ordinal)
+                && a.Status == "Error" && a.Description?.Contains(control, StringComparison.Ordinal) == true),
+                "Activity listener must observe actual names, tags, event fields, baggage and status-description controls.");
+            Assert.True(ContainsAny(activities.SelectMany(a => a.AllValues()), new[] { control }),
+                "The Activity privacy detector must detect the deliberate control.");
+            logs.Clear(); activities.Clear();
+            logger.LogInformation("B2 ordinary-log observation control is active");
+        }
+
+        public void AssertOrdinaryChannelsSafe(string[] forbidden)
+        {
+            var observed = logs.ToArray();
+            Assert.NotEmpty(observed);
+            Assert.True(observed.Any(e => e.Category.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal)),
+                "Capture must observe real composed ASP.NET request logs, not only a custom positive control.");
+            Assert.False(ContainsAny(observed.SelectMany(e => e.AllValues()), forbidden),
+                "Composed ordinary formatted/state/template/scope/exception logs must not retain private input.");
+            Assert.False(ContainsAny(activities.SelectMany(a => a.AllValues()), forbidden),
+                "Observed actual Activity names/tags/events/baggage/status fields must not retain private input.");
+        }
+
+        public static bool ContainsAny(IEnumerable<string?> values, IEnumerable<string> forbidden) =>
+            values.Any(value => value is not null && forbidden.Any(marker =>
+                value.Contains(marker, StringComparison.Ordinal)));
+
+        private static string Render(object? value)
+        {
+            if (value is null) return "";
+            if (value is IEnumerable<KeyValuePair<string, object?>> fields)
+                return string.Join(";", fields.Select(p => p.Key + "=" + Render(p.Value)));
+            if (value is string text) return text;
+            if (value is IFormattable formattable) return formattable.ToString(null, CultureInfo.InvariantCulture) ?? "";
+            try { return JsonSerializer.Serialize(value, value.GetType()); }
+            catch (NotSupportedException) { return value.ToString() ?? ""; }
+            catch (JsonException) { return value.ToString() ?? ""; }
+        }
+
+        private sealed class MemoryLogger(PrivacyCapture owner, string category) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => owner.scopes.Push(state);
+            public bool IsEnabled(LogLevel level) => true;
+            public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                var scopeValues = new List<string>();
+                owner.scopes.ForEachScope((value, buffer) => buffer.Add(Render(value)), scopeValues);
+                var template = state is IEnumerable<KeyValuePair<string, object?>> fields
+                    ? fields.FirstOrDefault(p => p.Key == "{OriginalFormat}").Value?.ToString() ?? "" : "";
+                owner.logs.Enqueue(new LogObservation(category, formatter(state, exception), Render(state), template,
+                    string.Join(";", scopeValues), exception?.ToString() ?? ""));
+            }
+        }
+
+        private sealed record LogObservation(string Category, string Formatted, string Structured,
+            string Template, string Scopes, string Exception)
+        {
+            public IEnumerable<string?> AllValues() => new[] { Category, Formatted, Structured, Template, Scopes, Exception };
+        }
+        private sealed record ActivityObservation(string Source, string Operation, string Display,
+            string Status, string? Description, string Tags, string Events, string Baggage)
+        {
+            public IEnumerable<string?> AllValues() => new[] { Source, Operation, Display, Status, Description, Tags, Events, Baggage };
+        }
+    }
     private sealed class ServiceCredential : IActionAuthorityServiceCredential
     { public string? BearerToken => "synthetic-service-token"; }
 
-    private sealed class AuthorityTransport(Guid org, Guid actor, string mode) : HttpMessageHandler
+    private sealed class AuthorityTransport(Guid org, Guid actor, string mode,
+        string timeZoneId = "Europe/Brussels") : HttpMessageHandler
     {
         public int ZoneCalls, EligibilityCalls;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
@@ -1048,7 +1342,7 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
             {
                 Interlocked.Increment(ref ZoneCalls);
                 return Response(HttpStatusCode.OK, JsonSerializer.Serialize(new { contractVersion = 1,
-                    organisationId = org, timeZoneId = "Europe/Brussels", configVersion = 1,
+                    organisationId = org, timeZoneId, configVersion = 1,
                     observedAtUtc = DateTimeOffset.UtcNow }));
             }
             Assert.Equal("/internal/v1/assignee-eligibility", request.RequestUri.AbsolutePath);
