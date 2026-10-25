@@ -20,6 +20,9 @@ public sealed record InteractionRevisionsV1(int ContractVersion, int Interaction
 public sealed record RecordInteractionV1(int ContractVersion, int InteractionId, int Revision,
     DateTime CreatedAtUtc);
 
+public sealed record RecordLinkedInteractionV1(int ContractVersion, int InteractionId, int Revision,
+    int FollowUpActionId);
+
 public sealed class BeneficiaryWireException(string code) : Exception(code)
 {
     public string Code { get; } = code;
@@ -35,11 +38,18 @@ public interface IBeneficiaryB1Store
         string note, string idempotencyKey, Guid actorMembershipId, CancellationToken token);
     Task<RecordInteractionV1?> ReconcileAsync(int beneficiaryId, DateTime occurredAtUtc,
         string note, string idempotencyKey, Guid actorMembershipId, CancellationToken token);
+    // Called only inside the linked executor's guarded tenant reads.
+    Task<RecordInteractionCommand?> RecoverLinkedCommandAsync(int beneficiaryId, DateTime occurredAtUtc,
+        string note, string idempotencyKey, FollowUpActionInput action, Guid actorMembershipId,
+        CancellationToken token) => throw new TenantAccessException(AccessFailure.Unavailable);
+    Task<RecordInteractionCommand> ResolveLinkedCommandAsync(int beneficiaryId, DateTime occurredAtUtc,
+        string note, string idempotencyKey, FollowUpActionInput action, DateOnly localDay,
+        CancellationToken token) => throw new TenantAccessException(AccessFailure.Unavailable);
 }
 
 // Only an isolated test-host controller calls this B1 surface. There is no production route.
 public sealed class BeneficiaryB1Service(IBeneficiaryB1Store store, TenantOperation operation,
-    ITenantTransactionExecutor transactions, TimeProvider clock)
+    ITenantTransactionExecutor transactions, TimeProvider clock, LinkedInteractionExecutor? linked = null)
 {
     private static readonly RequiresTenantPermissionAttribute Edit =
         new("Clients.EditAll", "Clients.EditAssigned");
@@ -90,6 +100,23 @@ public sealed class BeneficiaryB1Service(IBeneficiaryB1Store store, TenantOperat
         }
     }
 
+    public async Task<RecordLinkedInteractionV1> RecordLinkedAsync(int beneficiaryId, DateTime occurredAtUtc,
+        string note, string idempotencyKey, FollowUpActionInput action, CancellationToken token)
+    {
+        Validate(beneficiaryId, occurredAtUtc, note, idempotencyKey, clock.GetUtcNow());
+        ValidateAction(action);
+        var executor = linked ?? throw new TenantAccessException(AccessFailure.Unavailable);
+        var result = await executor.ExecuteAsync(
+            t => store.RecoverLinkedCommandAsync(beneficiaryId, occurredAtUtc, note,
+                idempotencyKey, action, operation.MembershipId, t),
+            (day, t) => store.ResolveLinkedCommandAsync(beneficiaryId, occurredAtUtc, note,
+                idempotencyKey, action, day, t), token);
+        if (result.InteractionId <= 0 || result.Revision != 1
+            || result.FollowUpActionId is not int actionId || actionId <= 0)
+            throw new TenantAccessException(AccessFailure.Unavailable);
+        return new RecordLinkedInteractionV1(1, result.InteractionId, result.Revision, actionId);
+    }
+
     public static void Validate(int beneficiaryId, DateTime occurredAtUtc, string note,
         string idempotencyKey, DateTimeOffset now)
     {
@@ -103,6 +130,15 @@ public sealed class BeneficiaryB1Service(IBeneficiaryB1Store store, TenantOperat
             || key.ToString("D") != idempotencyKey
             || idempotencyKey[14] != '4'
             || idempotencyKey[19] is not ('8' or '9' or 'a' or 'b'))
+            throw new BeneficiaryWireException("INVALID_REQUEST");
+    }
+
+    public static void ValidateAction(FollowUpActionInput? action)
+    {
+        if (action is null || action.Purpose is null || action.Purpose.Length is < 1 or > 500
+            || string.IsNullOrWhiteSpace(action.Purpose) || !WellFormedUtf16(action.Purpose)
+            || action.Purpose.Any(c => char.IsControl(c) && c is not ('\n' or '\t'))
+            || action.DueLocalDate == default || action.AssigneeMembershipId == Guid.Empty)
             throw new BeneficiaryWireException("INVALID_REQUEST");
     }
 

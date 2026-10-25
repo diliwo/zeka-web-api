@@ -32,6 +32,7 @@ public static class DependencyInjection
             runtimeConnection, "zeka_client_runtime"));
         services.AddScoped<TenantTransactionAttemptState>();
         services.AddScoped<ClientManagement.Application.ActionWrites.ActionWriteAuthorityScope>();
+        services.AddScoped<ClientManagement.Application.ActionWrites.LinkedInteractionExecutor>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<Authorization.IActionAuthorityServiceCredential,
             Authorization.UnprovisionedActionAuthorityCredential>();
