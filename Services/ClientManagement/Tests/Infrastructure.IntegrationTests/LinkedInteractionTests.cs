@@ -585,6 +585,7 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
     [InlineData("US/Eastern", false)]
     [InlineData("UTC", false)]
     [InlineData("GMT", false)]
+    [InlineData("+02:00", false)]
     [InlineData("Romance Standard Time", false)]
     [InlineData("europe/brussels", false)]
     [InlineData(" Europe/Brussels", false)]
@@ -625,6 +626,15 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
         var privateBeneficiary = "B2-private-beneficiary-" + suffix;
         var privateHeader = "synthetic-b2-header-" + suffix;
         var seed = await Seed(org, actor, privateBeneficiary);
+        string[] actualBeneficiaryPersonal;
+        await using (var seedDb = Context(org))
+        {
+            var actualSeed = await seedDb.Clients.SingleAsync(c => c.Id == seed.ClientId);
+            actualBeneficiaryPersonal = new[] { actualSeed.FirstName, actualSeed.LastName, actualSeed.FullName, actualSeed.Ssn };
+            Assert.True(actualBeneficiaryPersonal.All(value => !string.IsNullOrWhiteSpace(value))
+                && actualBeneficiaryPersonal.Distinct(StringComparer.Ordinal).Count() == 4,
+                "Privacy detectors must bind distinct actual synthetic beneficiary name and NISS values.");
+        }
         var access = Grant(subject, org, actor, scenario == "denied" ? "Clients.ViewAll" : "Clients.EditAll");
         using var capture = new PrivacyCapture();
         var transport = new AuthorityTransport(org, actor, scenario == "authority-failure" ? "dependency-auth" : "success");
@@ -635,11 +645,11 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", privateHeader);
         var body = Payload(actor, note: privateNote, purpose: privatePurpose);
         var forbidden = new[] { privateNote, privatePurpose, privateBeneficiary, privateHeader,
-            "synthetic-service-token", body };
+            "synthetic-service-token", body }.Concat(actualBeneficiaryPersonal).ToArray();
         var target = scenario == "hidden" ? int.MaxValue : seed.ClientId;
         if (scenario is "replay" or "conflict")
             Assert.Equal(HttpStatusCode.Created, (await Post(client, target, body)).StatusCode);
-        var request = scenario == "conflict" ? body.Replace(privatePurpose, privatePurpose + "-changed")
+        var request = scenario == "conflict" ? body.Replace(privateNote, privateNote + "-changed").Replace(privatePurpose, privatePurpose + "-changed")
             : scenario == "malformed" ? body[..^1] + ",\"unknown\":true}" : body;
         var response = await Post(client, target, request);
         var expected = scenario switch
@@ -666,6 +676,15 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
         var seedClient = await db.Clients.SingleAsync();
         await db.Interactions.LoadAsync(); await db.FollowUpActions.LoadAsync();
         await db.ActionChanges.LoadAsync(); await db.IdempotencyReceipts.LoadAsync();
+        if (rows == 1)
+        {
+            Assert.True(StringComparer.Ordinal.Equals(privateNote, db.Interactions.Local.Single().Note),
+                "Committed creation/replay/conflict must preserve the same original private note input.");
+            Assert.True(StringComparer.Ordinal.Equals(privatePurpose, db.FollowUpActions.Local.Single().Purpose),
+                "Committed creation/replay/conflict must preserve the same original private purpose input.");
+        }
+        output.WriteLine("B2 F1 controls: actual_beneficiary_name_niss_bound=true; committed_business_rows=" + rows
+            + "; original_note_purpose_checked=" + (rows == 1).ToString().ToLowerInvariant());
         // Inspect actual structural audit columns only. Business Note/Purpose and the
         // protected RecordMetadata receipt payload intentionally remain persisted.
         var audit = db.ChangeTracker.Entries().SelectMany(entry => entry.Properties
@@ -962,6 +981,11 @@ public sealed class LinkedInteractionTests(PostgreSqlClientRuntimeDatabase datab
         var client = ClientManagement.Tests.Common.SyntheticClient.Create(
             ClientManagement.Tests.Common.SyntheticClient.Niss(sequence: Interlocked.Increment(ref sequence)));
         client.ReferenceNumber = privateReference ?? $"b2-{Guid.NewGuid():N}";
+        if (privateReference is not null)
+        {
+            client.FirstName = "B2-private-first-" + Guid.NewGuid().ToString("N");
+            client.LastName = "B2-private-last-" + Guid.NewGuid().ToString("N");
+        }
         var worker = new SocialWorker();
         worker.ApplyProjection(actor, 1, Guid.NewGuid(), true, "Synthetic", "Worker",
             Guid.NewGuid().ToString("N"), "Team", "T");
