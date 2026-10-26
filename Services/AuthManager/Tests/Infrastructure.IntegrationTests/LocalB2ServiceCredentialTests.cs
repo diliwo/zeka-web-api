@@ -133,11 +133,6 @@ public sealed class LocalB2ServiceCredentialTests
 
     private static async Task Prepare(Run run)
     {
-        using var signing = run.SigningKey();
-        using var certificate = run.ProducerCertificate();
-        using var ca = run.RootCertificate();
-        Demand(signing.KeySize >= 2048 && certificate.HasPrivateKey, "H1_KEY_CONTRACT");
-        Demand(certificate.NotAfter.ToUniversalTime() > DateTime.UtcNow, "H1_CERTIFICATE_EXPIRED");
         run.CheckTokenDirectory();
         Demand(!File.Exists(run.StopFile) && !File.Exists(run.TokenFile), "H1_OWNERSHIP_COLLISION");
         await AtomicWrite(run.TokenFile, Encoding.ASCII.GetBytes(Marker), run);
@@ -170,6 +165,11 @@ public sealed class LocalB2ServiceCredentialTests
                     IsExplicitNoneLogsFailure(SafeAscii(logs.Error));
                 Demand(empty || unsupported, "H1_LOGGING_GATE");
             }
+            using var signing = run.SigningKey();
+            using var certificate = run.ProducerCertificate();
+            using var ca = run.RootCertificate();
+            Demand(signing.KeySize >= 2048 && certificate.HasPrivateKey, "H1_KEY_CONTRACT");
+            Demand(certificate.NotAfter.ToUniversalTime() > DateTime.UtcNow, "H1_CERTIFICATE_EXPIRED");
             await WriteState(run, new State { ProbeId = id, MarkerPassed = true, Producer = "not-started" });
             Console.WriteLine("H1_MARKER_LOGGING_GATE_PASSED");
         }
@@ -244,6 +244,11 @@ public sealed class LocalB2ServiceCredentialTests
 
     private static async Task Authority(Run run)
     {
+        var state = ReadState(run);
+        Demand(state.MarkerPassed && !state.ProbeRemoved && IsContainerId(state.ProbeId) &&
+            state.Producer == "listening", "H1_MARKER_REQUIRED");
+        await Inspect(run, state.ProbeId, first: false);
+        Demand(DeliveryAdmitted(run), "H1_DELIVERY_ADMISSION_REQUIRED");
         using var key = run.SigningKey();
         using var client = run.AuthClient();
         foreach (var kind in new[] { "valid", "issuer", "audience", "subject", "signature",
