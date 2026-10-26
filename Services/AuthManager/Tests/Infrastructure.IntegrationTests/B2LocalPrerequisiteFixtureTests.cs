@@ -254,7 +254,7 @@ public sealed class B2LocalPrerequisiteFixtureTests
         // Ephemeral TEST trust is local to this process. It is never enrolled in the application.
         using var rsa = RSA.Create(3072);
         var signingKey = new RsaSecurityKey(rsa) { KeyId = "TEST-only-" + run.RunId };
-        await run.WritePrivate("AuthWriter/ephemeral-test-signing.pem", rsa.ExportRSAPrivateKeyPem(), token, replace: false);
+        await run.WritePrivate("Auth/Writer/ephemeral-test-signing.pem", rsa.ExportRSAPrivateKeyPem(), token, replace: false);
         foreach (var organisationId in allowed)
         {
             await using var database = new AuthDbContext(Options(connection!));
@@ -282,7 +282,7 @@ public sealed class B2LocalPrerequisiteFixtureTests
             var compact = new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(claims: claims,
                 notBefore: now.AddSeconds(-1).UtcDateTime, expires: now.AddMinutes(2).UtcDateTime,
                 signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256)));
-            await run.WritePrivate($"AuthWriter/{organisationId:D}-approval.json",
+            await run.WritePrivate($"Auth/Writer/{organisationId:D}-approval.json",
                 new { testOnly = true, command, proof, ownerJws = compact }, token, replace: false);
             var verifier = new ConfigureTimeZoneApprovalVerifier(new Dictionary<string, SecurityKey>
                 { [signingKey.KeyId] = new RsaSecurityKey(rsa.ExportParameters(false)) }, TimeProvider.System);
