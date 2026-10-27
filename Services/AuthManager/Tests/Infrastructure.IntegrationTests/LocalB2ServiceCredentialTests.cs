@@ -173,12 +173,12 @@ public sealed class LocalB2ServiceCredentialTests
             await WriteState(run, new State { ProbeId = id, MarkerPassed = true, Producer = "not-started" });
             Console.WriteLine("H1_MARKER_LOGGING_GATE_PASSED");
         }
-        catch
+        catch (Exception failure)
         {
-            if (id is not null) await RemoveProbe(run, id);
-            RemoveOwnedFile(run, run.TokenFile);
-            RemoveOwnedFile(run, run.StopFile);
-            throw;
+            await Cleanup(failure, Console.WriteLine,
+                ("H1_PROBE_CLEANUP_UNVERIFIED", async () => { if (id is not null) await RemoveProbe(run, id); }),
+                ("H1_TOKEN_CLEANUP_UNVERIFIED", () => RemoveToken(run)),
+                ("H1_STATE_CLEANUP_UNVERIFIED", () => { RemoveOwnedFile(run, run.StopFile); return Task.CompletedTask; }));
         }
     }
 
@@ -213,6 +213,7 @@ public sealed class LocalB2ServiceCredentialTests
         await WriteState(run, state with { Producer = "listening" });
         var started = DateTimeOffset.UtcNow;
         var next = DateTimeOffset.MinValue;
+        Exception? failure = null;
         try
         {
             while (DateTimeOffset.UtcNow - started < TimeSpan.FromMinutes(150))
@@ -234,11 +235,19 @@ public sealed class LocalB2ServiceCredentialTests
                 await Task.Delay(250);
             }
         }
+        catch (Exception error) { failure = error; }
         finally
         {
-            using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await app.StopAsync(stop.Token);
-            await WriteState(run, state with { Producer = "stopped" });
+            var stopped = false;
+            await Cleanup(failure, Console.WriteLine,
+                ("H1_PRODUCER_CLEANUP_UNVERIFIED", async () =>
+                {
+                    using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await app.StopAsync(stop.Token);
+                    stopped = true;
+                }),
+                ("H1_STATE_CLEANUP_UNVERIFIED", () => WriteState(run,
+                    state with { Producer = stopped ? "stopped" : "stop-unverified" })));
         }
     }
 
@@ -266,6 +275,7 @@ public sealed class LocalB2ServiceCredentialTests
         Demand(state.MarkerPassed && IsContainerId(state.ProbeId), "H1_MARKER_REQUIRED");
         var id = state.ProbeId;
         byte[]? last = null;
+        Exception? failure = null;
         using var client = run.AuthClient();
         try
         {
@@ -321,36 +331,162 @@ public sealed class LocalB2ServiceCredentialTests
             await InspectExit(run, id, 42);
             await UnreadableRead(run, id);
         }
+        catch (Exception error) { failure = error; }
         finally
         {
             if (last is not null) CryptographicOperations.ZeroMemory(last);
-            await RequestStop(run);
-            await WaitStopped(run);
-            await RemoveProbe(run, id);
-            RemoveOwnedFile(run, run.TokenFile);
-            await WriteState(run, state with { Producer = "stopped", ProbeRemoved = true });
+            var stopped = false;
+            var removed = false;
+            await Cleanup(failure, Console.WriteLine,
+                ("H1_PRODUCER_REQUEST_CLEANUP_UNVERIFIED", () => RequestStop(run)),
+                ("H1_PRODUCER_CLEANUP_UNVERIFIED", async () => { await WaitStopped(run); stopped = true; }),
+                ("H1_PROBE_CLEANUP_UNVERIFIED", async () => { await RemoveProbe(run, id); removed = true; }),
+                ("H1_TOKEN_CLEANUP_UNVERIFIED", () => RemoveToken(run)),
+                ("H1_STATE_CLEANUP_UNVERIFIED", () =>
+                {
+                    Demand(stopped, "H1_PRODUCER_CLEANUP_UNVERIFIED");
+                    return WriteState(run, state with { Producer = "stopped", ProbeRemoved = removed });
+                }));
         }
     }
 
     private static async Task Stop(Run run)
     {
-        await RequestStop(run);
-        await WaitStopped(run);
-        var state = ReadState(run);
-        Demand(IsContainerId(state.ProbeId), "H1_PROBE_ID");
-        if (state.ProbeRemoved)
-        {
-            using var absent = await Docker(run, TimeSpan.FromSeconds(5), "container", "inspect",
-                "--format", "{{json .}}", state.ProbeId);
-            Demand(absent.ExitCode != 0 && absent.Output.Length == 0 &&
-                SafeAscii(absent.Error).Contains("No such", StringComparison.OrdinalIgnoreCase),
-                "H1_CLEANUP_VERIFY");
-        }
-        else await RemoveProbe(run, state.ProbeId);
-        RemoveOwnedFile(run, run.TokenFile);
-        RemoveOwnedFile(run, run.StopFile);
+        State? state = null;
+        Exception? failure = null;
+        try { state = ReadState(run); }
+        catch (Exception error) { failure = error; }
+        var stopped = false;
+        var removed = false;
+        var tokenRemoved = false;
+        await Cleanup(failure, Console.WriteLine,
+            ("H1_PRODUCER_REQUEST_CLEANUP_UNVERIFIED", () => RequestStop(run)),
+            ("H1_PRODUCER_CLEANUP_UNVERIFIED", async () => { await WaitStopped(run); stopped = true; }),
+            ("H1_PROBE_CLEANUP_UNVERIFIED", async () =>
+            {
+                Demand(state is not null && IsContainerId(state.ProbeId), "H1_PROBE_ID");
+                if (state!.ProbeRemoved)
+                {
+                    using var absent = await Docker(run, TimeSpan.FromSeconds(5), "container", "inspect",
+                        "--format", "{{json .}}", state.ProbeId);
+                    Demand(absent.ExitCode != 0 && absent.Output.Length == 0 &&
+                        SafeAscii(absent.Error).Contains("No such", StringComparison.OrdinalIgnoreCase),
+                        "H1_CLEANUP_VERIFY");
+                }
+                else await RemoveProbe(run, state.ProbeId);
+                removed = true;
+            }),
+            ("H1_TOKEN_CLEANUP_UNVERIFIED", async () => { await RemoveToken(run); tokenRemoved = true; }),
+            ("H1_STATE_CLEANUP_UNVERIFIED", () =>
+            {
+                Demand(stopped && removed && tokenRemoved, "H1_CLEANUP_UNVERIFIED");
+                RemoveOwnedFile(run, run.StopFile);
+                return Task.CompletedTask;
+            }));
     }
 
+    private static Task RemoveToken(Run run) => Cleanup(null, Console.WriteLine,
+        ("H1_TOKEN_FILE_CLEANUP_UNVERIFIED", () =>
+        {
+            RemoveOwnedFile(run, run.TokenFile);
+            Demand(!File.Exists(run.TokenFile), "H1_TOKEN_FILE_CLEANUP_UNVERIFIED");
+            return Task.CompletedTask;
+        }),
+        ("H1_TOKEN_TEMP_CLEANUP_UNVERIFIED", () =>
+        {
+            var temporary = run.TokenFile + "." + run.RunId + ".tmp";
+            RemoveOwnedFile(run, temporary);
+            Demand(!File.Exists(temporary), "H1_TOKEN_TEMP_CLEANUP_UNVERIFIED");
+            return Task.CompletedTask;
+        }));
+
+    private static async Task Cleanup(Exception? firstFailure, Action<string> report,
+        params (string FailureCode, Func<Task> Action)[] steps)
+    {
+        var firstCode = firstFailure is H1Failure admitted ? admitted.Message :
+            firstFailure is null ? null : "H1_OPERATION_FAILED";
+        foreach (var step in steps)
+        {
+            try { await step.Action(); }
+            catch
+            {
+                firstCode ??= step.FailureCode;
+                // A closed/broken diagnostic sink must not skip owned cleanup.
+                try { report(step.FailureCode); }
+                catch { }
+            }
+        }
+        if (firstCode is not null) throw new H1Failure(firstCode);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Cleanup_continues_after_producer_and_probe_failures_without_private_diagnostics(bool stopFails)
+    {
+        var calls = new List<string>();
+        var outcomes = new List<string>();
+        var error = await Assert.ThrowsAsync<H1Failure>(() => Cleanup(null, outcomes.Add,
+            ("H1_PRODUCER_REQUEST_CLEANUP_UNVERIFIED", () =>
+            {
+                calls.Add("stop");
+                return stopFails ? Task.FromException(new Exception("synthetic-private-stop")) : Task.CompletedTask;
+            }),
+            ("H1_PRODUCER_CLEANUP_UNVERIFIED", () =>
+            { calls.Add("confirm"); return Task.FromException(new Exception("synthetic-private-confirm")); }),
+            ("H1_PROBE_CLEANUP_UNVERIFIED", () =>
+            { calls.Add("probe"); return Task.FromException(new Exception("synthetic-private-probe")); }),
+            ("H1_TOKEN_CLEANUP_UNVERIFIED", () => { calls.Add("token"); return Task.CompletedTask; })));
+        Assert.Equal(new[] { "stop", "confirm", "probe", "token" }, calls);
+        Assert.Equal(stopFails ? "H1_PRODUCER_REQUEST_CLEANUP_UNVERIFIED" :
+            "H1_PRODUCER_CLEANUP_UNVERIFIED", error.Message);
+        Assert.Contains("H1_PRODUCER_CLEANUP_UNVERIFIED", outcomes);
+        Assert.Contains("H1_PROBE_CLEANUP_UNVERIFIED", outcomes);
+        Assert.All(outcomes, outcome => Assert.DoesNotContain("synthetic-private", outcome));
+        Assert.DoesNotContain("synthetic-private", error.ToString());
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public async Task Cleanup_preserves_original_fixed_failure_while_reporting_later_cleanup_failures()
+    {
+        var outcomes = new List<string>();
+        var tokenRemoved = false;
+        var error = await Assert.ThrowsAsync<H1Failure>(() => Cleanup(new H1Failure("H1_SERVICE_VALIDATOR"),
+            outcomes.Add,
+            ("H1_PROBE_CLEANUP_UNVERIFIED", () => Task.FromException(new Exception("synthetic-private-probe"))),
+            ("H1_TOKEN_CLEANUP_UNVERIFIED", () => { tokenRemoved = true; return Task.CompletedTask; })));
+        Assert.True(tokenRemoved);
+        Assert.Equal("H1_SERVICE_VALIDATOR", error.Message);
+        Assert.Equal(new[] { "H1_PROBE_CLEANUP_UNVERIFIED" }, outcomes);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public async Task Cleanup_continues_when_fixed_outcome_reporting_fails()
+    {
+        var calls = new List<string>();
+        var attemptedOutcomes = new List<string>();
+        var error = await Assert.ThrowsAsync<H1Failure>(() => Cleanup(
+            new H1Failure("H1_SERVICE_VALIDATOR"),
+            code =>
+            {
+                attemptedOutcomes.Add(code);
+                throw new IOException("synthetic-private-report");
+            },
+            ("H1_PRODUCER_CLEANUP_UNVERIFIED", () =>
+            { calls.Add("producer"); return Task.FromException(new IOException("synthetic-private-stop")); }),
+            ("H1_PROBE_CLEANUP_UNVERIFIED", () =>
+            { calls.Add("probe"); return Task.FromException(new IOException("synthetic-private-probe")); }),
+            ("H1_TOKEN_CLEANUP_UNVERIFIED", () =>
+            { calls.Add("token"); return Task.CompletedTask; })));
+        Assert.Equal(new[] { "producer", "probe", "token" }, calls);
+        Assert.Equal(new[] { "H1_PRODUCER_CLEANUP_UNVERIFIED", "H1_PROBE_CLEANUP_UNVERIFIED" },
+            attemptedOutcomes);
+        Assert.Equal("H1_SERVICE_VALIDATOR", error.Message);
+        Assert.DoesNotContain("synthetic-private", error.ToString());
+        Assert.Null(error.InnerException);
+    }
     private static async Task NegativeRead(Run run, string id, byte[]? bytes, int exit, bool oversized = false)
     {
         if (bytes is not null) await AtomicWrite(run.TokenFile, bytes, run);
@@ -740,7 +876,7 @@ public sealed class LocalB2ServiceCredentialTests
         var until = DateTimeOffset.UtcNow.AddSeconds(10);
         while (DateTimeOffset.UtcNow < until)
         {
-            if (!File.Exists(run.StopFile)) return;
+            Demand(File.Exists(run.StopFile), "H1_PRODUCER_CLEANUP_UNVERIFIED");
             try { if (ReadState(run).Producer is "stopped" or "not-started") return; }
             catch (H1Failure) { }
             catch (JsonException) { }

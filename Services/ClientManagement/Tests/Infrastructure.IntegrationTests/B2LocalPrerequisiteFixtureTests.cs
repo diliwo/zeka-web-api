@@ -37,6 +37,54 @@ public sealed class B2LocalPrerequisiteFixtureTests
         Assert.Throws<InvalidOperationException>(() => B2FixtureManifest.Selected("Initialize", "unapproved"));
     }
 
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("Production", null)]
+    [InlineData(null, "Production")]
+    [InlineData("Development", "Production")]
+    [InlineData("Production", "Development")]
+    [InlineData("", "Development")]
+    [InlineData("Development", "")]
+    public void Missing_or_conflicting_process_Development_fails_before_io(
+        string? dotnetEnvironment, string? aspnetcoreEnvironment)
+    {
+        var requested = new List<string>();
+        var failure = Assert.Throws<InvalidOperationException>(() => B2FixtureManifest.Load("client", variable =>
+        {
+            requested.Add(variable);
+            return variable switch
+            {
+                "DOTNET_ENVIRONMENT" => dotnetEnvironment,
+                "ASPNETCORE_ENVIRONMENT" => aspnetcoreEnvironment,
+                _ => throw new InvalidOperationException("NONSECRET_PRIVATE_INPUT_BARRIER")
+            };
+        }));
+        Assert.Equal("B2 helpers require explicit Development process activation.", failure.Message);
+        Assert.Equal(new[] { "DOTNET_ENVIRONMENT", "ASPNETCORE_ENVIRONMENT" }, requested);
+    }
+
+    [Theory]
+    [InlineData("Development", null)]
+    [InlineData(null, "Development")]
+    [InlineData("Development", "Development")]
+    public void Explicit_process_Development_is_admitted_without_io(
+        string? dotnetEnvironment, string? aspnetcoreEnvironment)
+    {
+        var requested = new List<string>();
+        var failure = Assert.Throws<InvalidOperationException>(() => B2FixtureManifest.Load("client", variable =>
+        {
+            requested.Add(variable);
+            return variable switch
+            {
+                "DOTNET_ENVIRONMENT" => dotnetEnvironment,
+                "ASPNETCORE_ENVIRONMENT" => aspnetcoreEnvironment,
+                _ => throw new InvalidOperationException("NONSECRET_PRIVATE_INPUT_BARRIER")
+            };
+        }));
+        Assert.Equal("NONSECRET_PRIVATE_INPUT_BARRIER", failure.Message);
+        Assert.Equal(new[] { "DOTNET_ENVIRONMENT", "ASPNETCORE_ENVIRONMENT", "ZEKA_B2_MANIFEST" }, requested);
+    }
+
     [Fact]
     public void Exact_Development_target_is_admitted_without_io()
     {
@@ -325,15 +373,21 @@ internal sealed class B2FixtureManifest
             throw new InvalidOperationException("B2 target mismatch.");
     }
 
-    internal static B2FixtureManifest Load(string service)
+    internal static void RequireDevelopmentEnvironment(string? dotnetEnvironment, string? aspnetcoreEnvironment)
     {
-        foreach (var variable in new[] { "DOTNET_ENVIRONMENT", "ASPNETCORE_ENVIRONMENT" })
-        {
-            var environment = Environment.GetEnvironmentVariable(variable);
-            if (environment is not null && environment != "Development")
-                throw new InvalidOperationException("B2 helpers reject non-Development process environments.");
-        }
-        var path = Environment.GetEnvironmentVariable("ZEKA_B2_MANIFEST")
+        if ((dotnetEnvironment is null && aspnetcoreEnvironment is null)
+            || (dotnetEnvironment is not null && dotnetEnvironment != "Development")
+            || (aspnetcoreEnvironment is not null && aspnetcoreEnvironment != "Development"))
+            throw new InvalidOperationException("B2 helpers require explicit Development process activation.");
+    }
+
+    internal static B2FixtureManifest Load(string service) => Load(service, Environment.GetEnvironmentVariable);
+
+    internal static B2FixtureManifest Load(string service, Func<string, string?> environment)
+    {
+        RequireDevelopmentEnvironment(environment("DOTNET_ENVIRONMENT"),
+            environment("ASPNETCORE_ENVIRONMENT"));
+        var path = environment("ZEKA_B2_MANIFEST")
             ?? throw new InvalidOperationException("An explicit B2 manifest is required.");
         var fullManifest = Path.GetFullPath(path);
         var privateBase = Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Zeka", "B2"));
@@ -349,7 +403,7 @@ internal sealed class B2FixtureManifest
         }
         var document = JsonNode.Parse(File.ReadAllText(fullManifest))?.AsObject()
             ?? throw new InvalidOperationException("Invalid B2 manifest.");
-        ValidateTarget(document, Environment.GetEnvironmentVariable("ZEKA_B2_SOURCE_COMMIT") ?? "");
+        ValidateTarget(document, environment("ZEKA_B2_SOURCE_COMMIT") ?? "");
         var run = document["runId"]?.GetValue<string>() ?? "";
         if (!System.Text.RegularExpressions.Regex.IsMatch(run, "^[A-Za-z0-9][A-Za-z0-9_-]{7,95}$"))
             throw new InvalidOperationException("Invalid B2 run identity.");
