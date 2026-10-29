@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using AdminAreaManagement.API;
 using AdminAreaManagement.API.Services;
 using Zeka.Extensions.MultiTenancy.AspNetCore;
@@ -32,23 +30,9 @@ builder.Services.AddRabbitMqEventBus(builder.Configuration)
 builder.Services.AddControllers();
 
 
-if (builder.Environment.IsEnvironment("LocalStack")) builder.Services.AddHealthChecks();
+LocalStackHealth.Add(builder);
 var app = builder.Build();
-if (app.Environment.IsEnvironment("LocalStack"))
-{
-    // Internal status-only probes run before business authentication/transport middleware.
-    app.UseHealthChecks("/health/live", new HealthCheckOptions
-    {
-        Predicate = _ => false,
-        ResponseWriter = (_, _) => Task.CompletedTask
-    });
-    app.UseHealthChecks("/health/ready", new HealthCheckOptions
-    {
-        Predicate = registration => registration.Tags.Contains("ready"),
-        ResultStatusCodes = { [HealthStatus.Degraded] = StatusCodes.Status503ServiceUnavailable },
-        ResponseWriter = (_, _) => Task.CompletedTask
-    });
-}
+app.UseLocalStackHealth();
 
 //app.UseMigrationsAndSeed();
 
