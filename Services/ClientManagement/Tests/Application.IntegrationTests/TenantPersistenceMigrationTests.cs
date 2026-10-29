@@ -19,11 +19,51 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
     public Task DisposeAsync() => _postgres.DisposeAsync().AsTask();
 
     [Fact]
-    public async Task Missing_mapping_table_blocks_migration_without_schema_changes()
+    public async Task Empty_initial_database_migrates_without_mapping_and_preserves_tenant_constraints()
     {
         await using var context = await CreateContextAsync();
         var migrator = context.GetService<IMigrator>();
         await migrator.MigrateAsync("20250425093851_Initial Migration");
+
+        await migrator.MigrateAsync("20260904124417_OrganisationTenantConstraints");
+
+        (await ScalarAsync<bool>(context,
+            """SELECT to_regclass('public."__OrganisationTenantMap"') IS NULL"""))
+            .Should().BeTrue();
+        (await ScalarAsync<long>(context, """
+            SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = 'public' AND column_name = 'OrganisationId' AND is_nullable = 'NO'
+              AND table_name IN ('SocialWorkers', 'SocialCases', 'SchoolRegistrations', 'ProfessionnalExperience',
+                'ProfessionalAssessments', 'MonitoringReports', 'Clients', 'Assessments')
+            """))
+            .Should().Be(8);
+        (await ScalarAsync<long>(context, """
+            SELECT count(*) FROM pg_constraint
+            WHERE conname IN (
+              'FK_MonitoringReports_Clients_ClientId_OrganisationId',
+              'FK_SocialCases_Clients_ClientId_OrganisationId',
+              'FK_SocialCases_SocialWorkers_SocialWorkerId_OrganisationId')
+            """))
+            .Should().Be(3);
+        (await ScalarAsync<bool>(context,
+            """SELECT indisunique FROM pg_index WHERE indexrelid = 'public."IX_Clients_OrganisationId_ReferenceNumber"'::regclass"""))
+            .Should().BeTrue();
+        (await ScalarAsync<bool>(context,
+            "SELECT NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE column_name = 'TenantName' AND table_schema = 'public')"))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Missing_mapping_table_with_legacy_rows_blocks_migration_without_schema_changes()
+    {
+        await using var context = await CreateContextAsync();
+        var migrator = context.GetService<IMigrator>();
+        await migrator.MigrateAsync("20250425093851_Initial Migration");
+        await context.Database.ExecuteSqlRawAsync("""
+            INSERT INTO "SocialWorkers"
+                ("FirstName", "LastName", "UserName", "TeamName", "TeamAcronym", "CreatedBy", "Created", "LastModifiedBy", "TenantName", "Softdelete")
+            VALUES ('Ada', 'Lovelace', 'ada', 'Support', 'SUP', 'test', now(), '', 'Legacy', false)
+            """);
 
         var migration = () => migrator.MigrateAsync("20260904124417_OrganisationTenantConstraints");
 
@@ -32,6 +72,20 @@ public sealed class TenantPersistenceMigrationTests : IAsyncLifetime
         (await ScalarAsync<bool>(context,
             "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'SocialWorkers' AND column_name = 'TenantName')"))
             .Should().BeTrue();
+        (await ScalarAsync<long>(context, """
+            SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = 'public' AND column_name = 'OrganisationId'
+              AND table_name IN ('SocialWorkers', 'SocialCases', 'SchoolRegistrations', 'ProfessionnalExperience',
+                'ProfessionalAssessments', 'MonitoringReports', 'Clients', 'Assessments')
+            """))
+            .Should().Be(0);
+        (await ScalarAsync<long>(context, """
+            SELECT count(*) FROM "SocialWorkers"
+            """))
+            .Should().Be(1);
+        (await ScalarAsync<string>(context,
+            """SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId" DESC LIMIT 1"""))
+            .Should().Be("20250425093851_Initial Migration");
     }
 
     [Fact]
