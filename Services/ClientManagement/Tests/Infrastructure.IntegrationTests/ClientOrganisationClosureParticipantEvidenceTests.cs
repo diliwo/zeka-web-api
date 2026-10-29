@@ -276,15 +276,19 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
                 Header(Guid.NewGuid(), organisation, Guid.NewGuid(), Guid.NewGuid()), DateTimeOffset.UtcNow)));
         await Task.Delay(150);
         Assert.False(enterTask.IsCompleted);
+        var beforeCommitAt = LifecycleContractTimeV1.Normalize(DateTimeOffset.UtcNow);
         await transaction.CommitAsync();
-        var preBoundaryCommittedAt = DateTimeOffset.UtcNow;
         var completed = await enterTask;
-        Assert.True(completed.BoundaryEstablishedAt >= preBoundaryCommittedAt,
-            $"Boundary {completed.BoundaryEstablishedAt:O} preceded committed ordinary work {preBoundaryCommittedAt:O}.");
+        Assert.True(completed.BoundaryEstablishedAt >= beforeCommitAt,
+            $"Boundary {completed.BoundaryEstablishedAt:O} preceded pre-commit lower bound {beforeCommitAt:O}.");
 
         Assert.Equal(1, await CountRows("Clients", organisation));
-        await Assert.ThrowsAsync<PostgresException>(() => RuntimeSql(organisation,
+        Assert.Equal("pre-boundary", await ReadClientReferenceNumber(organisation));
+        var blocked = await Assert.ThrowsAsync<PostgresException>(() => RuntimeSql(organisation,
             "UPDATE public.\"Clients\" SET \"ReferenceNumber\" = 'post-boundary'"));
+        Assert.Equal("P0001", blocked.SqlState);
+        Assert.Equal("organisation_closure_fence_active", blocked.MessageText);
+        Assert.Equal("pre-boundary", await ReadClientReferenceNumber(organisation));
     }
 
     [Fact]
@@ -618,6 +622,19 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
             $"SELECT count(*) FROM public.\"{table}\" WHERE \"OrganisationId\" = @organisation", connection, transaction);
         command.Parameters.AddWithValue("organisation", organisation);
         return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<string> ReadClientReferenceNumber(Guid organisation)
+    {
+        await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await SetContext(connection, transaction, organisation);
+        await using var command = new NpgsqlCommand(
+            "SELECT \"ReferenceNumber\" FROM public.\"Clients\" WHERE \"OrganisationId\" = @organisation",
+            connection, transaction);
+        command.Parameters.AddWithValue("organisation", organisation);
+        return Assert.IsType<string>(await command.ExecuteScalarAsync());
     }
 
     private async Task<IReadOnlyDictionary<string, TableDigest>> SnapshotOwnedTables(Guid organisation)
