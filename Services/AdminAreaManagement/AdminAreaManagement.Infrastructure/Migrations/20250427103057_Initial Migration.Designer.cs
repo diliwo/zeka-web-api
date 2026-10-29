@@ -493,47 +493,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.HasIndex("TeamId");
 
                     b.ToTable("StaffMembers");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            CreatedBy = "",
-                            FirstName = "John",
-                            LastModifiedBy = "",
-                            LastName = "Doe",
-                            Softdelete = false,
-                            TeamId = 1,
-                            TenantName = "Zeka",
-                            UserName = "Cambridge"
-                        },
-                        new
-                        {
-                            Id = 2,
-                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            CreatedBy = "",
-                            FirstName = "Helen",
-                            LastModifiedBy = "",
-                            LastName = "Ripley",
-                            Softdelete = false,
-                            TeamId = 3,
-                            TenantName = "Zeka",
-                            UserName = "hripley"
-                        },
-                        new
-                        {
-                            Id = 3,
-                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            CreatedBy = "",
-                            FirstName = "Adama",
-                            LastModifiedBy = "",
-                            LastName = "Rezegova",
-                            Softdelete = false,
-                            TeamId = 2,
-                            TenantName = "Zeka",
-                            UserName = "Cambridge"
-                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.Team", b =>
@@ -578,41 +537,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Teams");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            Acronym = "SES",
-                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            CreatedBy = "",
-                            LastModifiedBy = "",
-                            Name = "School & Education Service",
-                            Softdelete = false,
-                            TenantName = "Zeka"
-                        },
-                        new
-                        {
-                            Id = 2,
-                            Acronym = "IS",
-                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            CreatedBy = "",
-                            LastModifiedBy = "",
-                            Name = "Imigration Service",
-                            Softdelete = false,
-                            TenantName = "Zeka"
-                        },
-                        new
-                        {
-                            Id = 3,
-                            Acronym = "SPI",
-                            Created = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            CreatedBy = "",
-                            LastModifiedBy = "",
-                            Name = "Socio-Professional Integration Service",
-                            Softdelete = false,
-                            TenantName = "Zeka"
-                        });
                 });
 
             modelBuilder.Entity("AdminAreaManagement.Core.Entities.Training", b =>

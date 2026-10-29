@@ -79,7 +79,11 @@ namespace AdminAreaManagement.Infrastructure.Migrations
 
             migrationBuilder.Sql("""
                 DO $$ BEGIN
-                    IF to_regclass('public."__OrganisationTenantMap"') IS NULL THEN
+                    IF to_regclass('public."__OrganisationTenantMap"') IS NULL AND (
+                        EXISTS (SELECT 1 FROM "Teams") OR EXISTS (SELECT 1 FROM "StaffMembers")
+                        OR EXISTS (SELECT 1 FROM "Partners") OR EXISTS (SELECT 1 FROM "DocumentPartners")
+                        OR EXISTS (SELECT 1 FROM "Emails") OR EXISTS (SELECT 1 FROM "ContactPersons")
+                    ) THEN
                         RAISE EXCEPTION 'Create and validate __OrganisationTenantMap(TenantName text, OrganisationId uuid) before applying this migration.';
                     END IF;
                 END $$;
@@ -91,12 +95,16 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                 ALTER TABLE "Emails" ADD COLUMN "OrganisationId" uuid;
                 ALTER TABLE "ContactPersons" ADD COLUMN "OrganisationId" uuid;
 
-                UPDATE "Teams" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "StaffMembers" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "Partners" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "DocumentPartners" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "Emails" child SET "OrganisationId" = parent."OrganisationId" FROM "Partners" parent WHERE child."PartnerId" = parent."Id";
-                UPDATE "ContactPersons" child SET "OrganisationId" = parent."OrganisationId" FROM "Partners" parent WHERE child."PartnerId" = parent."Id";
+                DO $tenant_backfill$ BEGIN
+                    IF to_regclass('public."__OrganisationTenantMap"') IS NOT NULL THEN
+                        UPDATE "Teams" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "StaffMembers" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "Partners" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "DocumentPartners" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "Emails" child SET "OrganisationId" = parent."OrganisationId" FROM "Partners" parent WHERE child."PartnerId" = parent."Id";
+                        UPDATE "ContactPersons" child SET "OrganisationId" = parent."OrganisationId" FROM "Partners" parent WHERE child."PartnerId" = parent."Id";
+                    END IF;
+                END $tenant_backfill$;
 
                 DO $$ BEGIN
                     IF EXISTS (
@@ -461,16 +469,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                 });
 
             migrationBuilder.InsertData(
-                table: "Teams",
-                columns: new[] { "Id", "Acronym", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
-                values: new object[,]
-                {
-                    { 1, "SES", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "School & Education Service", false, "Zeka" },
-                    { 2, "IS", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Imigration Service", false, "Zeka" },
-                    { 3, "SPI", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Socio-Professional Integration Service", false, "Zeka" }
-                });
-
-            migrationBuilder.InsertData(
                 table: "TrainingFields",
                 columns: new[] { "TrainingFieldId", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
                 values: new object[,]
@@ -488,16 +486,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Bachelor", false, "Zeka" },
                     { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Master", false, "Zeka" },
                     { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Master of Business Administration", false, "Zeka" }
-                });
-
-            migrationBuilder.InsertData(
-                table: "StaffMembers",
-                columns: new[] { "Id", "Created", "CreatedBy", "FirstName", "LastModified", "LastModifiedBy", "LastName", "Softdelete", "TeamId", "TenantName", "UserName" },
-                values: new object[,]
-                {
-                    { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", "John", null, "", "Doe", false, 1, "Zeka", "Cambridge" },
-                    { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", "Helen", null, "", "Ripley", false, 3, "Zeka", "hripley" },
-                    { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", "Adama", null, "", "Rezegova", false, 2, "Zeka", "Cambridge" }
                 });
 
             migrationBuilder.InsertData(
