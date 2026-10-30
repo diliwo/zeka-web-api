@@ -954,7 +954,7 @@ jobs:
             /d:sonar.pullrequest.base="${SONAR_PR_BASE}" \
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
-            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1" \
+            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
@@ -968,27 +968,37 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
 
+          base = Path.cwd()
           namespace = {"s": "http://www.sonarsource.com/msbuild/integration/2015/1"}
-          script = (Path.cwd() / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve()
-          project = (Path.cwd() / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj").resolve()
-          if not script.is_relative_to(project.parent):
-              raise SystemExit("Configuration assertions must physically belong to the test project.")
-          owners = set()
+          script_projects = {
+              (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve():
+                  (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj").resolve(),
+              **{
+                  (base / "Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration" / name).resolve():
+                      (base / "Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj").resolve()
+                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1")
+              },
+          }
+          for script, project in script_projects.items():
+              if not script.is_relative_to(project.parent):
+                  raise SystemExit("Configuration assertions must physically belong to their test project.")
+          owners = {script: set() for script in script_projects}
           for info in Path(".sonarqube/out").rglob("ProjectInfo.xml"):
               root = ET.parse(info).getroot()
               for result in root.findall("s:AnalysisResultFiles/s:AnalysisResultFile", namespace):
                   if result.get("Id") != "FilesToAnalyze":
                       continue
                   paths = Path(result.attrib["Location"]).read_text(encoding="utf-8-sig").splitlines()
-                  if script not in {Path(value).resolve() for value in paths if value}:
-                      continue
+                  analyzed = {Path(value).resolve() for value in paths if value}
                   owner = Path(root.findtext("s:FullPath", namespaces=namespace)).resolve()
                   category = root.findtext("s:ProjectType", namespaces=namespace)
                   excluded = root.findtext("s:IsExcluded", namespaces=namespace)
-                  owners.add((owner, category, excluded))
-          if owners != {(project, "Test", "false")}:
-              raise SystemExit("Configuration assertion script must be included by its exact non-excluded test project.")
-          print("Configuration assertion script is included as TEST source; production coverage is unchanged.")
+                  for script in owners.keys() & analyzed:
+                      owners[script].add((owner, category, excluded))
+          for script, project in script_projects.items():
+              if owners[script] != {(project, "Test", "false")}:
+                  raise SystemExit(f"Assertion script must be included by its exact non-excluded test project: {script.relative_to(base)}")
+          print("Four configuration assertion scripts are owned by their exact TEST projects; production coverage is unchanged.")
           PY
 
       - name: Run Python accounting regressions and collect coverage for analysis
@@ -1054,8 +1064,18 @@ jobs:
           from pathlib import Path
 
           base = Path.cwd()
-          script = (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve()
-          wrapper = (base / "Deployments/local-stack/Test-Configuration.ps1").resolve()
+          assertion_scripts = {
+              (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve(),
+              *{
+                  (base / "Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration" / name).resolve()
+                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1")
+              },
+          }
+          main_scripts = {
+              (base / "Deployments/local-stack" / name).resolve()
+              for name in ("Test-Configuration.ps1", "Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1",
+                           "Initialize-Databases.ps1", "W3-NativeDiagnostics.ps1")
+          }
           text = (base / ".sonarqube/out/sonar-project.properties").read_text(encoding="utf-8-sig")
           text = re.sub(r"\\\r?\n[ \t]*", "", text)
           scopes = {"sonar.tests": set(), "sonar.sources": set()}
@@ -1066,11 +1086,13 @@ jobs:
                   continue
               value = re.sub(r"\\([\\:= ,#!])", r"\1", value)
               scopes[scope].update(Path(path).resolve() for path in next(csv.reader([value], skipinitialspace=True)) if path)
-          if script not in scopes["sonar.tests"] or script in scopes["sonar.sources"]:
-              raise SystemExit("Configuration assertion script must be TEST source in the final scanner input.")
-          if wrapper not in scopes["sonar.sources"] or wrapper in scopes["sonar.tests"]:
-              raise SystemExit("Configuration test forwarding entry must remain MAIN source.")
-          print("Final scanner input: assertion suite is TEST; forwarding entry remains MAIN.")
+          for script in assertion_scripts:
+              if script not in scopes["sonar.tests"] or script in scopes["sonar.sources"]:
+                  raise SystemExit(f"Assertion script must be TEST source in the final scanner input: {script.relative_to(base)}")
+          for script in main_scripts:
+              if script not in scopes["sonar.sources"] or script in scopes["sonar.tests"]:
+                  raise SystemExit(f"Forwarding and operational entrypoints must remain MAIN source: {script.relative_to(base)}")
+          print("Final scanner input: four assertion suites are TEST; forwarding and operational entrypoints remain MAIN.")
           PY
 
   mvp_validation:
