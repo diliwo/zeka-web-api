@@ -138,7 +138,7 @@ try {
     $ready = $false
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $probe = Native @('exec', $guardId, 'pg_isready', '-U', 'postgres', '-d', 'postgres') 6000 $true
+        $probe = Native @('exec', $guardId, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres') 6000 $true
         if ($probe.Exit -eq 0) { $ready = $true; break }
         [Threading.Thread]::Sleep(500)
     }
