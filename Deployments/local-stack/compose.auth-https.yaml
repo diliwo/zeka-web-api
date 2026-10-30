@@ -1,0 +1,26 @@
+# Add only after protected TLS material, physical mount paths and resource admission pass.
+# Merge after compose.yaml. This configures consumption; it creates no CA, trust or hosts entry.
+services:
+  auth:
+    networks:
+      internal:
+        aliases: [auth.zeka-m1.test]
+    ports:
+      - "127.0.0.1:19443:19443"
+    environment:
+      ASPNETCORE_HTTPS_PORTS: "19443"
+      ASPNETCORE_HTTPS_PORT: "19443"
+      Kestrel__Certificates__Default__Path: /run/secrets/auth_tls_certificate.pem
+      Kestrel__Certificates__Default__KeyPath: /run/secrets/auth_tls_key.pem
+    secrets:
+      - source: auth_tls_certificate
+        target: /run/secrets/auth_tls_certificate.pem
+      - source: auth_tls_key
+        target: /run/secrets/auth_tls_key.pem
+secrets:
+  auth_tls_certificate:
+    file: ${ZEKA_M1_AUTH_TLS_CERTIFICATE_SOURCE:?Verified physical TLS certificate source required}
+  auth_tls_key:
+    file: ${ZEKA_M1_AUTH_TLS_KEY_SOURCE:?Verified physical TLS key source required}
+  local_ca_bundle:
+    file: ${ZEKA_M1_CA_BUNDLE_SOURCE:?Verified physical public CA bundle source required}
