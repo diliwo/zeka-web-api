@@ -33,4 +33,4 @@ volumes:
       com.diliwo.zeka.scope: m1-database-bootstrap
 secrets:
   postgres_admin_password:
-    file: ${ZEKA_M1_PRIVATE_DIR:?Protected M1 directory required}/postgres/admin-password
+    file: ${ZEKA_M1_POSTGRES_ADMIN_SOURCE:?Verified physical administrator file required}

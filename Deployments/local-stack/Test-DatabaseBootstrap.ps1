@@ -1,12 +1,13 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$BuildDirectory,
-    [string]$FixtureDirectory = (Join-Path $env:LOCALAPPDATA 'Zeka\M1\bootstrap-fixtures')
+    [string]$FixtureDirectory = (Join-Path $env:LOCALAPPDATA 'Zeka\M1\bootstrap-fixtures'),
+    [ValidatePattern('^[a-f0-9]{32}$')][string]$FixtureIdentity = [Guid]::NewGuid().ToString('N')
 )
 $ErrorActionPreference = 'Stop'
 $stage = 'host-admission'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$fixtureId = [Guid]::NewGuid().ToString('N')
+$fixtureId = $FixtureIdentity
 $guardToken = 'zeka-m1-bootstrap-fixture-' + $fixtureId
 $setupProject = 'zeka-m1-bootstrap-fixture-' + $fixtureId.Substring(0, 8)
 $labelKey = 'com.diliwo.zeka.fixture-id'
@@ -17,29 +18,15 @@ $guardRunner = $guardToken + '-checks'
 $createdContainers = @()
 $createdNetworks = @()
 $createdVolumes = @()
-function Fail([string]$Code) { throw [InvalidOperationException]::new($Code) }
+. (Join-Path $PSScriptRoot 'W3-NativeDiagnostics.ps1')
+$diagnosticPath = Join-Path ([IO.Path]::GetFullPath($BuildDirectory)) ('native-diagnostics-' + $fixtureId)
+Initialize-W3Diagnostics -Directory $diagnosticPath -FixtureId $fixtureId -EngineId '0b62f5ec-15d9-4e4b-a450-817d52378eef' | Out-Null
+function Fail([string]$Code) { Write-W3GuardRecord -Rule $Code -Operation $stage; throw [InvalidOperationException]::new($Code) }
 function Native([string[]]$Argv, [int]$Milliseconds = 15000, [bool]$AllowFailure = $false, [string]$Exe = 'docker') {
-    $info = [Diagnostics.ProcessStartInfo]::new($Exe)
-    $info.UseShellExecute = $false
-    $info.CreateNoWindow = $true
-    $info.WorkingDirectory = $repo
-    $info.RedirectStandardOutput = $true
-    $info.RedirectStandardError = $true
-    foreach ($value in $Argv) { $info.ArgumentList.Add($value) }
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = $info
-    if (!$process.Start()) { Fail 'PROCESS_START_FAILED' }
-    $stdout = $process.StandardOutput.ReadToEndAsync()
-    $stderr = $process.StandardError.ReadToEndAsync()
-    if (!$process.WaitForExit($Milliseconds)) {
-        $process.Kill($true)
-        $process.Dispose()
-        Fail 'OPERATION_TIMEOUT_FIXTURES_PRESERVED'
-    }
-    $result = @{ Exit = $process.ExitCode; Out = $stdout.GetAwaiter().GetResult(); Error = $stderr.GetAwaiter().GetResult() }
-    $process.Dispose()
-    if ($result.Exit -ne 0 -and !$AllowFailure) { Fail 'NATIVE_OPERATION_REJECTED' }
-    return $result
+    $name = [IO.Path]::GetFileNameWithoutExtension($Exe)
+    $verb = $Argv[0]
+    if ($name -eq 'docker' -and $verb -in @('volume','network','image','container')) { $verb += '.' + $Argv[1] }
+    return Invoke-W3Native -Exe $Exe -ArgumentList $Argv -WorkingDirectory $repo -TimeoutMs $Milliseconds -Operation ($stage + '.' + $name + '.' + $verb) -AllowFailure:$AllowFailure
 }
 function ProtectedDirectory([string]$Path) {
     if (Test-Path -LiteralPath $Path) { Fail 'FIXTURE_PRIVATE_PATH_EXISTS' }
@@ -66,6 +53,7 @@ function SaveProtected([string]$Path, [byte[]]$Bytes) {
     $stream = [IO.FileStream]::new($temp, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::WriteThrough)
     try { $stream.Write($Bytes, 0, $Bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
     [IO.File]::Move($temp, $Path)
+    if ([IO.Path]::GetFileName($Path) -eq 'admin-password') { Register-W3Secret -Value ([Text.Encoding]::UTF8.GetString($Bytes)) }
 }
 function Absent([string]$Kind, [string]$Name) {
     $observed = Native @($Kind, 'inspect', $Name) 15000 $true
@@ -126,15 +114,35 @@ try {
     $marker = Join-Path $guardPrivate 'fixture-marker'
     SaveProtected $marker ([Text.Encoding]::UTF8.GetBytes($guardToken))
     foreach ($pair in @(@('container', $guardContainer), @('container', $guardRunner), @('network', $guardNetwork), @('volume', $guardVolume), @('container', ($setupProject + '-postgres-1')), @('network', ($setupProject + '_internal')), @('volume', ($setupProject + '_postgres_data')))) { Absent $pair[0] $pair[1] }
+    $stage = 'guard-mount-admission'
+    $adminMount = Get-W3MountSource -WindowsPath $admin
+    $markerMount = Get-W3MountSource -WindowsPath $marker
+    $resultMount = Get-W3MountSource -WindowsPath $guardResults
+    $mountIntent = @{ fixtureId=$fixtureId; engineId=$engine; secretSource=$adminMount; destination='/run/secrets/admin-password'; type='bind'; readOnly=$true; credentialDelivery='protected file only'; createAttempts=0 }
+    $mountIntent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $runRoot 'mount-intent.json')
     $stage = 'guard-fixture-create'
     $networkId = (Native @('network', 'create', '--internal', '--label', ($labelKey + '=' + $fixtureId), $guardNetwork)).Out.Trim()
     $createdNetworks += @{ id = $networkId; name = $guardNetwork; fixture = $fixtureId }
     $null = Native @('volume', 'create', '--label', ($labelKey + '=' + $fixtureId), $guardVolume)
     $volume = Inspect 'volume' $guardVolume
     $createdVolumes += @{ name = $guardVolume; created = $volume.CreatedAt; fixture = $fixtureId }
-    $guardId = (Native @('create', '--name', $guardContainer, '--network', $guardNetwork, '--network-alias', 'postgres-guard', '--label', ($labelKey + '=' + $fixtureId), '--log-driver', 'none', '--memory', '1g', '--env', 'POSTGRES_USER=postgres', '--env', 'POSTGRES_PASSWORD_FILE=/run/secrets/admin-password', '--env', 'POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256', '--mount', ('type=bind,src=' + $admin + ',dst=/run/secrets/admin-password,readonly'), '--mount', ('type=volume,src=' + $guardVolume + ',dst=/var/lib/postgresql/data'), 'postgres:17', '-c', 'log_statement=none', '-c', 'log_min_error_statement=panic')).Out.Trim()
+    $createArgs = @('create', '--name', $guardContainer, '--network', $guardNetwork, '--network-alias', 'postgres-guard', '--label', ($labelKey + '=' + $fixtureId), '--log-driver', 'none', '--memory', '1g', '--env', 'POSTGRES_USER=postgres', '--env', 'POSTGRES_PASSWORD_FILE=/run/secrets/admin-password', '--env', 'POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256', '--mount', ('type=bind,src=' + $adminMount.DaemonPath + ',dst=/run/secrets/admin-password,readonly'), '--mount', ('type=volume,src=' + $guardVolume + ',dst=/var/lib/postgresql/data'), 'postgres:17', '-c', 'log_statement=none', '-c', 'log_min_error_statement=panic')
+    $decision = Assert-W3DockerArguments -ArgumentList $createArgs
+    $mountIntent.guardDecision = $decision
+    $mountIntent.createAttempts = 1
+    $mountIntent | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $runRoot 'mount-intent.json')
+    $guardId = (Native $createArgs).Out.Trim()
     $createdContainers += @{ id = $guardId; name = $guardContainer; fixture = $fixtureId }
+    $created = Inspect 'container' $guardId
+    $configuredMount = @($created.HostConfig.Mounts | Where-Object Target -EQ '/run/secrets/admin-password')
+    if ($configuredMount.Count -ne 1 -or $configuredMount[0].Type -ne 'bind' -or $configuredMount[0].Source -ne $adminMount.DaemonPath -or !$configuredMount[0].ReadOnly) { Fail 'GUARD_EFFECTIVE_MOUNT_REJECTED' }
     $null = Native @('start', $guardId)
+    $stage = 'guard-protected-mount-access'
+    $null = Native @('exec', $guardId, '/bin/sh', '-c', 'test -f /run/secrets/admin-password && test -r /run/secrets/admin-password')
+    $mounted = Inspect 'container' $guardId
+    $effectiveMount = @($mounted.Mounts | Where-Object Destination -EQ '/run/secrets/admin-password')
+    if ($effectiveMount.Count -ne 1 -or $effectiveMount[0].Type -ne 'bind' -or $effectiveMount[0].Source -ne $adminMount.DaemonPath -or $effectiveMount[0].RW) { Fail 'GUARD_EFFECTIVE_MOUNT_REJECTED' }
+    @{fixtureId=$fixtureId;engineId=$engine;container=$guardId;source=$effectiveMount[0].Source;destination=$effectiveMount[0].Destination;type=$effectiveMount[0].Type;readOnly=(!$effectiveMount[0].RW);readable=$true;contentsDisclosed=$false} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runRoot 'protected-mount-result.json')
     $ready = $false
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -151,7 +159,7 @@ try {
     $sql = "COMMENT ON DATABASE postgres IS '" + $guardToken + "';"
     $null = Native @('exec', $guardId, 'psql', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', $sql)
     $stage = 'guard-checks'
-    $runnerId = (Native @('create', '--name', $guardRunner, '--network', $guardNetwork, '--label', ($labelKey + '=' + $fixtureId), '--env', ('ZEKA_M1_GUARD_FIXTURE=' + $guardToken), '--mount', ('type=bind,src=' + $admin + ',dst=/run/secrets/admin-password,readonly'), '--mount', ('type=bind,src=' + $marker + ',dst=/run/secrets/guard-fixture-marker,readonly'), '--mount', ('type=bind,src=' + $guardResults + ',dst=/run/results'), $image, '--guard-checks')).Out.Trim()
+    $runnerId = (Native @('create', '--name', $guardRunner, '--network', $guardNetwork, '--label', ($labelKey + '=' + $fixtureId), '--env', ('ZEKA_M1_GUARD_FIXTURE=' + $guardToken), '--mount', ('type=bind,src=' + $adminMount.DaemonPath + ',dst=/run/secrets/admin-password,readonly'), '--mount', ('type=bind,src=' + $markerMount.DaemonPath + ',dst=/run/secrets/guard-fixture-marker,readonly'), '--mount', ('type=bind,src=' + $resultMount.DaemonPath + ',dst=/run/results'), $image, '--guard-checks')).Out.Trim()
     $createdContainers += @{ id = $runnerId; name = $guardRunner; fixture = $fixtureId }
     $guardRun = Native @('start', '--attach', $runnerId) 220000 $true
     $guardState = Inspect 'container' $runnerId
@@ -195,39 +203,16 @@ try {
         $after = @($second | Where-Object service -EQ $before.service)[0]
         if ($after.schemaSha256 -ne $before.schemaSha256 -or $after.historySha256 -ne $before.historySha256 -or $after.clusterId -ne $before.clusterId -or $after.initializationId -ne $before.initializationId -or $after.sourceCommit -ne $source) { Fail 'REPEAT_DATABASE_SNAPSHOT_CHANGED' }
     }
-    $stage = 'verified-fixture-cleanup'
-    foreach ($record in $createdContainers) {
-        $resource = Inspect 'container' $record.id
-        if ($resource.Id -ne $record.id -or $resource.Name.TrimStart('/') -ne $record.name) { Fail 'CLEANUP_CONTAINER_IDENTITY_REJECTED' }
-        if ($record.fixture) {
-            if ($resource.Config.Labels.$labelKey -ne $record.fixture) { Fail 'CLEANUP_FIXTURE_LABEL_REJECTED' }
-        } elseif ($resource.Config.Labels.'com.docker.compose.project' -ne $record.project -or $resource.Config.Labels.'com.diliwo.zeka.initialization-id' -ne $record.initialization) { Fail 'CLEANUP_INITIALIZATION_LABEL_REJECTED' }
-    }
-    foreach ($record in $createdVolumes) {
-        $resource = Inspect 'volume' $record.name
-        if ($resource.Name -ne $record.name -or $resource.CreatedAt -ne $record.created) { Fail 'CLEANUP_VOLUME_IDENTITY_REJECTED' }
-        if ($record.fixture) {
-            if ($resource.Labels.$labelKey -ne $record.fixture) { Fail 'CLEANUP_FIXTURE_LABEL_REJECTED' }
-        } elseif ($resource.Labels.'com.docker.compose.project' -ne $record.project -or $resource.Labels.'com.diliwo.zeka.initialization-id' -ne $record.initialization) { Fail 'CLEANUP_INITIALIZATION_LABEL_REJECTED' }
-    }
-    foreach ($record in $createdNetworks) {
-        $resource = Inspect 'network' $record.id
-        if ($resource.Id -ne $record.id -or $resource.Name -ne $record.name -or !$resource.Internal) { Fail 'CLEANUP_NETWORK_IDENTITY_REJECTED' }
-        if ($record.fixture) {
-            if ($resource.Labels.$labelKey -ne $record.fixture) { Fail 'CLEANUP_FIXTURE_LABEL_REJECTED' }
-        } elseif ($resource.Labels.'com.docker.compose.project' -ne $record.project -or $resource.Labels.'com.diliwo.zeka.initialization-id' -ne $record.initialization) { Fail 'CLEANUP_INITIALIZATION_LABEL_REJECTED' }
-    }
-    foreach ($record in $createdContainers) { $null = Native @('rm', '--force', $record.id) }
-    foreach ($record in $createdVolumes) { $null = Native @('volume', 'rm', $record.name) }
-    foreach ($record in $createdNetworks) { $null = Native @('network', 'rm', $record.id) }
-    $summary = @{ status = 'PASS'; sourceCommit = $source; engineId = $engine; fixtureId = $fixtureId; guardChecks = 'PASS'; firstInvocation = 'INITIALIZED'; secondInvocation = 'ALREADY_CURRENT'; services = 3; credentialFilesUnchanged = $true; schemaHistoryUnchanged = $true; dockerFixtureCleanup = 'verified exact resources removed'; protectedFixtureDirectory = $privateRoot }
+    $stage = 'verified-fixture-preservation'
+    @{ fixtureId=$fixtureId; containers=$createdContainers; volumes=$createdVolumes; networks=$createdNetworks; automaticCleanup=$false } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $runRoot 'preserved-resources.json')
+    $summary = @{ status = 'PASS'; sourceCommit = $source; engineId = $engine; fixtureId = $fixtureId; guardChecks = 'PASS'; firstInvocation = 'INITIALIZED'; secondInvocation = 'ALREADY_CURRENT'; services = 3; credentialFilesUnchanged = $true; schemaHistoryUnchanged = $true; dockerFixtureCleanup = 'not attempted; all fixture resources preserved'; protectedFixtureDirectory = $privateRoot }
     $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $runRoot 'verification-result.json')
     Write-Output ($summary | ConvertTo-Json -Compress)
 } catch {
     $code = 'GUARD_OR_OPERATION_REJECTED'
-    $allowedGuardCodes = @('BOOTSTRAP_INVOCATION_FAILED', 'BOOTSTRAP_FIXTURE_IDENTITY_REJECTED', 'BOOTSTRAP_PROGRESS_REJECTED', 'BOOTSTRAP_RESULT_COUNT_REJECTED', 'BOOTSTRAP_RESULT_REJECTED', 'BOOTSTRAP_SERVICE_SET_REJECTED', 'CLEANUP_CONTAINER_IDENTITY_REJECTED', 'CLEANUP_FIXTURE_LABEL_REJECTED', 'CLEANUP_INITIALIZATION_LABEL_REJECTED', 'CLEANUP_NETWORK_IDENTITY_REJECTED', 'CLEANUP_VOLUME_IDENTITY_REJECTED', 'CREDENTIAL_OR_CONFIGURATION_CHANGED', 'DOCKER_TARGET_REJECTED', 'EXISTING_IMAGE_SOURCE_REJECTED', 'FIXTURE_ABSENCE_UNCERTAIN', 'FIXTURE_ACL_REJECTED', 'FIXTURE_BUILD_PRIVATE_OVERLAP', 'FIXTURE_INSPECTION_AMBIGUOUS', 'FIXTURE_PATH_BOUNDARY_REJECTED', 'FIXTURE_PRIVATE_OVERWRITE_REJECTED', 'FIXTURE_PRIVATE_PATH_EXISTS', 'FIXTURE_REPARSE_REJECTED', 'FIXTURE_RESOURCE_ALREADY_EXISTS', 'FIXTURE_RESULT_PATH_EXISTS', 'GUARD_CHECKS_FAILED', 'GUARD_FIXTURE_ISOLATION_REJECTED', 'GUARD_POSTGRES_NOT_READY', 'GUARD_RESULT_REJECTED', 'NATIVE_OPERATION_REJECTED', 'OPERATION_TIMEOUT_FIXTURES_PRESERVED', 'OWNER_WINDOWS_REQUIRED', 'PROCESS_START_FAILED', 'REPEAT_DATABASE_SNAPSHOT_CHANGED', 'SOURCE_COMMIT_REJECTED')
+    $allowedGuardCodes = @('MOUNT_SOURCE_MISSING', 'MOUNT_SOURCE_HANDLE_REJECTED', 'MOUNT_SOURCE_PHYSICAL_PATH_UNAVAILABLE', 'MOUNT_SOURCE_LOCAL_DRIVE_REJECTED', 'MOUNT_SOURCE_TRANSLATION_REJECTED', 'MOUNT_SOURCE_WSL_UNREADABLE', 'DIAGNOSTICS_INSIDE_CHECKOUT_REJECTED', 'DIAGNOSTIC_IDENTITY_REJECTED', 'DIAGNOSTIC_REPARSE_REJECTED', 'DIAGNOSTICS_NOT_INITIALIZED', 'NATIVE_TIMEOUT_INPUT_REJECTED', 'GUARD_EFFECTIVE_MOUNT_REJECTED', 'W3_ARGUMENT_SECURITY_REJECTED', 'OPERATION_TIMEOUT_REQUIRES_INSPECTION', 'BOOTSTRAP_INVOCATION_FAILED', 'BOOTSTRAP_FIXTURE_IDENTITY_REJECTED', 'BOOTSTRAP_PROGRESS_REJECTED', 'BOOTSTRAP_RESULT_COUNT_REJECTED', 'BOOTSTRAP_RESULT_REJECTED', 'BOOTSTRAP_SERVICE_SET_REJECTED', 'CLEANUP_CONTAINER_IDENTITY_REJECTED', 'CLEANUP_FIXTURE_LABEL_REJECTED', 'CLEANUP_INITIALIZATION_LABEL_REJECTED', 'CLEANUP_NETWORK_IDENTITY_REJECTED', 'CLEANUP_VOLUME_IDENTITY_REJECTED', 'CREDENTIAL_OR_CONFIGURATION_CHANGED', 'DOCKER_TARGET_REJECTED', 'EXISTING_IMAGE_SOURCE_REJECTED', 'FIXTURE_ABSENCE_UNCERTAIN', 'FIXTURE_ACL_REJECTED', 'FIXTURE_BUILD_PRIVATE_OVERLAP', 'FIXTURE_INSPECTION_AMBIGUOUS', 'FIXTURE_PATH_BOUNDARY_REJECTED', 'FIXTURE_PRIVATE_OVERWRITE_REJECTED', 'FIXTURE_PRIVATE_PATH_EXISTS', 'FIXTURE_REPARSE_REJECTED', 'FIXTURE_RESOURCE_ALREADY_EXISTS', 'FIXTURE_RESULT_PATH_EXISTS', 'GUARD_CHECKS_FAILED', 'GUARD_FIXTURE_ISOLATION_REJECTED', 'GUARD_POSTGRES_NOT_READY', 'GUARD_RESULT_REJECTED', 'NATIVE_OPERATION_REJECTED', 'OPERATION_TIMEOUT_FIXTURES_PRESERVED', 'OWNER_WINDOWS_REQUIRED', 'PROCESS_START_FAILED', 'REPEAT_DATABASE_SNAPSHOT_CHANGED', 'SOURCE_COMMIT_REJECTED')
     if ($_.Exception -is [InvalidOperationException] -and $_.Exception.Message -in $allowedGuardCodes) { $code = $_.Exception.Message }
-    $failure = @{ status = 'BLOCKED'; stage = $stage; code = $code; fixtureId = $fixtureId; fixturesPreserved = $true }
+    $failure = @{ status = 'BLOCKED'; stage = $stage; code = $code; fixtureId = $fixtureId; fixturesPreserved = $true; diagnosticDirectory = $diagnosticPath }
     if ($runRoot -and (Test-Path -LiteralPath $runRoot)) { $failure | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runRoot 'verification-blocker.json') }
     Write-Output ($failure | ConvertTo-Json -Compress)
     exit 1

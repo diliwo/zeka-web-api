@@ -49,3 +49,13 @@ Individual host operation limits remain active: resource observations use 15 sec
 On uncertain timeout, protected progress is marked requiresInspection where available. Database startup/service-operation failures likewise prevent an automatic retry. A killed Docker client does not establish that its container operation completed or stopped; inspect the retained resource state before any separately authorized recovery.
 
 The wrapper reports only allowlisted guard codes and safe result fields. Preserve result files and progress for review. Do not remove a failure marker, erase evidence, reset a volume, migrate another service or begin TLS/worker/seeding work as a way to continue this checkpoint.
+
+## Controlled fixture diagnostics
+
+Run Test-W3NativeDiagnostics.ps1 with -Directory pointing to a new outside-checkout directory before the controlled fixture. Its native-process tests execute only ordinary PowerShell children; credential-shaped Docker inputs are refused before process start.
+
+Test-DatabaseBootstrap.ps1 accepts -BuildDirectory outside the checkout and -FixtureIdentity with a new 32-character lowercase GUID. It records operation, fixture/engine identity, pre-execution guard result, process start/PID, exit code and sanitized stdout/stderr in unique journals. It never records raw arguments or secret values. A native rejection is retained before the launcher stops; it is distinct from a pre-execution refusal. An outer Codex approval refusal is evidenced by that tool's result, not inferred from missing Docker events.
+
+Windows packaged-app file virtualization can make a logical AppData path differ from its physical source. Resolve the existing file handle, translate that physical path through Rancher's WSL namespace, and verify metadata/readability without printing contents or changing ACLs. Docker CLI binds use the verified daemon path; Compose's protected file input uses the verified physical Windows source. Inspect the accepted container's source/destination/type/read-only flag and test readability before continuing. A missing or unreadable source stops the pass.
+
+The controlled pass preserves all newly created fixture resources and service helper containers on success and failure. It performs no automatic cleanup; the original failed fixture is never reused. The database-only configuration and later TLS/worker/seeding boundaries remain unchanged.

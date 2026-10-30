@@ -12,29 +12,15 @@ $progress = $null
 $progressFile = $null
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $expectedOwnerRoot = 'C:\Users\herve\AppData\Local\Zeka\M1\private'
-function Fail([string]$Code) { throw [InvalidOperationException]::new($Code) }
+. (Join-Path $PSScriptRoot 'W3-NativeDiagnostics.ps1')
+$diagnosticPath = Join-Path ([IO.Path]::GetFullPath($BuildDirectory)) ('native-diagnostics-' + [Guid]::NewGuid().ToString('N'))
+Initialize-W3Diagnostics -Directory $diagnosticPath -FixtureId $ProjectName -EngineId '0b62f5ec-15d9-4e4b-a450-817d52378eef' | Out-Null
+function Fail([string]$Code) { Write-W3GuardRecord -Rule $Code -Operation $stage; throw [InvalidOperationException]::new($Code) }
 function Native([string]$Exe, [string[]]$Argv, [int]$Milliseconds = 120000, [bool]$AllowFailure = $false) {
-    $info = [Diagnostics.ProcessStartInfo]::new($Exe)
-    $info.UseShellExecute = $false
-    $info.CreateNoWindow = $true
-    $info.WorkingDirectory = $repo
-    $info.RedirectStandardOutput = $true
-    $info.RedirectStandardError = $true
-    foreach ($value in $Argv) { $info.ArgumentList.Add($value) }
-    $p = [Diagnostics.Process]::new()
-    $p.StartInfo = $info
-    if (!$p.Start()) { Fail 'PROCESS_START_FAILED' }
-    $o = $p.StandardOutput.ReadToEndAsync()
-    $e = $p.StandardError.ReadToEndAsync()
-    if (!$p.WaitForExit($Milliseconds)) {
-        $p.Kill($true)
-        $p.Dispose()
-        Fail 'OPERATION_TIMEOUT_REQUIRES_INSPECTION'
-    }
-    $result = @{ Exit = $p.ExitCode; Out = $o.GetAwaiter().GetResult(); Error = $e.GetAwaiter().GetResult() }
-    $p.Dispose()
-    if ($result.Exit -ne 0 -and !$AllowFailure) { Fail 'NATIVE_OPERATION_REJECTED' }
-    return $result
+    $name = [IO.Path]::GetFileNameWithoutExtension($Exe)
+    $verb = $Argv[0]
+    if ($name -eq 'docker' -and $verb -in @('volume','network','image','container')) { $verb += '.' + $Argv[1] }
+    return Invoke-W3Native -Exe $Exe -ArgumentList $Argv -WorkingDirectory $repo -TimeoutMs $Milliseconds -Operation ($stage + '.' + $name + '.' + $verb) -AllowFailure:$AllowFailure
 }
 function Restricted([string]$Path, [bool]$Protect = $false) {
     $item = Get-Item -LiteralPath $Path
@@ -116,6 +102,7 @@ try {
         NewPassword $adminFile
     }
     Restricted $adminFile
+    Register-W3Secret -Value ([IO.File]::ReadAllText($adminFile).Trim())
     $progressFile = Join-Path $private 'database\setup-progress.json'
     if (Test-Path -LiteralPath (Join-Path $private 'database\reset-incomplete.json')) { Fail 'RESET_INCOMPLETE' }
     $volume = $ProjectName + '_postgres_data'
@@ -177,6 +164,7 @@ try {
             }
             Restricted $file
             $value = [IO.File]::ReadAllText($file).Trim()
+            Register-W3Secret -Value $value
             if ($value.Length -ne 64 -or $value -notmatch '^[0-9A-Fa-f]{64}$') { Fail 'SAVED_CREDENTIAL_FORMAT_REJECTED' }
         }
         $runtime = [IO.File]::ReadAllText((Join-Path $directory 'runtime-password')).Trim()
@@ -201,6 +189,8 @@ try {
     $stage = 'postgres-create-or-resume'
     $env:ZEKA_M1_INITIALIZATION_ID = $progress.initializationId
     $compose = Join-Path $PSScriptRoot 'compose.database-setup.yaml'
+    $adminMount = Get-W3MountSource -WindowsPath $adminFile
+    $env:ZEKA_M1_POSTGRES_ADMIN_SOURCE = $adminMount.WindowsPhysical
     $null = Native 'docker' @('compose', '--project-name', $ProjectName, '-f', $compose, 'up', '-d', '--wait', '--wait-timeout', '60', 'postgres') 90000
     $current = (((Native 'docker' @('inspect', $container)).Out) | ConvertFrom-Json)[0]
     if ($current.Config.Labels.'com.diliwo.zeka.initialization-id' -ne $progress.initializationId -or $current.NetworkSettings.Ports.'5432/tcp' -or $current.HostConfig.NetworkMode -eq 'host') { Fail 'POSTGRES_RESOURCE_ADMISSION_FAILED' }
@@ -235,17 +225,23 @@ try {
         $request = @{ Project = 'zeka-m1'; Service = $service; InitializationId = $progress.initializationId; SourceCommit = $source; Completed = $state.completed; ClusterId = $progress.clusterId; SchemaSha256 = $state.schemaSha256; HistorySha256 = $state.historySha256 }
         $request | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'request.json')
         $runnerName = $ProjectName + '-db-' + $service + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+        $requestMount = Get-W3MountSource -WindowsPath (Join-Path $run 'request.json')
+        $resultMount = Get-W3MountSource -WindowsPath $run
+        $migratorMount = Get-W3MountSource -WindowsPath (Join-Path $private ($service + '\migrator-password'))
+        $runtimeMount = Get-W3MountSource -WindowsPath (Join-Path $private ($service + '\runtime-password'))
+        $configurationMount = Get-W3MountSource -WindowsPath (Join-Path $private ($service + '\database.LocalStack.json'))
+        $sqlMount = Get-W3MountSource -WindowsPath (Join-Path $repo ('Deployments\database\bootstrap-' + $service + '-roles.sql'))
         $parameters = @(
-            'run', '--rm', '--name', $runnerName, '--network', ($ProjectName + '_internal'),
+            'run', '--name', $runnerName, '--network', ($ProjectName + '_internal'),
             '--label', ('com.docker.compose.project=' + $ProjectName),
             '--label', ('com.diliwo.zeka.initialization-id=' + $progress.initializationId),
-            '--mount', ('type=bind,src=' + (Join-Path $run 'request.json') + ',dst=/run/setup/request.json,readonly'),
-            '--mount', ('type=bind,src=' + $run + ',dst=/run/results'),
-            '--mount', ('type=bind,src=' + $adminFile + ',dst=/run/secrets/admin-password,readonly'),
-            '--mount', ('type=bind,src=' + (Join-Path $private ($service + '\migrator-password')) + ',dst=/run/secrets/migrator-password,readonly'),
-            '--mount', ('type=bind,src=' + (Join-Path $private ($service + '\runtime-password')) + ',dst=/run/secrets/runtime-password,readonly'),
-            '--mount', ('type=bind,src=' + (Join-Path $private ($service + '\database.LocalStack.json')) + ',dst=/run/secrets/runtime-config.json,readonly'),
-            '--mount', ('type=bind,src=' + (Join-Path $repo ('Deployments\database\bootstrap-' + $service + '-roles.sql')) + ',dst=/run/source/bootstrap-' + $service + '-roles.sql,readonly'),
+            '--mount', ('type=bind,src=' + $requestMount.DaemonPath + ',dst=/run/setup/request.json,readonly'),
+            '--mount', ('type=bind,src=' + $resultMount.DaemonPath + ',dst=/run/results'),
+            '--mount', ('type=bind,src=' + $adminMount.DaemonPath + ',dst=/run/secrets/admin-password,readonly'),
+            '--mount', ('type=bind,src=' + $migratorMount.DaemonPath + ',dst=/run/secrets/migrator-password,readonly'),
+            '--mount', ('type=bind,src=' + $runtimeMount.DaemonPath + ',dst=/run/secrets/runtime-password,readonly'),
+            '--mount', ('type=bind,src=' + $configurationMount.DaemonPath + ',dst=/run/secrets/runtime-config.json,readonly'),
+            '--mount', ('type=bind,src=' + $sqlMount.DaemonPath + ',dst=/run/source/bootstrap-' + $service + '-roles.sql,readonly'),
             $image
         )
         $native = Native 'docker' $parameters 330000 $true
@@ -276,7 +272,7 @@ try {
 } catch {
     $failure = $_
     $code = 'GUARD_OR_OPERATION_REJECTED'
-    $allowedGuardCodes = @('SOURCE_WORKTREE_NOT_CLEAN', 'ESTABLISHED_POSTGRES_RESOURCE_MISSING', 'PROCESS_START_FAILED', 'OPERATION_TIMEOUT_REQUIRES_INSPECTION', 'NATIVE_OPERATION_REJECTED', 'PRIVATE_REPARSE_REJECTED', 'PRIVATE_ACL_REJECTED', 'PRIVATE_INHERITANCE_REJECTED', 'PRIVATE_OVERWRITE_REJECTED', 'PRIVATE_WRITE_INCOMPLETE', 'OWNER_WINDOWS_REQUIRED', 'PROJECT_SCOPE_REJECTED', 'FIXTURE_ACTUAL_PROJECT_REJECTED', 'PRIVATE_ROOT_MISSING', 'PRIVATE_ROOT_REJECTED', 'FIXTURE_OWNER_PRIVATE_ROOT_REJECTED', 'PRIVATE_ROOT_IN_BUILD_CONTEXT', 'PRIVATE_ROOT_INHERITANCE_REJECTED', 'SOURCE_COMMIT_REJECTED', 'DOCKER_TARGET_REJECTED', 'OWNER_ADMINISTRATOR_FILE_MISSING', 'RESET_INCOMPLETE', 'VOLUME_OBSERVATION_UNCERTAIN', 'CONTAINER_OBSERVATION_UNCERTAIN', 'NETWORK_OBSERVATION_UNCERTAIN', 'INITIALIZATION_PROGRESS_IDENTITY_DRIFT', 'ROLE_SOURCE_DRIFT', 'PREVIOUS_OPERATION_REQUIRES_INSPECTION', 'ESTABLISHED_RESOURCE_WITHOUT_PROGRESS', 'NETWORK_INITIALIZATION_IDENTITY_DRIFT', 'VOLUME_INITIALIZATION_IDENTITY_DRIFT', 'CONTAINER_IDENTITY_OR_EXPOSURE_DRIFT', 'CONTAINER_NETWORK_OR_VOLUME_DRIFT', 'CONTAINER_RESOURCE_STATE_UNCERTAIN', 'POSTGRES_CONTAINER_ID_DRIFT', 'ESTABLISHED_CREDENTIAL_FILE_MISSING', 'SAVED_CREDENTIAL_FORMAT_REJECTED', 'RUNTIME_CONFIGURATION_DRIFT', 'ESTABLISHED_RUNTIME_CONFIGURATION_MISSING', 'POSTGRES_RESOURCE_ADMISSION_FAILED', 'POSTGRES_NETWORK_OR_VOLUME_ADMISSION_FAILED', 'POSTGRES_NETWORK_ADMISSION_FAILED', 'BUILD_OUTPUT_MUST_BE_OUTSIDE_CHECKOUT', 'BUILD_PRIVATE_OVERLAP_REJECTED', 'IMAGE_OBSERVATION_UNCERTAIN', 'RUNNER_SOURCE_IDENTITY_DRIFT', 'RUNNER_RESULT_MISSING_REQUIRES_INSPECTION', 'SERVICE_SETUP_BLOCKED_REQUIRES_INSPECTION', 'REPEAT_RESULT_REJECTED')
+    $allowedGuardCodes = @('MOUNT_SOURCE_MISSING', 'MOUNT_SOURCE_HANDLE_REJECTED', 'MOUNT_SOURCE_PHYSICAL_PATH_UNAVAILABLE', 'MOUNT_SOURCE_LOCAL_DRIVE_REJECTED', 'MOUNT_SOURCE_TRANSLATION_REJECTED', 'MOUNT_SOURCE_WSL_UNREADABLE', 'DIAGNOSTICS_INSIDE_CHECKOUT_REJECTED', 'DIAGNOSTIC_IDENTITY_REJECTED', 'DIAGNOSTIC_REPARSE_REJECTED', 'DIAGNOSTICS_NOT_INITIALIZED', 'NATIVE_TIMEOUT_INPUT_REJECTED', 'W3_ARGUMENT_SECURITY_REJECTED', 'SOURCE_WORKTREE_NOT_CLEAN', 'ESTABLISHED_POSTGRES_RESOURCE_MISSING', 'PROCESS_START_FAILED', 'OPERATION_TIMEOUT_REQUIRES_INSPECTION', 'NATIVE_OPERATION_REJECTED', 'PRIVATE_REPARSE_REJECTED', 'PRIVATE_ACL_REJECTED', 'PRIVATE_INHERITANCE_REJECTED', 'PRIVATE_OVERWRITE_REJECTED', 'PRIVATE_WRITE_INCOMPLETE', 'OWNER_WINDOWS_REQUIRED', 'PROJECT_SCOPE_REJECTED', 'FIXTURE_ACTUAL_PROJECT_REJECTED', 'PRIVATE_ROOT_MISSING', 'PRIVATE_ROOT_REJECTED', 'FIXTURE_OWNER_PRIVATE_ROOT_REJECTED', 'PRIVATE_ROOT_IN_BUILD_CONTEXT', 'PRIVATE_ROOT_INHERITANCE_REJECTED', 'SOURCE_COMMIT_REJECTED', 'DOCKER_TARGET_REJECTED', 'OWNER_ADMINISTRATOR_FILE_MISSING', 'RESET_INCOMPLETE', 'VOLUME_OBSERVATION_UNCERTAIN', 'CONTAINER_OBSERVATION_UNCERTAIN', 'NETWORK_OBSERVATION_UNCERTAIN', 'INITIALIZATION_PROGRESS_IDENTITY_DRIFT', 'ROLE_SOURCE_DRIFT', 'PREVIOUS_OPERATION_REQUIRES_INSPECTION', 'ESTABLISHED_RESOURCE_WITHOUT_PROGRESS', 'NETWORK_INITIALIZATION_IDENTITY_DRIFT', 'VOLUME_INITIALIZATION_IDENTITY_DRIFT', 'CONTAINER_IDENTITY_OR_EXPOSURE_DRIFT', 'CONTAINER_NETWORK_OR_VOLUME_DRIFT', 'CONTAINER_RESOURCE_STATE_UNCERTAIN', 'POSTGRES_CONTAINER_ID_DRIFT', 'ESTABLISHED_CREDENTIAL_FILE_MISSING', 'SAVED_CREDENTIAL_FORMAT_REJECTED', 'RUNTIME_CONFIGURATION_DRIFT', 'ESTABLISHED_RUNTIME_CONFIGURATION_MISSING', 'POSTGRES_RESOURCE_ADMISSION_FAILED', 'POSTGRES_NETWORK_OR_VOLUME_ADMISSION_FAILED', 'POSTGRES_NETWORK_ADMISSION_FAILED', 'BUILD_OUTPUT_MUST_BE_OUTSIDE_CHECKOUT', 'BUILD_PRIVATE_OVERLAP_REJECTED', 'IMAGE_OBSERVATION_UNCERTAIN', 'RUNNER_SOURCE_IDENTITY_DRIFT', 'RUNNER_RESULT_MISSING_REQUIRES_INSPECTION', 'SERVICE_SETUP_BLOCKED_REQUIRES_INSPECTION', 'REPEAT_RESULT_REJECTED')
     if ($failure.Exception -is [InvalidOperationException] -and $failure.Exception.Message -in $allowedGuardCodes) { $code = $failure.Exception.Message }
     if ($progress -and $progressFile -and ($code -eq 'OPERATION_TIMEOUT_REQUIRES_INSPECTION' -or $stage -in @('postgres-create-or-resume', 'service-setup'))) {
         $progress.requiresInspection = $true
