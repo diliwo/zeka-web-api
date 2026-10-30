@@ -21,5 +21,8 @@
     <Content Include="LocalStackConfiguration/Test-DatabaseBootstrap.ps1" />
     <Content Include="LocalStackConfiguration/Test-W3NativeDiagnostics.ps1" />
     <Content Include="LocalStackConfiguration/Test-W3AtomicWrite.ps1" />
+    <Content Include="LocalStackConfiguration/PowerShellLineCoverage.ps1" />
+    <Content Include="LocalStackConfiguration/Test-PowerShellLineCoverage.ps1" />
+    <Content Include="LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1" />
   </ItemGroup>
 </Project>

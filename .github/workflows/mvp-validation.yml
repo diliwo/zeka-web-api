@@ -878,9 +878,56 @@ jobs:
             authman.api \
             zekaocelotgw
 
+  powershell_coverage:
+    name: Windows PowerShell core coverage
+    needs: source_policy
+    if: ${{ needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact source with LF bytes for cross-runner source hashes
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: core.autocrlf
+          GIT_CONFIG_VALUE_0: "false"
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Prove real PowerShell line collection and run credential-free core regressions
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualHead = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualHead -cne $env:EXPECTED_HEAD) { throw 'POWERSHELL_COVERAGE_HEAD_MISMATCH' }
+          # Core scope is native9 + atomic2 only. TLS file-only assertions remain owner-local evidence:
+          # their mandatory Sonar CLI admission requires an unreleased Windows CI credential path.
+          # The TLS test stays TEST source, and operational TLS code stays MAIN/uncovered in Sonar.
+          $directory = Join-Path $env:RUNNER_TEMP 'zeka-powershell-coverage'
+          & ./Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1 -Directory $directory
+          [IO.File]::WriteAllText((Join-Path $directory 'source-revision.txt'), $actualHead, [Text.UTF8Encoding]::new($false))
+          Write-Output 'TLS file-only CI coverage BLOCKED: mandatory Sonar CLI authentication is unavailable in this credential-free Windows job; no TLS runtime readiness is claimed.'
+
+      - name: Retain only coverage XML and source-bound safe counts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: powershell-line-coverage
+          path: |
+            ${{ runner.temp }}/zeka-powershell-coverage/powershell-coverage.xml
+            ${{ runner.temp }}/zeka-powershell-coverage/powershell-coverage-result.json
+            ${{ runner.temp }}/zeka-powershell-coverage/source-revision.txt
+          if-no-files-found: error
+          retention-days: 14
+
   sonar:
     name: SonarQube Cloud / Quality Gate
-    needs: source_policy
+    needs: [source_policy, powershell_coverage]
     if: ${{ needs.source_policy.outputs.trusted == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
@@ -902,6 +949,80 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: 3.12.14
+
+      - name: Download same-run execution-derived PowerShell coverage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: powershell-line-coverage
+          path: TestResults/powershell-coverage
+
+      - name: Verify PowerShell coverage source bytes, schema and actual count receipts
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import xml.etree.ElementTree as ET
+
+          directory = Path("TestResults/powershell-coverage")
+          report = directory / "powershell-coverage.xml"
+          summary_file = directory / "powershell-coverage-result.json"
+          revision_file = directory / "source-revision.txt"
+          if {item.name for item in directory.iterdir()} != {report.name, summary_file.name, revision_file.name}:
+              raise SystemExit("PowerShell coverage artifact must contain exactly its three allowlisted files.")
+          if (report.stat().st_size > 1_000_000 or summary_file.stat().st_size > 64_000
+                  or revision_file.read_text(encoding="utf-8").strip() != os.environ["EXPECTED_HEAD"]):
+              raise SystemExit("PowerShell coverage artifact is oversized or belongs to another source revision.")
+          summary = json.loads(summary_file.read_text(encoding="utf-8"))
+          if (summary.get("status") != "PASS" or summary.get("collectorProof") != "PASS"
+                  or summary.get("nativeCasesPassed") != 9 or summary.get("atomicCasesPassed") != 2
+                  or summary.get("coverageReport") != report.name
+                  or hashlib.sha256(report.read_bytes()).hexdigest() != summary.get("coverageSha256")):
+              raise SystemExit("PowerShell collector proof, regression counts or XML hash receipt is invalid.")
+          expected = {"Deployments/local-stack/W3-NativeDiagnostics.ps1", "Deployments/local-stack/Initialize-Databases.ps1"}
+          hashes = summary.get("sourceHashes", [])
+          if len(hashes) != 2 or {item.get("path") for item in hashes} != expected:
+              raise SystemExit("PowerShell coverage must name exactly its two core operational source files.")
+          for item in hashes:
+              digest = item.get("sha256", "")
+              if (not re.fullmatch(r"[0-9a-f]{64}", digest)
+                      or hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest() != digest):
+                  raise SystemExit("PowerShell coverage source bytes differ from this exact Linux checkout.")
+          coverage = ET.parse(report).getroot()
+          if coverage.tag != "coverage" or coverage.attrib != {"version": "1"}:
+              raise SystemExit("PowerShell coverage must use the supported generic XML version 1 schema.")
+          counts = {}
+          for source in coverage:
+              if source.tag != "file" or set(source.attrib) != {"path"} or source.get("path") not in expected or source.get("path") in counts:
+                  raise SystemExit("PowerShell coverage contains an unexpected or duplicate source file.")
+              path = source.attrib["path"]
+              maximum = len(Path(path).read_text(encoding="utf-8-sig").splitlines())
+              seen = set()
+              covered = 0
+              for line in source:
+                  if line.tag != "lineToCover" or set(line.attrib) != {"lineNumber", "covered"}:
+                      raise SystemExit("PowerShell coverage contains unsupported line metadata.")
+                  number = int(line.attrib["lineNumber"])
+                  if number <= 0 or number > maximum or number in seen or line.attrib["covered"] not in {"true", "false"}:
+                      raise SystemExit("PowerShell coverage line numbers or actual-hit flags are invalid.")
+                  seen.add(number)
+                  covered += line.attrib["covered"] == "true"
+              if not seen:
+                  raise SystemExit("PowerShell coverage must report nonempty source line candidates.")
+              counts[path] = (len(seen), covered)
+          native = counts.get("Deployments/local-stack/W3-NativeDiagnostics.ps1")
+          initialization = counts.get("Deployments/local-stack/Initialize-Databases.ps1")
+          if (set(counts) != expected or not native or native[1] <= 0 or not initialization or initialization[1] != 0
+                  or native != (summary.get("nativeStatementLines"), summary.get("nativeExecutedLines"))
+                  or initialization != (summary.get("initializationStatementLines"), summary.get("initializationExecutedLines"))):
+              raise SystemExit("PowerShell XML counts disagree with source-bound execution receipts.")
+          print(f"Verified actual PowerShell core line hits: helper {native[1]}/{native[0]}; database initialization 0/{initialization[0]} (NOT RUN).")
+          print("TLS CI coverage remains BLOCKED by mandatory scanner authentication; operational TLS code remains MAIN/uncovered.")
+          PY
 
       - name: Verify SonarQube Cloud prerequisites
         env:
@@ -954,7 +1075,8 @@ jobs:
             /d:sonar.pullrequest.base="${SONAR_PR_BASE}" \
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
-            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1" \
+            /d:sonar.coverageReportPaths="TestResults/powershell-coverage/powershell-coverage.xml" \
+            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
@@ -976,7 +1098,7 @@ jobs:
               **{
                   (base / "Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration" / name).resolve():
                       (base / "Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj").resolve()
-                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1")
+                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1", "PowerShellLineCoverage.ps1", "Test-PowerShellLineCoverage.ps1", "Test-AuthHttpsConfiguration.ps1")
               },
           }
           for script, project in script_projects.items():
@@ -998,7 +1120,7 @@ jobs:
           for script, project in script_projects.items():
               if owners[script] != {(project, "Test", "false")}:
                   raise SystemExit(f"Assertion script must be included by its exact non-excluded test project: {script.relative_to(base)}")
-          print("Four configuration assertion scripts are owned by their exact TEST projects; production coverage is unchanged.")
+          print("Seven test harness/infrastructure scripts are owned by their exact TEST projects; production coverage is unchanged.")
           PY
 
       - name: Run Python accounting regressions and collect coverage for analysis
@@ -1068,13 +1190,13 @@ jobs:
               (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve(),
               *{
                   (base / "Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration" / name).resolve()
-                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1")
+                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1", "PowerShellLineCoverage.ps1", "Test-PowerShellLineCoverage.ps1", "Test-AuthHttpsConfiguration.ps1")
               },
           }
           main_scripts = {
               (base / "Deployments/local-stack" / name).resolve()
               for name in ("Test-Configuration.ps1", "Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1",
-                           "Initialize-Databases.ps1", "W3-NativeDiagnostics.ps1")
+                           "Initialize-Databases.ps1", "W3-NativeDiagnostics.ps1", "Initialize-AuthHttpsConfiguration.ps1")
           }
           text = (base / ".sonarqube/out/sonar-project.properties").read_text(encoding="utf-8-sig")
           text = re.sub(r"\\\r?\n[ \t]*", "", text)
@@ -1092,7 +1214,7 @@ jobs:
           for script in main_scripts:
               if script not in scopes["sonar.sources"] or script in scopes["sonar.tests"]:
                   raise SystemExit(f"Forwarding and operational entrypoints must remain MAIN source: {script.relative_to(base)}")
-          print("Final scanner input: four assertion suites are TEST; forwarding and operational entrypoints remain MAIN.")
+          print("Final scanner input: seven test harness/infrastructure scripts are TEST; forwarding and operational entrypoints remain MAIN.")
           PY
 
   mvp_validation:
@@ -1104,6 +1226,7 @@ jobs:
       - life05a_verifier
       - production_conformance
       - docker_images
+      - powershell_coverage
       - sonar
     if: ${{ always() }}
     runs-on: ubuntu-24.04
@@ -1117,6 +1240,7 @@ jobs:
           LIFE05A_VERIFIER_RESULT: ${{ needs.life05a_verifier.result }}
           PRODUCTION_CONFORMANCE_RESULT: ${{ needs.production_conformance.result }}
           DOCKER_IMAGES_RESULT: ${{ needs.docker_images.result }}
+          POWERSHELL_COVERAGE_RESULT: ${{ needs.powershell_coverage.result }}
           SONAR_RESULT: ${{ needs.sonar.result }}
         run: |
           if [[ "${TRUSTED_SOURCE}" != "true" ]]; then
@@ -1131,6 +1255,7 @@ jobs:
             "LIFE-05A synthetic verifier (exact head):${LIFE05A_VERIFIER_RESULT}" \
             "Issue 46 production conformance targets:${PRODUCTION_CONFORMANCE_RESULT}" \
             "Docker images (4):${DOCKER_IMAGES_RESULT}" \
+            "Windows PowerShell core coverage:${POWERSHELL_COVERAGE_RESULT}" \
             "SonarQube Cloud / Quality Gate:${SONAR_RESULT}"
           do
             component_name="${component_result%%:*}"
