@@ -15,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Zeka.DbMigrate/Zeka.DbMigrate.csproj" />
+    <ProjectReference Include="../Zeka.LocalStack.DatabaseSetup/Zeka.LocalStack.DatabaseSetup.csproj" />
   </ItemGroup>
 </Project>
