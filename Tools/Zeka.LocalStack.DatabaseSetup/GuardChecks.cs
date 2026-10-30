@@ -266,7 +266,7 @@ internal static class GuardChecks
         // in-memory value. It is never part of JSON, diagnostic output or ToString().
         const string sql = """
             SELECT json_build_object(
-                       'oid',a.oid,'rolname',a.rolname,'rolsuper',a.rolsuper,
+                       'oid',a.oid::bigint,'rolname',a.rolname,'rolsuper',a.rolsuper,
                        'rolinherit',a.rolinherit,'rolcreaterole',a.rolcreaterole,
                        'rolcreatedb',a.rolcreatedb,'rolcanlogin',a.rolcanlogin,
                        'rolreplication',a.rolreplication,'rolbypassrls',a.rolbypassrls,
