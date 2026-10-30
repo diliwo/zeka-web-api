@@ -78,6 +78,7 @@ jobs:
           test_projects=(
             "Services/AuthManager/Tests/Domain.UnitTests/Domain.UnitTests.csproj"
             "Services/AuthManager/Tests/Application.UnitTests/Application.UnitTests.csproj"
+            "Tools/Zeka.AuthOwnerProvision.Tests/Zeka.AuthOwnerProvision.Tests.csproj"
             "Services/AuthManager/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj"
             "Services/AdminAreaManagement/Tests/Domain.UnitTests/Domain.UnitTests.csproj"
             "Services/AdminAreaManagement/Tests/Application.UnitTests/Application.UnitTests.csproj"
@@ -878,6 +879,54 @@ jobs:
             authman.api \
             zekaocelotgw
 
+      - name: Install pinned SDK for the owner helper
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - name: Build source-bound private owner helper and prove rejected stdin
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
+          export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
+          payload="$RUNNER_TEMP/zeka-owner-helper-publish"
+          evidence="$RUNNER_TEMP/zeka-owner-helper-evidence"
+          mkdir "$evidence"
+          dotnet publish Tools/Zeka.AuthOwnerProvision/Zeka.AuthOwnerProvision.csproj --configuration Release --runtime linux-x64 --self-contained false --output "$payload" -p:ZekaSourceSha="$EXPECTED_HEAD"
+          binary_sha=$(sha256sum "$payload/zeka-auth-owner-provision.dll" | cut -d' ' -f1)
+          docker build --file Tools/Zeka.AuthOwnerProvision/Dockerfile --build-arg SOURCE_COMMIT="$EXPECTED_HEAD" --build-arg BINARY_SHA256="$binary_sha" --tag "zeka-owner-helper-ci:$EXPECTED_HEAD" "$payload"
+          image_id=$(docker image inspect --format '{{.Id}}' "zeka-owner-helper-ci:$EXPECTED_HEAD")
+          set +e
+          printf '{}\n' | docker run --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16777216,mode=1777 --cap-drop ALL --security-opt no-new-privileges --label com.diliwo.zeka.scope=m1-owner-provision-negative-ci --interactive "$image_id" > "$evidence/rejected-stdin.json" 2> "$evidence/rejected-stdin.stderr"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          export OWNER_BINARY_SHA="$binary_sha" OWNER_IMAGE_ID="$image_id" OWNER_EVIDENCE="$evidence"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          evidence = Path(os.environ["OWNER_EVIDENCE"])
+          receipt = json.loads((evidence / "rejected-stdin.json").read_text())
+          if receipt.get("status") != "BLOCKED" or receipt.get("stage") != "admission" or receipt.get("code") != "INPUT_SCHEMA_REJECTED" or receipt.get("exitCode") != 2:
+              raise SystemExit("Owner helper must reject invalid stdin before any database or identity work.")
+          (evidence / "build-result.json").write_text(json.dumps({"sourceCommit": os.environ["EXPECTED_HEAD"], "binarySha256": os.environ["OWNER_BINARY_SHA"], "imageId": os.environ["OWNER_IMAGE_ID"], "rejectedStdinExit": 2, "runtimeProvisioning": "NOT RUN"}, indent=2))
+          PY
+
+      - name: Retain safe owner helper image evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: owner-helper-source-and-rejection
+          path: |
+            ${{ runner.temp }}/zeka-owner-helper-evidence/build-result.json
+            ${{ runner.temp }}/zeka-owner-helper-evidence/rejected-stdin.json
+          if-no-files-found: error
+          retention-days: 14
   powershell_coverage:
     name: Windows PowerShell core coverage
     needs: source_policy
@@ -913,6 +962,22 @@ jobs:
           [IO.File]::WriteAllText((Join-Path $directory 'source-revision.txt'), $actualHead, [Text.UTF8Encoding]::new($false))
           Write-Output 'TLS file-only CI coverage BLOCKED: mandatory Sonar CLI authentication is unavailable in this credential-free Windows job; no TLS runtime readiness is claimed.'
 
+      - name: Prove owner admission with synthetic facts only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $directory = Join-Path $env:RUNNER_TEMP 'zeka-owner-admission-tests'
+          [IO.Directory]::CreateDirectory($directory) | Out-Null
+          & ./Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1 -ReportFile (Join-Path $directory 'owner-admission.json')
+
+      - name: Retain safe synthetic owner admission proof
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: owner-admission-synthetic-windows
+          path: ${{ runner.temp }}/zeka-owner-admission-tests/owner-admission.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Retain only coverage XML and source-bound safe counts
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -1088,7 +1153,7 @@ jobs:
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
             /d:sonar.coverageReportPaths="TestResults/powershell-coverage/powershell-coverage.xml" \
-            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellCoverageChild.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1" \
+            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellCoverageChild.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1,Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
@@ -1105,6 +1170,8 @@ jobs:
           base = Path.cwd()
           namespace = {"s": "http://www.sonarsource.com/msbuild/integration/2015/1"}
           script_projects = {
+              (base / "Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1").resolve():
+                  (base / "Tools/Zeka.AuthOwnerProvision.Tests/Zeka.AuthOwnerProvision.Tests.csproj").resolve(),
               (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve():
                   (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj").resolve(),
               **{
@@ -1132,7 +1199,7 @@ jobs:
           for script, project in script_projects.items():
               if owners[script] != {(project, "Test", "false")}:
                   raise SystemExit(f"Assertion script must be included by its exact non-excluded test project: {script.relative_to(base)}")
-          print("Nine test harness/infrastructure scripts are owned by their exact TEST projects; production coverage is unchanged.")
+          print("Ten test harness/infrastructure scripts are owned by their exact TEST projects; production coverage is unchanged.")
           PY
 
       - name: Run Python accounting regressions and collect coverage for analysis
@@ -1199,6 +1266,7 @@ jobs:
 
           base = Path.cwd()
           assertion_scripts = {
+              (base / "Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1").resolve(),
               (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve(),
               *{
                   (base / "Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration" / name).resolve()
@@ -1208,7 +1276,7 @@ jobs:
           main_scripts = {
               (base / "Deployments/local-stack" / name).resolve()
               for name in ("Test-Configuration.ps1", "Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1",
-                           "Initialize-Databases.ps1", "W3-NativeDiagnostics.ps1", "Initialize-AuthHttpsConfiguration.ps1")
+                           "Initialize-Databases.ps1", "W3-NativeDiagnostics.ps1", "Initialize-AuthHttpsConfiguration.ps1", "Invoke-OwnerFirstAdmin.ps1")
           }
           text = (base / ".sonarqube/out/sonar-project.properties").read_text(encoding="utf-8-sig")
           text = re.sub(r"\\\r?\n[ \t]*", "", text)
@@ -1226,7 +1294,7 @@ jobs:
           for script in main_scripts:
               if script not in scopes["sonar.sources"] or script in scopes["sonar.tests"]:
                   raise SystemExit(f"Forwarding and operational entrypoints must remain MAIN source: {script.relative_to(base)}")
-          print("Final scanner input: nine test harness/infrastructure scripts are TEST; forwarding and operational entrypoints remain MAIN.")
+          print("Final scanner input: ten test harness/infrastructure scripts are TEST; forwarding and operational entrypoints remain MAIN.")
           PY
 
   mvp_validation:
