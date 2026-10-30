@@ -19,13 +19,6 @@ public sealed class User : IdentityUser<Guid>
 
     public DateTimeOffset? UpdatedAtUtc { get; private set; }
 
-    public void ActivateAfterEmailVerification(DateTimeOffset activatedAtUtc)
-    {
-        if (Status != UserStatus.PendingVerification || !EmailConfirmed || activatedAtUtc < CreatedAtUtc)
-            throw new InvalidOperationException("USER_VERIFIED_ACTIVATION_REJECTED");
-        Status = UserStatus.Active;
-        UpdatedAtUtc = activatedAtUtc;
-    }
 
     public static User Create(
         string email,
