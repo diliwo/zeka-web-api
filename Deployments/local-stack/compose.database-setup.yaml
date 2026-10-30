@@ -1,0 +1,36 @@
+name: zeka-m1
+services:
+  postgres:
+    image: postgres:17
+    restart: "no"
+    networks: [internal]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    secrets: [postgres_admin_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    labels:
+      com.diliwo.zeka.initialization-id: ${ZEKA_M1_INITIALIZATION_ID:?Initialization ID required}
+      com.diliwo.zeka.scope: m1-database-bootstrap
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: {driver: none}
+    mem_limit: 1g
+networks:
+  internal:
+    internal: true
+    labels:
+      com.diliwo.zeka.initialization-id: ${ZEKA_M1_INITIALIZATION_ID:?Initialization ID required}
+      com.diliwo.zeka.scope: m1-database-bootstrap
+volumes:
+  postgres_data:
+    labels:
+      com.diliwo.zeka.initialization-id: ${ZEKA_M1_INITIALIZATION_ID:?Initialization ID required}
+      com.diliwo.zeka.scope: m1-database-bootstrap
+secrets:
+  postgres_admin_password:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Protected M1 directory required}/postgres/admin-password

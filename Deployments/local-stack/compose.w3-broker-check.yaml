@@ -1,0 +1,24 @@
+name: zeka-m1
+# Disposable, explicitly local-only broker check. Never use in TEST.
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    profiles: [w3-broker-check]
+    restart: "no"
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit loopback_users []"
+    networks: [w3_broker_internal]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    labels:
+      com.diliwo.zeka.scope: w3-broker-check-local-only
+    mem_limit: 512m
+networks:
+  w3_broker_internal:
+    internal: true
+    labels:
+      com.diliwo.zeka.scope: w3-broker-check-local-only
