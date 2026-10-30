@@ -909,7 +909,7 @@ jobs:
           # their mandatory Sonar CLI admission requires an unreleased Windows CI credential path.
           # The TLS test stays TEST source, and operational TLS code stays MAIN/uncovered in Sonar.
           $directory = Join-Path $env:RUNNER_TEMP 'zeka-powershell-coverage'
-          & ./Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1 -Directory $directory
+          & ./Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1 -Directory $directory
           [IO.File]::WriteAllText((Join-Path $directory 'source-revision.txt'), $actualHead, [Text.UTF8Encoding]::new($false))
           Write-Output 'TLS file-only CI coverage BLOCKED: mandatory Sonar CLI authentication is unavailable in this credential-free Windows job; no TLS runtime readiness is claimed.'
 
@@ -922,6 +922,18 @@ jobs:
             ${{ runner.temp }}/zeka-powershell-coverage/powershell-coverage.xml
             ${{ runner.temp }}/zeka-powershell-coverage/powershell-coverage-result.json
             ${{ runner.temp }}/zeka-powershell-coverage/source-revision.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Retain safe launcher and native receipts separately from coverage import
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: powershell-core-diagnostics
+          path: |
+            ${{ runner.temp }}/zeka-powershell-coverage/launcher-proof.json
+            ${{ runner.temp }}/zeka-powershell-coverage/launcher-result.json
+            ${{ runner.temp }}/zeka-powershell-coverage/native-result.json
           if-no-files-found: error
           retention-days: 14
 
@@ -1076,7 +1088,7 @@ jobs:
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
             /d:sonar.coverageReportPaths="TestResults/powershell-coverage/powershell-coverage.xml" \
-            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1" \
+            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellCoverageChild.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
@@ -1098,7 +1110,7 @@ jobs:
               **{
                   (base / "Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration" / name).resolve():
                       (base / "Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj").resolve()
-                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1", "PowerShellLineCoverage.ps1", "Test-PowerShellLineCoverage.ps1", "Test-AuthHttpsConfiguration.ps1")
+                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1", "PowerShellLineCoverage.ps1", "Test-PowerShellLineCoverage.ps1", "Test-AuthHttpsConfiguration.ps1", "PowerShellCoverageChild.ps1", "Test-PowerShellCoverageChild.ps1")
               },
           }
           for script, project in script_projects.items():
@@ -1120,7 +1132,7 @@ jobs:
           for script, project in script_projects.items():
               if owners[script] != {(project, "Test", "false")}:
                   raise SystemExit(f"Assertion script must be included by its exact non-excluded test project: {script.relative_to(base)}")
-          print("Seven test harness/infrastructure scripts are owned by their exact TEST projects; production coverage is unchanged.")
+          print("Nine test harness/infrastructure scripts are owned by their exact TEST projects; production coverage is unchanged.")
           PY
 
       - name: Run Python accounting regressions and collect coverage for analysis
@@ -1190,7 +1202,7 @@ jobs:
               (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve(),
               *{
                   (base / "Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration" / name).resolve()
-                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1", "PowerShellLineCoverage.ps1", "Test-PowerShellLineCoverage.ps1", "Test-AuthHttpsConfiguration.ps1")
+                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1", "PowerShellLineCoverage.ps1", "Test-PowerShellLineCoverage.ps1", "Test-AuthHttpsConfiguration.ps1", "PowerShellCoverageChild.ps1", "Test-PowerShellCoverageChild.ps1")
               },
           }
           main_scripts = {
@@ -1214,7 +1226,7 @@ jobs:
           for script in main_scripts:
               if script not in scopes["sonar.sources"] or script in scopes["sonar.tests"]:
                   raise SystemExit(f"Forwarding and operational entrypoints must remain MAIN source: {script.relative_to(base)}")
-          print("Final scanner input: seven test harness/infrastructure scripts are TEST; forwarding and operational entrypoints remain MAIN.")
+          print("Final scanner input: nine test harness/infrastructure scripts are TEST; forwarding and operational entrypoints remain MAIN.")
           PY
 
   mvp_validation:

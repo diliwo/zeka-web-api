@@ -24,5 +24,7 @@
     <Content Include="LocalStackConfiguration/PowerShellLineCoverage.ps1" />
     <Content Include="LocalStackConfiguration/Test-PowerShellLineCoverage.ps1" />
     <Content Include="LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1" />
+    <Content Include="LocalStackConfiguration/PowerShellCoverageChild.ps1" />
+    <Content Include="LocalStackConfiguration/Test-PowerShellCoverageChild.ps1" />
   </ItemGroup>
 </Project>
