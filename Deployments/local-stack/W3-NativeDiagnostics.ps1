@@ -129,7 +129,8 @@ function Assert-W3DockerArguments {
                 $envValue -in @('POSTGRES_PASSWORD_FILE=/run/secrets/admin-password',
                                'POSTGRES_PASSWORD_FILE=/run/secrets/postgres_admin_password') -or
                 $envValue -eq 'POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256' -or
-                $envValue -match '^ZEKA_M1_GUARD_FIXTURE=zeka-m1-bootstrap-fixture-[0-9a-f]{32}$'
+                $envValue -match '^ZEKA_M1_GUARD_FIXTURE=zeka-m1-bootstrap-fixture-[0-9a-f]{32}$' -or
+                $envValue -eq 'ZEKA_M1_PG17_REGRESSION_CONFIG=/run/setup/provider-regression.json'
             if (!$allowed) {
                 $decision.ReasonCode='CONTAINER_ENVIRONMENT_NOT_ALLOWLISTED'; return $decision
             }
@@ -254,4 +255,20 @@ function Get-W3MountSource {
     $result=@{WindowsLogical=$logical;WindowsPhysical=$physical;DaemonPath=$daemon;Readable=$true;SourceExists=$true}
     Write-W3DiagnosticRecord @{operation='mount.resolve';decision='metadata_verified';nativeStarted=$false;nativeExit=$null;mount=$result}
     return $result
+}
+
+function Complete-W3AtomicFileWrite {
+    param([Parameter(Mandatory)][string]$TemporaryPath,
+          [Parameter(Mandatory)][string]$DestinationPath,
+          [switch]$Replace)
+    $source=[IO.Path]::GetFullPath($TemporaryPath)
+    $destination=[IO.Path]::GetFullPath($DestinationPath)
+    if (![StringComparer]::OrdinalIgnoreCase.Equals([IO.Path]::GetDirectoryName($source),[IO.Path]::GetDirectoryName($destination))) {
+        throw [InvalidOperationException]::new('ATOMIC_WRITE_CROSS_DIRECTORY_REJECTED')
+    }
+    if (Test-Path -LiteralPath $destination) {
+        if (!$Replace) { throw [InvalidOperationException]::new('ATOMIC_WRITE_OVERWRITE_REJECTED') }
+        # A PowerShell $null string argument binds as empty; NullString passes a real null backup path.
+        [IO.File]::Replace($source,$destination,[NullString]::Value)
+    } else { [IO.File]::Move($source,$destination) }
 }

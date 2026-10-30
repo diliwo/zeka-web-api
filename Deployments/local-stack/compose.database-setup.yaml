@@ -13,6 +13,7 @@ services:
     labels:
       com.diliwo.zeka.initialization-id: ${ZEKA_M1_INITIALIZATION_ID:?Initialization ID required}
       com.diliwo.zeka.scope: m1-database-bootstrap
+      com.diliwo.zeka.owner: windows-codex-m1
     healthcheck:
       test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres"]
       interval: 5s
@@ -26,11 +27,13 @@ networks:
     labels:
       com.diliwo.zeka.initialization-id: ${ZEKA_M1_INITIALIZATION_ID:?Initialization ID required}
       com.diliwo.zeka.scope: m1-database-bootstrap
+      com.diliwo.zeka.owner: windows-codex-m1
 volumes:
   postgres_data:
     labels:
       com.diliwo.zeka.initialization-id: ${ZEKA_M1_INITIALIZATION_ID:?Initialization ID required}
       com.diliwo.zeka.scope: m1-database-bootstrap
+      com.diliwo.zeka.owner: windows-codex-m1
 secrets:
   postgres_admin_password:
     file: ${ZEKA_M1_POSTGRES_ADMIN_SOURCE:?Verified physical administrator file required}

@@ -1,7 +1,10 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Npgsql;
+
+[assembly: InternalsVisibleTo("Zeka.DbMigrate.Tests")]
 
 namespace Zeka.LocalStack.DatabaseSetup;
 
@@ -21,9 +24,23 @@ internal static class GuardChecks
         var cases = new List<GuardCase>();
         string? failure = null;
         var activeCase = "fixture_admission";
+        var activeStage = activeCase;
+        string? failedCase = null;
+        string? failureStage = null;
+        string? exceptionType = null;
+        string? sqlState = null;
         var admitted = false;
         NpgsqlConnection? admin = null;
         string? fixture = null;
+        void RecordFailure(string code, Exception error)
+        {
+            if (failure is not null) return;
+            failure = code;
+            failedCase = activeCase;
+            failureStage = activeStage;
+            exceptionType = error.GetType().Name;
+            sqlState = (error as PostgresException)?.SqlState;
+        }
         try
         {
             fixture = Environment.GetEnvironmentVariable("ZEKA_M1_GUARD_FIXTURE");
@@ -45,6 +62,7 @@ internal static class GuardChecks
             var passwords = Passwords();
 
             activeCase = "new_roles_comments_and_password_roundtrip";
+            activeStage = activeCase;
             Require(await RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service, passwords, true, ct) == 4,
                 "GUARD_NEW_ROLE_COUNT_REJECTED");
             await AssertCommentsAsync(admin, fixture!, ct);
@@ -56,14 +74,19 @@ internal static class GuardChecks
             cases.Add(new(activeCase, "passed"));
 
             activeCase = "repeat_preserves_oids_comments_and_password_hashes";
+            activeStage = activeCase;
+            activeStage = "repeat_snapshot_before";
             var before = await SnapshotAsync(admin, ct);
+            activeStage = "repeat_registry_ensure";
             Require(await RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service, passwords, false, ct) == 0,
                 "GUARD_REPEAT_CREATED_ROLE");
+            activeStage = "repeat_snapshot_after";
             await AssertSnapshotAsync(admin, before, ct);
             cases.Add(new(activeCase, "passed"));
             await CleanupAsync(admin, ct);
 
             activeCase = "unmarked_existing_role_rejected_without_partial_creation";
+            activeStage = activeCase;
             await ExecuteAsync(admin, "CREATE ROLE zeka_auth_runtime LOGIN NOSUPERUSER NOBYPASSRLS " +
                 "NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION CONNECTION LIMIT -1", ct);
             before = await SnapshotAsync(admin, ct);
@@ -75,6 +98,7 @@ internal static class GuardChecks
             await CleanupAsync(admin, ct);
 
             activeCase = "missing_comment_rejected_untouched";
+            activeStage = activeCase;
             await RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service, passwords, true, ct);
             await ExecuteAsync(admin, "COMMENT ON ROLE zeka_auth_owner IS NULL", ct);
             before = await SnapshotAsync(admin, ct);
@@ -85,6 +109,7 @@ internal static class GuardChecks
             await CleanupAsync(admin, ct);
 
             activeCase = "foreign_initialization_comment_rejected_untouched";
+            activeStage = activeCase;
             await RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service, passwords, true, ct);
             await ExecuteAsync(admin, "COMMENT ON ROLE zeka_auth_runtime IS 'foreign-initialization'", ct);
             before = await SnapshotAsync(admin, ct);
@@ -95,16 +120,31 @@ internal static class GuardChecks
             await CleanupAsync(admin, ct);
 
             activeCase = "attribute_drift_rejected_untouched";
+            activeStage = activeCase;
             await RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service, passwords, true, ct);
             await ExecuteAsync(admin, "ALTER ROLE zeka_auth_runtime CREATEDB", ct);
             before = await SnapshotAsync(admin, ct);
             await AssertRejectedAsync(() => RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service,
                 passwords, true, ct), "ROLE_REGISTRY_FOREIGN_OR_DRIFTED_ROLE");
             await AssertSnapshotAsync(admin, before, ct);
+            await CleanupAsync(admin, ct);
+
+            activeStage = "role_level_settings_drift";
+            await RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service, passwords, true, ct);
+            await ExecuteAsync(admin, "ALTER ROLE zeka_auth_runtime SET statement_timeout='1s'", ct);
+            await AssertSettingsDriftRejectedAsync(admin, fixture!, passwords, ct);
+            await CleanupAsync(admin, ct);
+
+            activeStage = "database_scoped_settings_drift";
+            await RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service, passwords, true, ct);
+            await ExecuteAsync(admin,
+                "ALTER ROLE zeka_auth_runtime IN DATABASE postgres SET statement_timeout='1s'", ct);
+            await AssertSettingsDriftRejectedAsync(admin, fixture!, passwords, ct);
             cases.Add(new(activeCase, "passed"));
             await CleanupAsync(admin, ct);
 
             activeCase = "missing_saved_password_rejected_without_partial_creation";
+            activeStage = activeCase;
             await AssertRejectedAsync(() => RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service,
                 new Dictionary<string, string> { ["runtime"] = passwords["runtime"] }, true, ct),
                 "ROLE_REGISTRY_INPUT_REJECTED");
@@ -112,6 +152,7 @@ internal static class GuardChecks
             cases.Add(new(activeCase, "passed"));
 
             activeCase = "missing_established_role_rejected_without_partial_creation";
+            activeStage = activeCase;
             await RoleRegistry.EnsureAsync(admin, fixture!, Revision, Service, passwords, true, ct);
             await ExecuteAsync(admin, "DROP ROLE zeka_auth_runtime", ct);
             before = await SnapshotAsync(admin, ct);
@@ -120,9 +161,9 @@ internal static class GuardChecks
             await AssertSnapshotAsync(admin, before, ct);
             cases.Add(new(activeCase, "passed"));
         }
-        catch (GuardFailure error) { failure = error.Message; }
-        catch (OperationCanceledException) { failure = "GUARD_DEADLINE_OR_CANCELLATION"; }
-        catch { failure = "GUARD_OPERATION_REJECTED"; }
+        catch (GuardFailure error) { RecordFailure(error.Message, error); }
+        catch (OperationCanceledException error) { RecordFailure("GUARD_DEADLINE_OR_CANCELLATION", error); }
+        catch (Exception error) { RecordFailure("GUARD_OPERATION_REJECTED", error); }
         finally
         {
             if (failure is null && admitted && admin is not null)
@@ -130,26 +171,37 @@ internal static class GuardChecks
                 using var cleanupDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 try
                 {
+                    activeCase = "fixture_cleanup";
+                    activeStage = activeCase;
                     await AssertFixtureAsync(admin, fixture!, false, cleanupDeadline.Token);
                     await CleanupAsync(admin, cleanupDeadline.Token);
                     Require((await SnapshotAsync(admin, cleanupDeadline.Token)).Count == 0,
                         "GUARD_CLEANUP_REJECTED");
                 }
-                catch { failure ??= "GUARD_CLEANUP_REJECTED"; }
+                catch (Exception error) { RecordFailure("GUARD_CLEANUP_REJECTED", error); }
             }
             if (admin is not null)
             {
                 try { await admin.DisposeAsync(); }
-                catch { failure ??= "GUARD_CONNECTION_DISPOSAL_REJECTED"; }
+                catch (Exception error)
+                {
+                    activeCase = "fixture_connection_disposal";
+                    activeStage = activeCase;
+                    RecordFailure("GUARD_CONNECTION_DISPOSAL_REJECTED", error);
+                }
             }
         }
-        if (failure is not null) cases.Add(new(activeCase, "failed"));
+        if (failure is not null) cases.Add(new(failedCase ?? activeCase, "failed"));
         var report = new
         {
             schema = "zeka-m1-bootstrap-guards/v1",
             status = failure is null ? "passed" : "failed",
             passed = cases.Count(value => value.Status == "passed"),
             failureCode = failure,
+            failedCase,
+            stage = failureStage,
+            exceptionType,
+            sqlState,
             cases,
             scope = "Dedicated marked PostgreSQL fixture; fixed auth roles only; no application databases.",
             limit = "Successful committed role/comment creation and rejection atomicity were checked; " +
@@ -208,29 +260,81 @@ internal static class GuardChecks
         Require(count == 4, "GUARD_COMMENT_COUNT_REJECTED");
     }
 
-    private static async Task<List<string>> SnapshotAsync(NpgsqlConnection admin, CancellationToken ct)
+    internal static async Task<List<RoleSnapshot>> SnapshotAsync(NpgsqlConnection admin, CancellationToken ct)
     {
-        // Password hashes remain in process memory and are never included in results or exceptions.
+        // The verifier fingerprint is a separate reader column held only in an opaque
+        // in-memory value. It is never part of JSON, diagnostic output or ToString().
         const string sql = """
-            SELECT row_to_json(s)::text FROM (
-                SELECT oid,rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolcanlogin,
-                       rolreplication,rolbypassrls,rolconnlimit,rolconfig,rolvaliduntil,
-                       md5(coalesce(rolpassword,'')) AS password_fingerprint,
-                       pg_catalog.shobj_description(oid,'pg_authid') AS comment
-                FROM pg_catalog.pg_authid WHERE rolname=ANY(@roles) ORDER BY rolname
-            ) s
+            SELECT json_build_object(
+                       'oid',a.oid,'rolname',a.rolname,'rolsuper',a.rolsuper,
+                       'rolinherit',a.rolinherit,'rolcreaterole',a.rolcreaterole,
+                       'rolcreatedb',a.rolcreatedb,'rolcanlogin',a.rolcanlogin,
+                       'rolreplication',a.rolreplication,'rolbypassrls',a.rolbypassrls,
+                       'rolconnlimit',a.rolconnlimit,'rolconfig',r.rolconfig,
+                       'rolvaliduntil',a.rolvaliduntil,
+                       'comment',pg_catalog.shobj_description(a.oid,'pg_authid'))::text,
+                   md5(coalesce(a.rolpassword,'')),
+                   a.rolpassword IS NOT NULL,
+                   r.rolconfig IS NULL,
+                   NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting settings
+                               WHERE settings.setrole=a.oid)
+            FROM pg_catalog.pg_authid a
+            JOIN pg_catalog.pg_roles r ON r.oid=a.oid
+            WHERE a.rolname=ANY(@roles)
+            ORDER BY a.rolname
             """;
         await using var command = Command(admin, sql);
         command.Parameters.AddWithValue("roles", Roles);
         await using var reader = await command.ExecuteReaderAsync(ct);
-        var snapshot = new List<string>();
-        while (await reader.ReadAsync(ct)) snapshot.Add(reader.GetString(0));
+        var snapshot = new List<RoleSnapshot>();
+        while (await reader.ReadAsync(ct))
+        {
+            Require(reader.GetBoolean(3) && reader.GetBoolean(4), "GUARD_ROLE_SETTINGS_REJECTED");
+            snapshot.Add(new RoleSnapshot(reader.GetString(0), reader.GetString(1), reader.GetBoolean(2)));
+        }
         return snapshot;
     }
 
-    private static async Task AssertSnapshotAsync(NpgsqlConnection admin, List<string> before,
+    internal sealed class RoleSnapshot : IEquatable<RoleSnapshot>
+    {
+        private readonly string _passwordFingerprint;
+        private readonly bool _hasPassword;
+
+        internal RoleSnapshot(string roleState, string passwordFingerprint, bool hasPassword)
+        {
+            RoleState = roleState;
+            _passwordFingerprint = passwordFingerprint;
+            _hasPassword = hasPassword;
+        }
+
+        internal string RoleState { get; }
+        internal bool HasPasswordFingerprint => _hasPassword && _passwordFingerprint.Length > 0;
+        internal bool MatchesFingerprint(string expected) =>
+            string.Equals(_passwordFingerprint, expected, StringComparison.Ordinal);
+
+        public bool Equals(RoleSnapshot? other) => other is not null
+            && string.Equals(RoleState, other.RoleState, StringComparison.Ordinal)
+            && _hasPassword == other._hasPassword
+            && string.Equals(_passwordFingerprint, other._passwordFingerprint, StringComparison.Ordinal);
+        public override bool Equals(object? other) => other is RoleSnapshot snapshot && Equals(snapshot);
+        public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(RoleState);
+        public override string ToString() => "RoleSnapshot (credential details withheld)";
+    }
+
+    private static async Task AssertSnapshotAsync(NpgsqlConnection admin, List<RoleSnapshot> before,
         CancellationToken ct) => Require(before.SequenceEqual(await SnapshotAsync(admin, ct)),
         "GUARD_REJECTION_OR_REPEAT_MUTATED_ROLE");
+
+    private static async Task AssertSettingsDriftRejectedAsync(NpgsqlConnection admin, string fixture,
+        IReadOnlyDictionary<string, string> passwords, CancellationToken ct)
+    {
+        await AssertRejectedAsync(async () => { await SnapshotAsync(admin, ct); return 0; },
+            "GUARD_ROLE_SETTINGS_REJECTED");
+        await AssertRejectedAsync(() => RoleRegistry.EnsureAsync(admin, fixture, Revision, Service,
+            passwords, false, ct), "ROLE_REGISTRY_FOREIGN_OR_DRIFTED_ROLE");
+        await AssertRejectedAsync(async () => { await SnapshotAsync(admin, ct); return 0; },
+            "GUARD_ROLE_SETTINGS_REJECTED");
+    }
 
     private static async Task AssertRejectedAsync(Func<Task<int>> operation, string expected)
     {

@@ -11,6 +11,7 @@ $lock = $null
 $progress = $null
 $progressFile = $null
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$executorOwner = 'windows-codex-m1'
 $expectedOwnerRoot = 'C:\Users\herve\AppData\Local\Zeka\M1\private'
 . (Join-Path $PSScriptRoot 'W3-NativeDiagnostics.ps1')
 $diagnosticPath = Join-Path ([IO.Path]::GetFullPath($BuildDirectory)) ('native-diagnostics-' + [Guid]::NewGuid().ToString('N'))
@@ -20,8 +21,56 @@ function Native([string]$Exe, [string[]]$Argv, [int]$Milliseconds = 120000, [boo
     $name = [IO.Path]::GetFileNameWithoutExtension($Exe)
     $verb = $Argv[0]
     if ($name -eq 'docker' -and $verb -in @('volume','network','image','container')) { $verb += '.' + $Argv[1] }
+    if ($name -eq 'docker' -and $Argv[0] -eq 'build') {
+        if ((Native 'docker' @('context','show')).Out.Trim() -ne 'default' -or
+            (Native 'docker' @('info','--format','{{.ID}}')).Out.Trim() -ne '0b62f5ec-15d9-4e4b-a450-817d52378eef') { Fail 'DOCKER_TARGET_REJECTED' }
+    }
+    if ($name -eq 'docker' -and (($Argv[0] -eq 'compose' -and $Argv -contains 'up') -or $Argv[0] -eq 'run')) {
+        Assert-DatabaseResourceAdmission -ExistingRequired:($Argv[0] -eq 'run')
+        if ($Argv[0] -eq 'run') {
+            $nameIndex=[Array]::IndexOf($Argv,'--name')
+            if ($nameIndex -lt 0 -or $Argv[$nameIndex+1] -notmatch ('^'+[regex]::Escape($ProjectName)+'-db-(auth|adminarea|client)-[a-f0-9]{8}$')) { Fail 'NEW_RUNNER_NAME_REJECTED' }
+            $absent=Native 'docker' @('container','inspect',$Argv[$nameIndex+1]) 15000 $true
+            if ($absent.Exit -eq 0 -or $absent.Error -notmatch '(?i)(no such|not found)') { Fail 'NEW_RUNNER_ABSENCE_UNPROVEN' }
+            if ($Argv -notcontains ('com.diliwo.zeka.owner='+$executorOwner)) { Fail 'RUNNER_OWNER_LABEL_REJECTED' }
+        }
+    }
     return Invoke-W3Native -Exe $Exe -ArgumentList $Argv -WorkingDirectory $repo -TimeoutMs $Milliseconds -Operation ($stage + '.' + $name + '.' + $verb) -AllowFailure:$AllowFailure
 }
+
+function Assert-DatabaseResourceAdmission {
+    param([switch]$ExistingRequired)
+    if ((Native 'docker' @('context','show')).Out.Trim() -ne 'default' -or
+        (Native 'docker' @('info','--format','{{.ID}}')).Out.Trim() -ne '0b62f5ec-15d9-4e4b-a450-817d52378eef') { Fail 'DOCKER_TARGET_REJECTED' }
+    $observations=@{
+        container=(Native 'docker' @('container','inspect',$container) 15000 $true)
+        network=(Native 'docker' @('network','inspect',$networkName) 15000 $true)
+        volume=(Native 'docker' @('volume','inspect',$volume) 15000 $true)
+    }
+    foreach($kind in $observations.Keys){
+        $observed=$observations[$kind]
+        if($observed.Exit -ne 0){
+            if($ExistingRequired -or $observed.Error -notmatch '(?i)(no such|not found)'){Fail 'OWNED_DATABASE_RESOURCE_UNAVAILABLE'}
+            continue
+        }
+        $resource=($observed.Out|ConvertFrom-Json)[0]
+        $labels=if($kind-eq'container'){$resource.Config.Labels}else{$resource.Labels}
+        if($labels.'com.docker.compose.project'-ne$ProjectName-or$labels.'com.diliwo.zeka.owner'-ne$executorOwner-or$labels.'com.diliwo.zeka.initialization-id'-ne$progress.initializationId){Fail 'OWNED_DATABASE_RESOURCE_LABEL_DRIFT'}
+        if($kind-eq'container'-and(!$progress.containerId-or$resource.Id-ne$progress.containerId-or$resource.Name.TrimStart('/')-ne$container)){Fail 'OWNED_DATABASE_RESOURCE_ID_DRIFT'}
+        if($kind-eq'container'){
+            $connections=@($resource.NetworkSettings.Networks.PSObject.Properties)
+            $data=@($resource.Mounts|Where-Object Destination -EQ '/var/lib/postgresql/data')
+            $secret=@($resource.Mounts|Where-Object Destination -EQ '/run/secrets/postgres_admin_password')
+            if(@($resource.HostConfig.PortBindings.PSObject.Properties).Count-ne0-or$resource.HostConfig.NetworkMode-eq'host'-or$resource.Config.Image-ne'postgres:17' -or
+                $connections.Count-ne1-or$connections[0].Name-ne$networkName-or$connections[0].Value.NetworkID-ne$progress.networkId-or
+                $data.Count-ne1-or$data[0].Type-ne'volume'-or$data[0].Name-ne$volume-or!$data[0].RW-or
+                $secret.Count-ne1-or$secret[0].Type-ne'bind'-or$secret[0].RW-or$secret[0].Source-ne$adminMount.DaemonPath){Fail 'OWNED_DATABASE_RESOURCE_CONFIGURATION_DRIFT'}
+        }
+        if($kind-eq'network'-and(!$progress.networkId-or$resource.Id-ne$progress.networkId-or$resource.Name-ne$networkName-or!$resource.Internal)){Fail 'OWNED_DATABASE_RESOURCE_ID_DRIFT'}
+        if($kind-eq'volume'-and(!$progress.volumeCreated-or$resource.CreatedAt-ne$progress.volumeCreated-or$resource.Name-ne$volume)){Fail 'OWNED_DATABASE_RESOURCE_ID_DRIFT'}
+    }
+}
+
 function Restricted([string]$Path, [bool]$Protect = $false) {
     $item = Get-Item -LiteralPath $Path
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { Fail 'PRIVATE_REPARSE_REJECTED' }
@@ -56,7 +105,7 @@ function SaveBytes([string]$Path, [byte[]]$Bytes, [bool]$Replace = $false) {
         $stream.Flush($true)
     } finally { $stream.Dispose() }
     Restricted $temp
-    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temp, $Path, $null) } else { [IO.File]::Move($temp, $Path) }
+    Complete-W3AtomicFileWrite -TemporaryPath $temp -DestinationPath $Path -Replace:$Replace
     Restricted $Path
     if ((Get-Item -LiteralPath $Path).Length -ne $Bytes.Length) { Fail 'PRIVATE_WRITE_INCOMPLETE' }
 }
@@ -123,13 +172,13 @@ try {
     if (Test-Path -LiteralPath $progressFile) {
         Restricted $progressFile
         $progress = Get-Content -LiteralPath $progressFile -Raw | ConvertFrom-Json -AsHashtable
-        if ($progress.schema -ne 'zeka-m1-database-setup/v1' -or $progress.project -ne $ProjectName -or $progress.sourceCommit -ne $source -or $progress.engineId -ne $engine -or $progress.templateHash -ne $templateHash) { Fail 'INITIALIZATION_PROGRESS_IDENTITY_DRIFT' }
+        if ($progress.schema -ne 'zeka-m1-database-setup/v1' -or $progress.owner -ne $executorOwner -or $progress.project -ne $ProjectName -or $progress.sourceCommit -ne $source -or $progress.engineId -ne $engine -or $progress.templateHash -ne $templateHash) { Fail 'INITIALIZATION_PROGRESS_IDENTITY_DRIFT' }
         foreach ($key in $roleHashes.Keys) { if ($progress.roleSqlHashes[$key] -ne $roleHashes[$key]) { Fail 'ROLE_SOURCE_DRIFT' } }
         if (($progress.containerId -or $progress.clusterId) -and ($volumeObservation.Exit -ne 0 -or $containerObservation.Exit -ne 0)) { Fail 'ESTABLISHED_POSTGRES_RESOURCE_MISSING' }
         if ($progress.requiresInspection) { Fail 'PREVIOUS_OPERATION_REQUIRES_INSPECTION' }
     } else {
         if ($resourcesEstablished -or $networkObservation.Exit -eq 0) { Fail 'ESTABLISHED_RESOURCE_WITHOUT_PROGRESS' }
-        $progress = @{ schema = 'zeka-m1-database-setup/v1'; project = $ProjectName; sourceCommit = $source; engineId = $engine; initializationId = [Guid]::NewGuid().ToString('D'); templateHash = $templateHash; roleSqlHashes = $roleHashes; clusterId = $null; services = @{}; requiresInspection = $false }
+        $progress = @{ schema = 'zeka-m1-database-setup/v1'; owner = $executorOwner; project = $ProjectName; sourceCommit = $source; engineId = $engine; initializationId = [Guid]::NewGuid().ToString('D'); templateHash = $templateHash; roleSqlHashes = $roleHashes; clusterId = $null; services = @{}; requiresInspection = $false }
         SaveJson $progressFile $progress
     }
     if ($networkObservation.Exit -eq 0) {
@@ -191,7 +240,7 @@ try {
     $compose = Join-Path $PSScriptRoot 'compose.database-setup.yaml'
     $adminMount = Get-W3MountSource -WindowsPath $adminFile
     $env:ZEKA_M1_POSTGRES_ADMIN_SOURCE = $adminMount.WindowsPhysical
-    $null = Native 'docker' @('compose', '--project-name', $ProjectName, '-f', $compose, 'up', '-d', '--wait', '--wait-timeout', '60', 'postgres') 90000
+    $null = Native 'docker' @('compose', '--project-name', $ProjectName, '-f', $compose, 'up', '-d', '--no-recreate', '--wait', '--wait-timeout', '60', 'postgres') 90000
     $current = (((Native 'docker' @('inspect', $container)).Out) | ConvertFrom-Json)[0]
     if ($current.Config.Labels.'com.diliwo.zeka.initialization-id' -ne $progress.initializationId -or $current.NetworkSettings.Ports.'5432/tcp' -or $current.HostConfig.NetworkMode -eq 'host') { Fail 'POSTGRES_RESOURCE_ADMISSION_FAILED' }
     $currentNetworks = @($current.NetworkSettings.Networks.PSObject.Properties)
@@ -199,7 +248,14 @@ try {
     if ($currentNetworks.Count -ne 1 -or $currentNetworks[0].Name -ne $networkName -or $currentMounts.Count -ne 1 -or $currentMounts[0].Type -ne 'volume' -or $currentMounts[0].Name -ne $volume -or !$currentMounts[0].RW -or $current.Config.Image -ne 'postgres:17') { Fail 'POSTGRES_NETWORK_OR_VOLUME_ADMISSION_FAILED' }
     $admittedNetwork = (((Native 'docker' @('network', 'inspect', $networkName)).Out) | ConvertFrom-Json)[0]
     if (!$admittedNetwork.Internal -or $admittedNetwork.Driver -ne 'bridge' -or $admittedNetwork.Labels.'com.docker.compose.project' -ne $ProjectName -or $admittedNetwork.Labels.'com.diliwo.zeka.initialization-id' -ne $progress.initializationId) { Fail 'POSTGRES_NETWORK_ADMISSION_FAILED' }
-    $progress.containerId = $current.Id
+    $createdVolume=(((Native 'docker' @('volume','inspect',$volume)).Out)|ConvertFrom-Json)[0]
+    if($current.Config.Labels.'com.diliwo.zeka.owner'-ne$executorOwner-or$admittedNetwork.Labels.'com.diliwo.zeka.owner'-ne$executorOwner-or$createdVolume.Labels.'com.diliwo.zeka.owner'-ne$executorOwner){Fail 'OWNED_DATABASE_RESOURCE_LABEL_DRIFT'}
+    if(($progress.containerId-and$progress.containerId-ne$current.Id)-or
+       ($progress.networkId-and$progress.networkId-ne$admittedNetwork.Id)-or
+       ($progress.volumeCreated-and$progress.volumeCreated-ne$createdVolume.CreatedAt)){Fail 'OWNED_DATABASE_RESOURCE_ID_DRIFT'}
+    if(!$progress.networkId){$progress.networkId=$admittedNetwork.Id}
+    if(!$progress.volumeCreated){$progress.volumeCreated=$createdVolume.CreatedAt}
+    if(!$progress.containerId){$progress.containerId=$current.Id}
     SaveJson $progressFile $progress $true
     $stage = 'source-bound-runner-build'
     $build = [IO.Path]::GetFullPath($BuildDirectory)
@@ -212,10 +268,10 @@ try {
         if ($imageObservation.Error -notmatch '(?i)(no such image|not found)') { Fail 'IMAGE_OBSERVATION_UNCERTAIN' }
         $published = Join-Path $build 'published'
         $null = Native 'dotnet' @('publish', (Join-Path $repo 'Tools\Zeka.LocalStack.DatabaseSetup\Zeka.LocalStack.DatabaseSetup.csproj'), '--configuration', 'Release', '--output', $published, ('-p:ZekaSourceSha=' + $source)) 180000
-        $null = Native 'docker' @('build', '--pull=false', '--label', ('org.opencontainers.image.revision=' + $source), '-f', (Join-Path $repo 'Tools\Zeka.LocalStack.DatabaseSetup\Dockerfile'), '-t', $image, $build) 120000
+        $null = Native 'docker' @('build', '--pull=false', '--label', ('com.diliwo.zeka.owner='+$executorOwner), '--label', ('org.opencontainers.image.revision=' + $source), '-f', (Join-Path $repo 'Tools\Zeka.LocalStack.DatabaseSetup\Dockerfile'), '-t', $image, $build) 120000
     }
     $imageInfo = (((Native 'docker' @('image', 'inspect', $image)).Out) | ConvertFrom-Json)[0]
-    if ($imageInfo.Config.Labels.'org.opencontainers.image.revision' -ne $source) { Fail 'RUNNER_SOURCE_IDENTITY_DRIFT' }
+    if ($imageInfo.Config.Labels.'org.opencontainers.image.revision' -ne $source -or $imageInfo.Config.Labels.'com.diliwo.zeka.owner' -ne $executorOwner) { Fail 'RUNNER_SOURCE_IDENTITY_DRIFT' }
     $stage = 'service-setup'
     $results = @()
     foreach ($service in @('auth', 'adminarea', 'client')) {
@@ -232,7 +288,7 @@ try {
         $configurationMount = Get-W3MountSource -WindowsPath (Join-Path $private ($service + '\database.LocalStack.json'))
         $sqlMount = Get-W3MountSource -WindowsPath (Join-Path $repo ('Deployments\database\bootstrap-' + $service + '-roles.sql'))
         $parameters = @(
-            'run', '--name', $runnerName, '--network', ($ProjectName + '_internal'),
+            'run', '--name', $runnerName, '--label', ('com.diliwo.zeka.owner='+$executorOwner), '--network', ($ProjectName + '_internal'),
             '--label', ('com.docker.compose.project=' + $ProjectName),
             '--label', ('com.diliwo.zeka.initialization-id=' + $progress.initializationId),
             '--mount', ('type=bind,src=' + $requestMount.DaemonPath + ',dst=/run/setup/request.json,readonly'),
@@ -272,7 +328,7 @@ try {
 } catch {
     $failure = $_
     $code = 'GUARD_OR_OPERATION_REJECTED'
-    $allowedGuardCodes = @('MOUNT_SOURCE_MISSING', 'MOUNT_SOURCE_HANDLE_REJECTED', 'MOUNT_SOURCE_PHYSICAL_PATH_UNAVAILABLE', 'MOUNT_SOURCE_LOCAL_DRIVE_REJECTED', 'MOUNT_SOURCE_TRANSLATION_REJECTED', 'MOUNT_SOURCE_WSL_UNREADABLE', 'DIAGNOSTICS_INSIDE_CHECKOUT_REJECTED', 'DIAGNOSTIC_IDENTITY_REJECTED', 'DIAGNOSTIC_REPARSE_REJECTED', 'DIAGNOSTICS_NOT_INITIALIZED', 'NATIVE_TIMEOUT_INPUT_REJECTED', 'W3_ARGUMENT_SECURITY_REJECTED', 'SOURCE_WORKTREE_NOT_CLEAN', 'ESTABLISHED_POSTGRES_RESOURCE_MISSING', 'PROCESS_START_FAILED', 'OPERATION_TIMEOUT_REQUIRES_INSPECTION', 'NATIVE_OPERATION_REJECTED', 'PRIVATE_REPARSE_REJECTED', 'PRIVATE_ACL_REJECTED', 'PRIVATE_INHERITANCE_REJECTED', 'PRIVATE_OVERWRITE_REJECTED', 'PRIVATE_WRITE_INCOMPLETE', 'OWNER_WINDOWS_REQUIRED', 'PROJECT_SCOPE_REJECTED', 'FIXTURE_ACTUAL_PROJECT_REJECTED', 'PRIVATE_ROOT_MISSING', 'PRIVATE_ROOT_REJECTED', 'FIXTURE_OWNER_PRIVATE_ROOT_REJECTED', 'PRIVATE_ROOT_IN_BUILD_CONTEXT', 'PRIVATE_ROOT_INHERITANCE_REJECTED', 'SOURCE_COMMIT_REJECTED', 'DOCKER_TARGET_REJECTED', 'OWNER_ADMINISTRATOR_FILE_MISSING', 'RESET_INCOMPLETE', 'VOLUME_OBSERVATION_UNCERTAIN', 'CONTAINER_OBSERVATION_UNCERTAIN', 'NETWORK_OBSERVATION_UNCERTAIN', 'INITIALIZATION_PROGRESS_IDENTITY_DRIFT', 'ROLE_SOURCE_DRIFT', 'PREVIOUS_OPERATION_REQUIRES_INSPECTION', 'ESTABLISHED_RESOURCE_WITHOUT_PROGRESS', 'NETWORK_INITIALIZATION_IDENTITY_DRIFT', 'VOLUME_INITIALIZATION_IDENTITY_DRIFT', 'CONTAINER_IDENTITY_OR_EXPOSURE_DRIFT', 'CONTAINER_NETWORK_OR_VOLUME_DRIFT', 'CONTAINER_RESOURCE_STATE_UNCERTAIN', 'POSTGRES_CONTAINER_ID_DRIFT', 'ESTABLISHED_CREDENTIAL_FILE_MISSING', 'SAVED_CREDENTIAL_FORMAT_REJECTED', 'RUNTIME_CONFIGURATION_DRIFT', 'ESTABLISHED_RUNTIME_CONFIGURATION_MISSING', 'POSTGRES_RESOURCE_ADMISSION_FAILED', 'POSTGRES_NETWORK_OR_VOLUME_ADMISSION_FAILED', 'POSTGRES_NETWORK_ADMISSION_FAILED', 'BUILD_OUTPUT_MUST_BE_OUTSIDE_CHECKOUT', 'BUILD_PRIVATE_OVERLAP_REJECTED', 'IMAGE_OBSERVATION_UNCERTAIN', 'RUNNER_SOURCE_IDENTITY_DRIFT', 'RUNNER_RESULT_MISSING_REQUIRES_INSPECTION', 'SERVICE_SETUP_BLOCKED_REQUIRES_INSPECTION', 'REPEAT_RESULT_REJECTED')
+    $allowedGuardCodes = @('OWNED_DATABASE_RESOURCE_CONFIGURATION_DRIFT', 'OWNED_DATABASE_RESOURCE_UNAVAILABLE', 'OWNED_DATABASE_RESOURCE_LABEL_DRIFT', 'OWNED_DATABASE_RESOURCE_ID_DRIFT', 'NEW_RUNNER_NAME_REJECTED', 'NEW_RUNNER_ABSENCE_UNPROVEN', 'RUNNER_OWNER_LABEL_REJECTED', 'MOUNT_SOURCE_MISSING', 'MOUNT_SOURCE_HANDLE_REJECTED', 'MOUNT_SOURCE_PHYSICAL_PATH_UNAVAILABLE', 'MOUNT_SOURCE_LOCAL_DRIVE_REJECTED', 'MOUNT_SOURCE_TRANSLATION_REJECTED', 'MOUNT_SOURCE_WSL_UNREADABLE', 'DIAGNOSTICS_INSIDE_CHECKOUT_REJECTED', 'DIAGNOSTIC_IDENTITY_REJECTED', 'DIAGNOSTIC_REPARSE_REJECTED', 'DIAGNOSTICS_NOT_INITIALIZED', 'NATIVE_TIMEOUT_INPUT_REJECTED', 'W3_ARGUMENT_SECURITY_REJECTED', 'SOURCE_WORKTREE_NOT_CLEAN', 'ESTABLISHED_POSTGRES_RESOURCE_MISSING', 'PROCESS_START_FAILED', 'OPERATION_TIMEOUT_REQUIRES_INSPECTION', 'NATIVE_OPERATION_REJECTED', 'PRIVATE_REPARSE_REJECTED', 'PRIVATE_ACL_REJECTED', 'PRIVATE_INHERITANCE_REJECTED', 'PRIVATE_OVERWRITE_REJECTED', 'PRIVATE_WRITE_INCOMPLETE', 'OWNER_WINDOWS_REQUIRED', 'PROJECT_SCOPE_REJECTED', 'FIXTURE_ACTUAL_PROJECT_REJECTED', 'PRIVATE_ROOT_MISSING', 'PRIVATE_ROOT_REJECTED', 'FIXTURE_OWNER_PRIVATE_ROOT_REJECTED', 'PRIVATE_ROOT_IN_BUILD_CONTEXT', 'PRIVATE_ROOT_INHERITANCE_REJECTED', 'SOURCE_COMMIT_REJECTED', 'DOCKER_TARGET_REJECTED', 'OWNER_ADMINISTRATOR_FILE_MISSING', 'RESET_INCOMPLETE', 'VOLUME_OBSERVATION_UNCERTAIN', 'CONTAINER_OBSERVATION_UNCERTAIN', 'NETWORK_OBSERVATION_UNCERTAIN', 'INITIALIZATION_PROGRESS_IDENTITY_DRIFT', 'ROLE_SOURCE_DRIFT', 'PREVIOUS_OPERATION_REQUIRES_INSPECTION', 'ESTABLISHED_RESOURCE_WITHOUT_PROGRESS', 'NETWORK_INITIALIZATION_IDENTITY_DRIFT', 'VOLUME_INITIALIZATION_IDENTITY_DRIFT', 'CONTAINER_IDENTITY_OR_EXPOSURE_DRIFT', 'CONTAINER_NETWORK_OR_VOLUME_DRIFT', 'CONTAINER_RESOURCE_STATE_UNCERTAIN', 'POSTGRES_CONTAINER_ID_DRIFT', 'ESTABLISHED_CREDENTIAL_FILE_MISSING', 'SAVED_CREDENTIAL_FORMAT_REJECTED', 'RUNTIME_CONFIGURATION_DRIFT', 'ESTABLISHED_RUNTIME_CONFIGURATION_MISSING', 'POSTGRES_RESOURCE_ADMISSION_FAILED', 'POSTGRES_NETWORK_OR_VOLUME_ADMISSION_FAILED', 'POSTGRES_NETWORK_ADMISSION_FAILED', 'BUILD_OUTPUT_MUST_BE_OUTSIDE_CHECKOUT', 'BUILD_PRIVATE_OVERLAP_REJECTED', 'IMAGE_OBSERVATION_UNCERTAIN', 'RUNNER_SOURCE_IDENTITY_DRIFT', 'RUNNER_RESULT_MISSING_REQUIRES_INSPECTION', 'SERVICE_SETUP_BLOCKED_REQUIRES_INSPECTION', 'REPEAT_RESULT_REJECTED')
     if ($failure.Exception -is [InvalidOperationException] -and $failure.Exception.Message -in $allowedGuardCodes) { $code = $failure.Exception.Message }
     if ($progress -and $progressFile -and ($code -eq 'OPERATION_TIMEOUT_REQUIRES_INSPECTION' -or $stage -in @('postgres-create-or-resume', 'service-setup'))) {
         $progress.requiresInspection = $true
