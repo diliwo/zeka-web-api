@@ -75,7 +75,10 @@ public sealed class StaffProjectionOutbox(ApplicationDbContext database, ITenant
                     ?? throw new InvalidOperationException("Invalid staff outbox record.");
                 if (message.OrganisationId != tenant.Current.OrganisationId.Value || message.Id != row.EventId)
                     throw new TenantContextException(TenantFailure.Conflict);
-                // The legacy broker port has no cancellation argument; bound the wait. Duplicates are safe.
+                // EventBus1.3 success means verified intended routing and a non-returned positive confirm.
+                // Return/NACK/disconnect/uncertain confirmation throws and MUST leave this row pending.
+                // The port has no cancellation argument: a bounded wait may expire after broker acceptance,
+                // so preserve the serialized EventId for a possibly duplicate retry, never restage a new event.
                 await publisher.PublishAsync(message).WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
                 row.PublishedAtUtc = DateTimeOffset.UtcNow;
                 Publications.Add(1, new KeyValuePair<string, object?>("outcome", "published"));
