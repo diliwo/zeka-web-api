@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -85,13 +84,13 @@ try
         await Execute(databaseAdmin, File.ReadAllText($"/run/source/bootstrap-{service.Key}-roles.sql"), ct);
     }
     stage = "restricted-migrator-plan";
-    var plan = await Migrate("plan", service, migrationCs, ct);
-    if (plan.Exit != 0) throw new SetupFailure("MIGRATOR_PLAN_REJECTED", plan.Exit);
+    var plan = await ManagedMigrationAdapter.RunAsync("plan", service.Key, request.SourceCommit, migrationCs, "/run/results", ct);
+    if (plan.Exit != 0) throw new SetupFailure("MIGRATOR_PLAN_REJECTED", plan.Exit, plan.OperationId, plan.ReceiptFile);
     if (request.Completed && plan.Classification != "ALREADY_CURRENT")
         throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
     stage = "restricted-migrator-apply";
-    var apply = await Migrate("apply", service, migrationCs, ct);
-    if (apply.Exit != 0) throw new SetupFailure("MIGRATOR_APPLY_REJECTED", apply.Exit);
+    var apply = await ManagedMigrationAdapter.RunAsync("apply", service.Key, request.SourceCommit, migrationCs, "/run/results", ct);
+    if (apply.Exit != 0) throw new SetupFailure("MIGRATOR_APPLY_REJECTED", apply.Exit, apply.OperationId, apply.ReceiptFile);
     if (request.Completed && apply.Classification != "ALREADY_CURRENT")
         throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
     if (!request.Completed)
@@ -164,7 +163,8 @@ catch (Exception error)
         root is InvalidOperationException && KnownGuard(root.Message) ? root.Message :
         "DATABASE_SETUP_REJECTED";
     var safe = new { status="BLOCKED", stage, code=safeCode, sqlState=(root as PostgresException)?.SqlState,
-        nativeExit=(root as SetupFailure)?.NativeExit, exceptionType=root.GetType().Name };
+        nativeExit=(root as SetupFailure)?.NativeExit, operationId=(root as SetupFailure)?.OperationId,
+        receiptFile=(root as SetupFailure)?.ReceiptFile, exceptionType=root.GetType().Name };
     File.WriteAllText("/run/results/result.json", JsonSerializer.Serialize(safe));
     Console.WriteLine(JsonSerializer.Serialize(safe));
     return 1;
@@ -252,23 +252,7 @@ static async Task FreshRuntime(string cs,Service s,CancellationToken ct)
     var validator=Activator.CreateInstance(type,cs,s.Runtime)!;
     await (Task)type.GetMethod("StartAsync")!.Invoke(validator,[ct])!;
 }
-static async Task<MigrationRun> Migrate(string operation,Service s,string credential,CancellationToken ct)
-{
-    var identifier=Guid.NewGuid().ToString("D");var file=operation+"-"+identifier+".json";
-    var info=new ProcessStartInfo("dotnet"){UseShellExecute=false,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
-    foreach(var value in new[]{"exec","--depsfile","./zeka-local-db-setup.deps.json","--runtimeconfig","./zeka-local-db-setup.runtimeconfig.json","./zeka-db-migrate.dll",operation,"--service",s.Key,"--target","latest","--operation-id",identifier,"--evidence-root","/run/results","--evidence-file",file,"--lock-timeout-seconds","10","--credential-stdin"})info.ArgumentList.Add(value);
-    using var process=Process.Start(info)??throw new InvalidOperationException("MIGRATION_PROCESS_START_FAILED");
-    var stdout=process.StandardOutput.ReadToEndAsync(ct);var stderr=process.StandardError.ReadToEndAsync(ct);
-    await process.StandardInput.WriteLineAsync(credential);process.StandardInput.Close();
-    await process.WaitForExitAsync(ct);await stdout;await stderr;
-    using var result=JsonDocument.Parse(File.ReadAllText("/run/results/"+file));var root=result.RootElement;
-    return new MigrationRun(process.ExitCode,root.GetProperty("classification").GetString()!,
-        root.GetProperty("phases").GetProperty("migration").GetProperty("status").GetString()=="passed",
-        root.GetProperty("phases").GetProperty("manifestVerification").GetProperty("status").GetString()=="failed");
-}
 internal sealed record SetupRequest(string Project,string Service,string InitializationId,string SourceCommit,bool Completed,string? ClusterId,string? SchemaSha256,string? HistorySha256);
-internal sealed record MigrationRun(int Exit,string Classification,bool MigrationPassed,bool ManifestFailed);
-internal sealed class SetupFailure(string code,int nativeExit):Exception {public string Code{get;}=code;public int NativeExit{get;}=nativeExit;}
 internal sealed record Service(string Key,string Database,string Migrator,string Runtime,string ConnectionKey)
 {
     public static Service For(string key)=>key switch {
