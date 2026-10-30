@@ -1,4 +1,4 @@
-﻿using AuthManager.Infrastructure.CustomTokenProviders;
+using AuthManager.Infrastructure.CustomTokenProviders;
 using AuthManager.Application.Common.Interfaces;
 using AuthManager.Infrastructure.Identity;
 using AuthManager.Infrastructure.Identity.Models;
@@ -111,6 +111,10 @@ public static class DependencyInjection
 
         builder.Services.Configure<EmailConfirmationTokenProviderOptions>(options =>
             options.TokenLifespan = TimeSpan.FromDays(3));
+
+        if (builder.Configuration.GetSection("AuthOnboarding").Exists())
+            AuthManager.Infrastructure.Identity.EmailVerification.EmailVerificationServiceCollectionExtensions.AddEmailVerificationExchange(
+                builder.Services, builder.Configuration);
 
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddScoped<IAuthenticationService, IdentityAuthenticationService>();
