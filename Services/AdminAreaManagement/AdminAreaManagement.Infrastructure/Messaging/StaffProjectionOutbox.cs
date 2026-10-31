@@ -77,9 +77,21 @@ public sealed class StaffProjectionOutbox(ApplicationDbContext database, ITenant
                     throw new TenantContextException(TenantFailure.Conflict);
                 // EventBus1.3 success means verified intended routing and a non-returned positive confirm.
                 // Return/NACK/disconnect/uncertain confirmation throws and MUST leave this row pending.
-                // The port has no cancellation argument: a bounded wait may expire after broker acceptance,
-                // so preserve the serialized EventId for a possibly duplicate retry, never restage a new event.
-                await publisher.PublishAsync(message).WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+                // The port has no cancellation argument and may await readiness BEFORE its first send.
+                // A timeout/cancellation ends only our wait, not the publication. Keep the tenant transaction's
+                // closure lock until that original task settles, even when its outcome deadline has expired.
+                // Never retry concurrently or mark a late success published: the original EventId stays pending.
+                var publication = publisher.PublishAsync(message);
+                try
+                {
+                    await publication.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+                }
+                catch
+                {
+                    try { await publication; }
+                    catch (Exception) { /* Observe settlement failure; preserve the original outcome below. */ }
+                    throw;
+                }
                 row.PublishedAtUtc = DateTimeOffset.UtcNow;
                 Publications.Add(1, new KeyValuePair<string, object?>("outcome", "published"));
             }

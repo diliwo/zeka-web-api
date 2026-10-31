@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AdminAreaManagement.Application.Common.Authorization;
 using AdminAreaManagement.Infrastructure.Messaging;
 using AdminAreaManagement.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -55,18 +56,31 @@ public sealed class StaffProjectionPublicationBoundaryTests
         Assert.NotNull((await database.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
     }
 
-    [Fact]
-    public async Task Wait_timeout_and_late_confirm_leave_pending_until_explicit_same_identity_retry()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Wait_timeout_and_late_settlement_leave_pending_until_explicit_same_identity_retry(bool lateFailure)
     {
         var fixture = new Fixture(); await fixture.SeedAsync();
         var confirmation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var publisher = new Publisher { Publish = _ => confirmation.Task };
         await using (var database = fixture.Open())
         {
-            await fixture.Outbox(database, publisher).DispatchAsync(default);
+            var dispatch = fixture.Outbox(database, publisher).DispatchAsync(default);
+            await publisher.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            try
+            {
+                // Keep the original publication unsettled beyond the outcome deadline.
+                await Assert.ThrowsAsync<TimeoutException>(() => dispatch.WaitAsync(TimeSpan.FromSeconds(3)));
+            }
+            finally
+            {
+                if (lateFailure) confirmation.TrySetException(new RabbitMqPublishException("uncertain-confirm"));
+                else confirmation.TrySetResult();
+            }
+            await dispatch;
             Assert.Null((await database.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
         }
-        confirmation.TrySetResult(); // The transport may have accepted after the caller's bounded wait.
         await using (var observed = fixture.Open())
             Assert.Null((await observed.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
         publisher.Publish = _ => Task.CompletedTask;
@@ -74,6 +88,83 @@ public sealed class StaffProjectionPublicationBoundaryTests
         await fixture.Outbox(retry, publisher).DispatchAsync(default);
         Assert.NotNull((await retry.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
         Assert.Equal(new[] { fixture.Message.Id, fixture.Message.Id }, publisher.Ids);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Delayed_first_send_cannot_escape_the_transaction_gate_on_timeout_or_cancellation(bool cancel)
+    {
+        var fixture = new Fixture(); await fixture.SeedAsync();
+        var gate = new TransactionGate();
+        var preSend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var confirmation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new Publisher { Publish = async _ =>
+        {
+            await preSend.Task;
+            Assert.False(gate.Closed); // This is FIRST send, not a late confirmation.
+            sent.TrySetResult();
+            await confirmation.Task;
+        } };
+        using var cancellation = new CancellationTokenSource();
+        await using var database = fixture.Open();
+        var dispatch = gate.DispatchTransactionAsync(() =>
+            fixture.Outbox(database, publisher, gate).DispatchAsync(cancellation.Token));
+        await publisher.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var close = gate.CloseTransactionAsync();
+        await gate.ClosureRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        if (cancel) cancellation.Cancel();
+        try
+        {
+            // A controlled pre-send barrier stays closed across cancellation/the real 2s deadline.
+            // A bounded negative observation fails on the old code: closure becomes possible.
+            await Assert.ThrowsAsync<TimeoutException>(() => close.WaitAsync(TimeSpan.FromSeconds(cancel ? 1 : 3)));
+            Assert.False(dispatch.IsCompleted);
+            Assert.False(sent.Task.IsCompleted);
+            Assert.False(gate.Closed);
+        }
+        finally
+        {
+            preSend.TrySetResult();
+            confirmation.TrySetResult();
+        }
+        if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatch);
+        else await dispatch;
+        await close.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(sent.Task.IsCompletedSuccessfully);
+        Assert.True(gate.Closed);
+        Assert.Null((await database.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => gate.DispatchTransactionAsync(() =>
+            fixture.Outbox(database, publisher, gate).DispatchAsync(default)));
+        Assert.Equal(new[] { fixture.Message.Id }, publisher.Ids);
+    }
+
+    // Models only the transaction-owned serialization contract, not PostgreSQL locking/RLS.
+    private sealed class TransactionGate : IAdminAreaClosureGate
+    {
+        private readonly SemaphoreSlim serial = new(1, 1);
+        public bool Closed { get; private set; }
+        public TaskCompletionSource ClosureRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task DemandOrdinaryAccessAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Closed) throw new InvalidOperationException("Closed organisation.");
+            return Task.CompletedTask;
+        }
+        public async Task DispatchTransactionAsync(Func<Task> work)
+        {
+            await serial.WaitAsync();
+            try { await work(); }
+            finally { serial.Release(); }
+        }
+        public async Task CloseTransactionAsync()
+        {
+            ClosureRequested.TrySetResult();
+            await serial.WaitAsync();
+            try { Closed = true; }
+            finally { serial.Release(); }
+        }
     }
 
     private sealed class Publisher : IEventBus
@@ -98,8 +189,9 @@ public sealed class StaffProjectionPublicationBoundaryTests
             var row = new StaffProjectionMessage { EventId = Message.Id, Payload = JsonSerializer.Serialize(Message) };
             row.AssignToOrganisation(organisation); database.Add(row); await database.SaveChangesAsync();
         }
-        public StaffProjectionOutbox Outbox(ApplicationDbContext database, Publisher publisher) => new(
+        public StaffProjectionOutbox Outbox(ApplicationDbContext database, Publisher publisher,
+            IAdminAreaClosureGate? gate = null) => new(
             database, TenantEnforcementTests.Scope(organisation), publisher, NullLogger<StaffProjectionOutbox>.Instance,
-            new ConfigurationBuilder().Build());
+            new ConfigurationBuilder().Build(), gate);
     }
 }

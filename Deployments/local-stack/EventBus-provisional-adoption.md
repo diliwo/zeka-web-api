@@ -44,10 +44,21 @@ the final integration SHA before C1 acceptance. No automatic stable release/merg
 
 PublishedAtUtc is set only after PublishAsync completes successfully. Library return,
 NACK, disconnect and uncertain-confirm exceptions leave the persisted row pending.
-The existing two-second caller wait is retained; a late positive confirm can mean
-accepted publication with a pending row. Retry keeps the serialized original EventId,
-so actual Client business idempotency remains necessary. No transaction/schema,
-tenant, closure-gate or authorization behavior is changed.
+The two-second outcome deadline is retained, but it is not a hard dispatch/shutdown
+duration limit. The current port has no cancellation argument and readiness checks can
+delay the FIRST send. After timeout or caller cancellation, the dispatcher therefore
+awaits settlement of the original publication task before returning/throwing and
+releasing the tenant transaction's closure lock. It must not detach that task or
+release the lock merely because the caller's wait ended. If the transport never
+settles, the dispatcher remains fail-closed; adding cancellation to the transport
+would require a separately reviewed contract, not another detached timeout.
+
+A late positive confirm can still mean accepted publication with a pending row;
+settlement never converts an expired outcome deadline into success. Retry keeps the
+serialized original EventId, so actual Client business idempotency remains necessary.
+No topology, transaction/schema, tenant authorization or durable closure-gate algorithm
+is changed. Controlled delayed-pre-send source tests model transaction serialization
+and cover timeout/cancellation; they do not establish real PostgreSQL locking.
 
 Focused tests prove shared composition/lifecycle ordering and the caller publication
 boundary. Their fake broker and EF InMemory observations do not prove PostgreSQL
