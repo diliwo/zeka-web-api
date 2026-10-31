@@ -16,5 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="OperatorBoundary/Test-OwnerAdmission.ps1" />
+    <Content Include="BuildContext/Test-OwnerHelperBuildContext.ps1" />
+    <Content Include="BuildContext/Test-OwnerImageContainment.py" />
   </ItemGroup>
 </Project>

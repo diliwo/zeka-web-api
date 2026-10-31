@@ -17,11 +17,16 @@ dotnet publish Tools/Zeka.AuthOwnerProvision/Zeka.AuthOwnerProvision.csproj -c R
 $binary = Join-Path $publish 'zeka-auth-owner-provision.dll'
 $binarySha = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant()
 $tag = "zeka/m1-owner-provision:$($commit.Substring(0,12))"
-docker build -f Tools/Zeka.AuthOwnerProvision/Dockerfile --build-arg SOURCE_COMMIT=$commit --build-arg BINARY_SHA256=$binarySha -t $tag $publish
+$context = "$publish-context"
+$receipt = & ./Tools/Zeka.AuthOwnerProvision/Prepare-OwnerHelperBuildContext.ps1 -PublishDirectory $publish -ContextDirectory $context -SourceCommit $commit -BinarySha256 $binarySha | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $receipt.status -ne 'PREPARED') { throw 'OWNER_HELPER_CONTEXT_REJECTED' }
+. ./Tools/Zeka.AuthOwnerProvision/Prepare-OwnerHelperBuildContext.ps1 -DefinitionsOnly
+Assert-OwnerHelperPreparedContext $context $receipt
+docker build -f (Join-Path $context 'Dockerfile') --build-arg SOURCE_COMMIT=$commit --build-arg BINARY_SHA256=$binarySha -t $tag $context
 $image = (docker image inspect --format '{{.Id}}' $tag).Trim()
 ```
 
-Capture the publish/binary/image/source receipt and verify the source is still clean. Build context contains published binaries only, never private configuration.
+Capture the publish/binary/image/source receipt and verify the source is still clean. The preparer rejects any publish output outside its exact 38-file inventory, copies only 31 runtime files, and excludes the seven known symbol/apphost outputs. The actual temporary context contains its own default-deny .dockerignore and the reviewed explicit-COPY Dockerfile; do not build directly from the publish directory. Revalidate the context immediately before building. Private configuration never enters either directory.
 
 If the executing parent contains database credential environment variables, use the existing process-environment-copy boundary for the wrapper child. Remove only names matching `^(?i:PGPASSWORD|POSTGRES_PASSWORD|ConnectionStrings__.+)$` from that child's environment; preserve the parent and normal Windows SDK. This is secret isolation, not a guard override: a create invocation that still inherits those names must fail closed. Never print their values.
 
@@ -45,4 +50,4 @@ Any nonzero/uncertain attempt retains an inspection marker and evidence; the wra
 
 ## Verification
 
-Normal `dotnet test` covers the application, CLI protocol and SQLite persistence suites. `OperatorBoundary/Test-OwnerAdmission.ps1 -ReportFile <new-file>` exercises synthetic admission/receipt facts without reading M1 private files or running Docker. SQLite and synthetic facts do not prove PostgreSQL RLS/runtime-role behavior or actual Windows owner execution. Required exact-head Linux CI and Chief's independent review remain separate gates.
+Normal `dotnet test` covers the application, CLI protocol and SQLite persistence suites. `OperatorBoundary/Test-OwnerAdmission.ps1 -ReportFile <new-file>` exercises synthetic admission/receipt facts without reading M1 private files or running Docker. SQLite and synthetic facts do not prove PostgreSQL RLS/runtime-role behavior or actual Windows owner execution. Required exact-head Linux CI and Chief's independent review remain separate gates. BuildContext/Test-OwnerHelperBuildContext.ps1 exercises synthetic file-boundary controls. BuildContext/Test-OwnerImageContainment.py exercises actual local images, a synthetic forbidden-file negative, filesystem/layer inspection and network-none startup refusals using published binaries. Neither test provisions an owner or proves live database authority. C1 acceptance requires its security and correctness/runtime matrix; the full existing Sonar gate, including 80% new-code coverage, still governs merging into develop.

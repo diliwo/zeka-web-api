@@ -18,5 +18,6 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="../../Deployments/local-stack/Invoke-OwnerFirstAdmin.ps1" Link="OperatorBoundary/Invoke-OwnerFirstAdmin.ps1" />
+    <Content Include="Prepare-OwnerHelperBuildContext.ps1" />
   </ItemGroup>
 </Project>
