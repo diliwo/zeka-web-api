@@ -2,7 +2,7 @@
 
 Chief-authored source only; Codex independently reviews and integrates. Base: PR101
 `a548ca8979efd54031af8db51a088ec6ddf94b51`. Library source:
-`4a62dcae25ce5c1989c08af6f90ceaa2a91d299d`. Neither this source reference nor a local
+`32c059affe6261d9f4f4929de37281be7c6eb409`. Neither this source reference nor a local
 build is a reviewed/distributed package or accepted C1 integration evidence.
 
 ## Shared contract and startup
@@ -40,7 +40,7 @@ provisional source evidence with the Greptile-reviewed, authorized/distributed R
 verified content identity and committed packages.lock.json/clean locked restore on
 the final integration SHA before C1 acceptance. No automatic stable release/merge.
 
-Library fail-stop contract: https://github.com/diliwo/eventbus-dotnet-lib/blob/4a62dcae25ce5c1989c08af6f90ceaa2a91d299d/docs/publisher-failstop-m1.md
+Library fail-stop contract: https://github.com/diliwo/eventbus-dotnet-lib/blob/32c059affe6261d9f4f4929de37281be7c6eb409/docs/publisher-failstop-m1.md
 
 ## Outbox and evidence boundary
 
