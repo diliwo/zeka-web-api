@@ -89,6 +89,18 @@ public sealed class StaffProjectionTransportTests
         Assert.False(producerStarted);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Process_failstop_requires_the_explicit_M1_switch(bool enabled)
+    {
+        var configuration = new ConfigurationManager();
+        configuration["ASPNETCORE_ENVIRONMENT"] = "M1"; // Never an enablement signal.
+        if (enabled) configuration["M1PublisherFailStop:EnableOwnerApprovedM1ProcessFailStop"] = "true";
+        using var provider = new ServiceCollection().AddStaffProjectionTransport(configuration).BuildServiceProvider();
+        Assert.Equal(enabled, provider.GetRequiredService<PublicationLifecycle>().ProcessFailStopEnabled);
+    }
+
     private sealed class Producer(Action start) : IHostedService
     {
         public Task StartAsync(CancellationToken ct) { start(); return Task.CompletedTask; }

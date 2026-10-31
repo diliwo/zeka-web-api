@@ -2,7 +2,7 @@
 
 Chief-authored source only; Codex independently reviews and integrates. Base: PR101
 `a548ca8979efd54031af8db51a088ec6ddf94b51`. Library source:
-`56881cb4982963c42f314aa481540a7bcc01064f`. Neither this source reference nor a local
+`cbf410c15d105d4b3eca9aa03a83718c488da014`. Neither this source reference nor a local
 build is a reviewed/distributed package or accepted C1 integration evidence.
 
 ## Shared contract and startup
@@ -40,30 +40,51 @@ provisional source evidence with the Greptile-reviewed, authorized/distributed R
 verified content identity and committed packages.lock.json/clean locked restore on
 the final integration SHA before C1 acceptance. No automatic stable release/merge.
 
+Library fail-stop contract: https://github.com/diliwo/eventbus-dotnet-lib/blob/cbf410c15d105d4b3eca9aa03a83718c488da014/docs/publisher-failstop-m1.md
+
 ## Outbox and evidence boundary
 
-PublishedAtUtc is set only after PublishAsync completes successfully. Library return,
-NACK, disconnect and uncertain-confirm exceptions leave the persisted row pending.
-The two-second outcome deadline is retained, but it is not a hard dispatch/shutdown
-duration limit. The current port has no cancellation argument and readiness checks can
-delay the FIRST send. After timeout or caller cancellation, the dispatcher therefore
-awaits settlement of the original publication task before returning/throwing and
-releasing the tenant transaction's closure lock. It must not detach that task or
-release the lock merely because the caller's wait ended. If the transport never
-settles, the dispatcher remains fail-closed; adding cancellation to the transport
-would require a separately reviewed contract, not another detached timeout.
+PublishedAtUtc is set only after an owned attempt completes successfully with CLOSED
+state (worker, disposal and explicit owned raw-socket termination proven). The outbox
+refuses before admission unless the publisher provides explicitly enabled M1 process
+fail-stop. Caller cancellation requests Stop but never releases the transaction's
+closure lock on an unproven timeout. A dedicated watchdog terminates the WHOLE shared
+process if termination remains unproven; PostgreSQL then rolls back the uncommitted
+transaction and closure waits for database-observed lock release.
 
-A late positive confirm can still mean accepted publication with a pending row;
-settlement never converts an expired outcome deadline into success. Retry keeps the
-serialized original EventId, so actual Client business idempotency remains necessary.
-No topology, transaction/schema, tenant authorization or durable closure-gate algorithm
-is changed. Controlled delayed-pre-send source tests model transaction serialization
-and cover timeout/cancellation; they do not establish real PostgreSQL locking.
+The one-way OPEN → CLOSING → CLOSED lifecycle and one logical send commit point are
+shared by ordinary publishing and raw replay. Topology/channel/network/cleanup work
+is outside the short admission mutex. Every attempt owns a publisher-only connection
+and irrevocable raw-socket custody, not the shared consumer connection. Already
+committed/in-flight sends remain uncertain and can arrive after process death.
+Original EventId and pending identity are preserved; duplicates require existing
+Client business idempotency and closure guards. Late post-stop settlement is never
+publication success. No schema, authority, lock-order or topology contract is changed.
 
-Focused tests prove shared composition/lifecycle ordering and the caller publication
-boundary. Their fake broker and EF InMemory observations do not prove PostgreSQL
-transaction/RLS behavior, real outbox persistence against RabbitMQ, Auth worker
-authority, Client projection idempotency, or accepted end-to-end recovery. Those real
-ZEK-23 tests and the combined oldest-pending-outbox-age/DLQ-depth smoke remain due
-on the reviewed immutable integration SHA. Owner-Windows TLS/CA/hosts/trust proof
-also remains separate and C1-critical at the4November gate.
+### Precise M1 configuration proposal — not deployed
+
+Only explicit owner-controlled M1 configuration may supply
+`M1PublisherFailStop:EnableOwnerApprovedM1ProcessFailStop=true`,
+`M1PublisherFailStop:AttemptDeadline=00:00:02`, and
+`M1PublisherFailStop:TerminationGrace=00:00:02`. Defaults are OFF; no environment-name
+inference or production activation. The native fatal reason is
+`ZEKA_M1_PUBLISHER_TERMINALITY_UNPROVEN`. FailFast skips finally/async-log flush;
+collect actual process/supervisor exits. Proposed M1 Docker policy is
+`restart: "on-failure:3"`, with measured Docker restart backoff and bounded count.
+Codex/operator owns deployment changes. No deployment file was modified here.
+
+A managed watchdog is not a hard-real-time guarantee during OS/runtime suspension
+or machine failure. Such scenarios need external supervisor termination evidence.
+DB connection-loss detection can take longer than the publisher deadline. Never
+claim CLOSED or release the fence based on local cancellation, Abort, timeout or
+process-exit notification alone; closure waits on PostgreSQL's transaction lock.
+
+### Evidence boundaries
+
+`Tools/EventBus.FailStopProof` uses real disposable PostgreSQL/RabbitMQ with actual
+AdminArea outbox, runtime role, transaction guard and closure gate. Test-only transport
+wrappers force pre-open/topology/channel/pre-commit/post-commit and missing-confirm
+faults. A post-commit wrapper stall is not a natural blocked driver/socket write.
+Client duplicate/closure provider tests remain separately identifiable; a combined
+live Auth/broker/Client/M1/supervisor run and distributed package/locks/protected CI
+are not established by a passing source fixture. TLS acceptance stays separate.

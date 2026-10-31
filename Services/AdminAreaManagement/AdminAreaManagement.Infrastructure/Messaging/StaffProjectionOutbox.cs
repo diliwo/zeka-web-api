@@ -75,23 +75,17 @@ public sealed class StaffProjectionOutbox(ApplicationDbContext database, ITenant
                     ?? throw new InvalidOperationException("Invalid staff outbox record.");
                 if (message.OrganisationId != tenant.Current.OrganisationId.Value || message.Id != row.EventId)
                     throw new TenantContextException(TenantFailure.Conflict);
-                // EventBus1.3 success means verified intended routing and a non-returned positive confirm.
-                // Return/NACK/disconnect/uncertain confirmation throws and MUST leave this row pending.
-                // The port has no cancellation argument and may await readiness BEFORE its first send.
-                // A timeout/cancellation ends only our wait, not the publication. Keep the tenant transaction's
-                // closure lock until that original task settles, even when its outcome deadline has expired.
-                // Never retry concurrently or mark a late success published: the original EventId stays pending.
-                var publication = publisher.PublishAsync(message);
-                try
-                {
-                    await publication.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
-                }
-                catch
-                {
-                    try { await publication; }
-                    catch (Exception) { /* Observe settlement failure; preserve the original outcome below. */ }
-                    throw;
-                }
+                // Refuse BEFORE starting I/O when the bounded process-custody capability is absent.
+                if (publisher is not IOwnedEventBus owned || !owned.ProcessFailStopEnabled)
+                    throw new InvalidOperationException("Outbox dispatch requires explicit owner-approved M1 publisher fail-stop.");
+                var attempt = owned.BeginPublication(message);
+                // Cancellation requests closure, but NEVER releases this transaction before proven settlement.
+                // The independent watchdog terminates the whole process if bounded stop remains unproven.
+                using var stopOnCancellation = cancellationToken.Register(() => { _ = attempt.StopAsync(); });
+                await attempt.Completion;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (attempt.State != PublicationState.Closed)
+                    throw new InvalidOperationException("Publisher terminality was not proven.");
                 row.PublishedAtUtc = DateTimeOffset.UtcNow;
                 Publications.Add(1, new KeyValuePair<string, object?>("outcome", "published"));
             }

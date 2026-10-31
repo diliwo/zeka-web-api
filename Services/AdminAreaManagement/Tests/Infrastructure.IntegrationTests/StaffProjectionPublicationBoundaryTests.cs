@@ -30,7 +30,7 @@ public sealed class StaffProjectionPublicationBoundaryTests
             await fixture.Outbox(database, publisher).DispatchAsync(default);
             Assert.Null((await database.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
         }
-        publisher.Publish = _ => Task.CompletedTask;
+        publisher = new Publisher { Ids = publisher.Ids };
         await using var retry = fixture.Open();
         await fixture.Outbox(retry, publisher).DispatchAsync(default);
         Assert.NotNull((await retry.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
@@ -83,7 +83,7 @@ public sealed class StaffProjectionPublicationBoundaryTests
         }
         await using (var observed = fixture.Open())
             Assert.Null((await observed.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
-        publisher.Publish = _ => Task.CompletedTask;
+        publisher = new Publisher { Ids = publisher.Ids };
         await using var retry = fixture.Open();
         await fixture.Outbox(retry, publisher).DispatchAsync(default);
         Assert.NotNull((await retry.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
@@ -100,13 +100,16 @@ public sealed class StaffProjectionPublicationBoundaryTests
         var preSend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var confirmation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Action? publisherCommit = null;
         var publisher = new Publisher { Publish = async _ =>
         {
             await preSend.Task;
+            publisherCommit!();
             Assert.False(gate.Closed); // This is FIRST send, not a late confirmation.
             sent.TrySetResult();
             await confirmation.Task;
         } };
+        publisherCommit = () => publisher.Attempt!.CommitSend();
         using var cancellation = new CancellationTokenSource();
         await using var database = fixture.Open();
         var dispatch = gate.DispatchTransactionAsync(() =>
@@ -132,12 +135,23 @@ public sealed class StaffProjectionPublicationBoundaryTests
         if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatch);
         else await dispatch;
         await close.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.True(sent.Task.IsCompletedSuccessfully);
+        Assert.False(sent.Task.IsCompleted); // Stop denied the delayed FIRST send commitment.
         Assert.True(gate.Closed);
         Assert.Null((await database.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
         await Assert.ThrowsAsync<InvalidOperationException>(() => gate.DispatchTransactionAsync(() =>
             fixture.Outbox(database, publisher, gate).DispatchAsync(default)));
         Assert.Equal(new[] { fixture.Message.Id }, publisher.Ids);
+    }
+
+    [Fact]
+    public async Task Disabled_failstop_refuses_before_any_publication_admission()
+    {
+        var fixture = new Fixture(); await fixture.SeedAsync();
+        var publisher = new Publisher { ProcessFailStopEnabled = false };
+        await using var database = fixture.Open();
+        await fixture.Outbox(database, publisher).DispatchAsync(default);
+        Assert.Empty(publisher.Ids);
+        Assert.Null((await database.Set<StaffProjectionMessage>().SingleAsync()).PublishedAtUtc);
     }
 
     // Models only the transaction-owned serialization contract, not PostgreSQL locking/RLS.
@@ -167,12 +181,21 @@ public sealed class StaffProjectionPublicationBoundaryTests
         }
     }
 
-    private sealed class Publisher : IEventBus
+    private sealed class Publisher : IOwnedEventBus
     {
         public Func<Event, Task> Publish { get; set; } = _ => Task.CompletedTask;
-        public List<Guid> Ids { get; } = [];
+        public List<Guid> Ids { get; init; } = [];
+        private readonly PublicationLifecycle lifecycle = new(new PublisherFailStopOptions());
+        public bool ProcessFailStopEnabled { get; init; } = true; // Modeled control, never actual FailFast here.
+        public OwnedPublicationAttempt? Attempt { get; private set; }
+        public IPublicationAttempt BeginPublication(Event message)
+        {
+            Ids.Add(message.Id);
+            Attempt = lifecycle.Begin(async _ => { Entered.TrySetResult(); await Publish(message); });
+            return Attempt;
+        }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Task PublishAsync(Event message) { Ids.Add(message.Id); Entered.TrySetResult(); return Publish(message); }
+        public Task PublishAsync(Event message) => BeginPublication(message).Completion;
     }
 
     private sealed class Fixture
