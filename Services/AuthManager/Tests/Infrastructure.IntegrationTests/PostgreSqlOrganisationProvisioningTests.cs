@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text.Json;
 using AuthManager.Application.Common.Outbox;
@@ -10,6 +12,7 @@ using AuthManager.Infrastructure.Persistence;
 using AuthManager.Infrastructure;
 using AuthManager.Infrastructure.Provisioning;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -108,13 +111,14 @@ public sealed class PostgreSqlOrganisationProvisioningTests(PostgreSqlFixture fi
         var database = context.Database;
         await database.Database.OpenConnectionAsync();
         await AssertRestrictedRuntimeAsync(database);
-        var identity = new FixtureIdentity(database, Guid.NewGuid());
+        var subject = Guid.NewGuid();
+        var command = new OrganisationProvisioningCommand("Provider rollback", null, "provider-rollback-request", null);
+        var identity = new FixtureIdentity(database, subject);
         var repository = new ObservedRepository(database);
         var outbox = new RefuseAfterOutboxSave(context.Outbox);
 
         var failure = await Assert.ThrowsAsync<OrganisationProvisioningPersistenceException>(() =>
-            context.Service(identity, repository, outbox).ProvisionAsync(
-                new("Provider rollback", null, "provider-rollback-request", null)));
+            context.Service(identity, repository, outbox).ProvisionAsync(command));
 
         Assert.Equal("PROVISIONING_TRANSACTION_REJECTED", failure.Code);
         Assert.False(failure.RequiresInspection);
@@ -127,6 +131,168 @@ public sealed class PostgreSqlOrganisationProvisioningTests(PostgreSqlFixture fi
         // A separate context proves durable absence, rather than tracked-state rollback only.
         await using var verification = new AuthDbContext(Options(runtime));
         await AssertCountsAsync(verification, 0);
+
+        // The same durable intent can start afresh after a fully rolled-back first use.
+        await using var recovery = new RuntimeContext(runtime);
+        var recovered = await recovery.Service(new FixtureIdentity(recovery.Database, subject),
+            new ObservedRepository(recovery.Database)).ProvisionAsync(command);
+        Assert.Equal(OrganisationProvisioningOutcome.Created, recovered.Outcome);
+        Assert.Equal(subject, recovered.SubjectId);
+        await using var recoveredVerification = new AuthDbContext(Options(runtime));
+        await AssertCountsAsync(recoveredVerification, 1);
+        Assert.Equal(recovered.OrganisationId, (await recoveredVerification.Organisations.AsNoTracking().SingleAsync()).Id);
+        Assert.Equal(recovered.MembershipId, (await recoveredVerification.OrganisationMemberships.AsNoTracking().SingleAsync()).Id);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Overlapping_first_use_transactions_commit_once_then_recover_by_replay_or_conflict(bool conflictingIntent)
+    {
+        var runtime = await CreateRuntimeAsync();
+        var subject = Guid.NewGuid();
+        var command = new OrganisationProvisioningCommand("Concurrent first owner", null, "concurrent-first-use", null);
+        var followerCommand = conflictingIntent ? command with { DisplayName = "Conflicting organisation intent" } : command;
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var race = new FirstUseRace();
+        await using var leader = new RuntimeContext(runtime, new ClaimCommandObserver(race, leader: true));
+        await using var follower = new RuntimeContext(runtime, new ClaimCommandObserver(race, leader: false));
+        await leader.Database.Database.OpenConnectionAsync(deadline.Token);
+        await follower.Database.Database.OpenConnectionAsync(deadline.Token);
+        await AssertRestrictedRuntimeAsync(leader.Database);
+        await AssertRestrictedRuntimeAsync(follower.Database);
+        Assert.NotEqual(((NpgsqlConnection)leader.Database.Database.GetDbConnection()).ProcessID,
+            ((NpgsqlConnection)follower.Database.Database.GetDbConnection()).ProcessID);
+        var leaderIdentity = new FixtureIdentity(leader.Database, subject);
+        var followerIdentity = new FixtureIdentity(follower.Database, subject);
+        var leaderRepository = new ObservedRepository(leader.Database);
+        var followerRepository = new ObservedRepository(follower.Database);
+
+        async Task<ProvisioningAttempt> RunLeaderAsync()
+        {
+            try { return await CaptureAttemptAsync(leader.Service(leaderIdentity, leaderRepository), command, deadline.Token); }
+            finally { race.LeaderFinished.TrySetResult(true); }
+        }
+
+        // Both real SERIALIZABLE transactions first observe an absent claim. The follower
+        // keeps that snapshot while the leader commits, then attempts its claim. This
+        // deterministically exercises stale-snapshot contention, not DB-observed lock waiting.
+        var leaderTask = RunLeaderAsync();
+        var followerTask = CaptureAttemptAsync(follower.Service(followerIdentity, followerRepository), followerCommand, deadline.Token);
+        var attempts = await Task.WhenAll(leaderTask, followerTask);
+        Assert.Null(attempts[0].Failure);
+        var created = Assert.IsType<OrganisationProvisioningResult>(attempts[0].Result);
+        Assert.Equal(OrganisationProvisioningOutcome.Created, created.Outcome);
+        Assert.Null(attempts[1].Result);
+        var refusal = Assert.IsType<OrganisationProvisioningPersistenceException>(attempts[1].Failure);
+        Assert.Equal("PROVISIONING_TRANSACTION_REJECTED", refusal.Code);
+        Assert.False(refusal.RequiresInspection);
+        Assert.Equal(2, race.EmptyFirstReads);
+        var nativeState = Assert.Single(race.ClaimInsertFailureStates);
+        Assert.True(nativeState is "40001" or "23505", "Expected PostgreSQL serialization or competing unique-claim refusal.");
+        Assert.Equal(1, leaderIdentity.EnsureCalls);
+        Assert.Equal(0, followerIdentity.EnsureCalls);
+        Assert.Null(followerRepository.ObservedTenant);
+        Assert.Empty(follower.Database.ChangeTracker.Entries());
+        Assert.Null(leader.Database.Database.CurrentTransaction);
+        Assert.Null(follower.Database.Database.CurrentTransaction);
+        Assert.True(string.IsNullOrEmpty(await TenantAsync(leader.Database)));
+        Assert.True(string.IsNullOrEmpty(await TenantAsync(follower.Database)));
+
+        await using var replayContext = new RuntimeContext(runtime);
+        var before = await replayContext.Database.IdempotencyRecords.AsNoTracking().SingleAsync(deadline.Token);
+        var replayIdentity = new FixtureIdentity(replayContext.Database, subject);
+        var replay = await replayContext.Service(replayIdentity, new ObservedRepository(replayContext.Database))
+            .ProvisionAsync(command, deadline.Token);
+        Assert.Equal(OrganisationProvisioningOutcome.Replay, replay.Outcome);
+        Assert.Equal(created.SubjectId, replay.SubjectId);
+        Assert.Equal(created.OrganisationId, replay.OrganisationId);
+        Assert.Equal(created.MembershipId, replay.MembershipId);
+        Assert.Equal(0, replayIdentity.EnsureCalls);
+
+        if (conflictingIntent)
+        {
+            await using var conflictContext = new RuntimeContext(runtime);
+            var conflictIdentity = new FixtureIdentity(conflictContext.Database, subject);
+            var conflict = await conflictContext.Service(conflictIdentity, new ObservedRepository(conflictContext.Database))
+                .ProvisionAsync(followerCommand, deadline.Token);
+            Assert.Equal(OrganisationProvisioningOutcome.Conflict, conflict.Outcome);
+            Assert.Equal(subject, conflict.SubjectId);
+            Assert.Equal(Guid.Empty, conflict.OrganisationId);
+            Assert.Equal(Guid.Empty, conflict.MembershipId);
+            Assert.Equal(0, conflictIdentity.EnsureCalls);
+        }
+
+        await using var verification = new AuthDbContext(Options(runtime));
+        await AssertCountsAsync(verification, 1);
+        var organisation = await verification.Organisations.AsNoTracking().SingleAsync(deadline.Token);
+        Assert.Equal(created.OrganisationId, organisation.Id);
+        Assert.Equal(command.DisplayName, organisation.DisplayName);
+        Assert.Equal(subject, organisation.OwnerUserId);
+        var membership = await verification.OrganisationMemberships.AsNoTracking().SingleAsync(deadline.Token);
+        Assert.Equal(created.MembershipId, membership.Id);
+        Assert.Equal(created.OrganisationId, membership.OrganisationId);
+        Assert.Equal(subject, membership.UserId);
+        Assert.Equal(PermissionSet.OrganisationOwnerId, membership.PermissionSetId);
+        var after = await verification.IdempotencyRecords.AsNoTracking().SingleAsync(deadline.Token);
+        Assert.Equal(before.RequestHash, after.RequestHash);
+        Assert.Equal(before.SafeResponse, after.SafeResponse);
+        Assert.Equal(before.ResourceId, after.ResourceId);
+        Assert.Equal(before.Status, after.Status);
+        Assert.Equal(created.OrganisationId, after.ResourceId);
+    }
+
+    private sealed record ProvisioningAttempt(OrganisationProvisioningResult? Result,
+        OrganisationProvisioningPersistenceException? Failure);
+
+    private static async Task<ProvisioningAttempt> CaptureAttemptAsync(OrganisationProvisioningService service,
+        OrganisationProvisioningCommand command, CancellationToken cancellationToken)
+    {
+        try { return new(await service.ProvisionAsync(command, cancellationToken), null); }
+        catch (OrganisationProvisioningPersistenceException failure) { return new(null, failure); }
+    }
+
+    private sealed class FirstUseRace
+    {
+        private int emptyFirstReads;
+        public int EmptyFirstReads => Volatile.Read(ref emptyFirstReads);
+        public TaskCompletionSource<bool> BothReadAbsent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> LeaderFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ConcurrentQueue<string> ClaimInsertFailureStates { get; } = new();
+
+        public async Task ObserveAsync(bool leader, DbDataReader result, CancellationToken cancellationToken)
+        {
+            Assert.False(result.HasRows);
+            var count = Interlocked.Increment(ref emptyFirstReads);
+            Assert.InRange(count, 1, 2);
+            if (count == 2) BothReadAbsent.TrySetResult(true);
+            await BothReadAbsent.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            if (!leader) await LeaderFinished.Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    private sealed class ClaimCommandObserver(FirstUseRace race, bool leader) : DbCommandInterceptor
+    {
+        private int firstRead;
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command,
+            CommandExecutedEventData eventData, DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("\"IdempotencyRecords\"", StringComparison.Ordinal)
+                && Interlocked.CompareExchange(ref firstRead, 1, 0) == 0)
+                await race.ObserveAsync(leader, result, cancellationToken);
+            return result;
+        }
+
+        public override Task CommandFailedAsync(DbCommand command, CommandErrorEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.TrimStart().StartsWith("INSERT", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("\"IdempotencyRecords\"", StringComparison.Ordinal)
+                && eventData.Exception is PostgresException postgres)
+                race.ClaimInsertFailureStates.Enqueue(postgres.SqlState); // Never capture provider messages or parameter values.
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class RuntimeContext : IAsyncDisposable
@@ -136,10 +302,14 @@ public sealed class PostgreSqlOrganisationProvisioningTests(PostgreSqlFixture fi
         public AuthDbContext Database { get; }
         public IOutboxWriter Outbox => scope.ServiceProvider.GetRequiredService<IOutboxWriter>();
 
-        public RuntimeContext(string runtime)
+        public RuntimeContext(string runtime, DbCommandInterceptor? interceptor = null)
         {
             var services = new ServiceCollection();
-            services.AddDbContext<AuthDbContext>(options => options.UseNpgsql(runtime));
+            services.AddDbContext<AuthDbContext>(options =>
+            {
+                options.UseNpgsql(runtime);
+                if (interceptor is not null) options.AddInterceptors(interceptor);
+            });
             services.AddSingleton<TimeProvider>(new FixedClock());
             services.AddOnboardingPersistenceFoundations(new ConfigurationBuilder().Build());
             provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
