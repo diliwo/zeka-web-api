@@ -76,6 +76,12 @@ internal static class OwnerProtocol
     public const string ApprovedEmail = "HERVE.MBILO@GMAIL.COM";
     public const string OwnerDecision = "a7daf3ea-6370-4604-9e4b-e5eb206465c7";
     public const int MaximumInputBytes = 65536;
+    private static readonly TimeSpan AdmissionMatchTimeout = TimeSpan.FromMilliseconds(100);
+    private const RegexOptions AdmissionRegexOptions = RegexOptions.CultureInvariant | RegexOptions.NonBacktracking;
+    private static readonly Regex OwnerSidPattern = new(@"^S-1-5-21-\d+-\d+-\d+-\d+$", AdmissionRegexOptions, AdmissionMatchTimeout);
+    private static readonly Regex InitializationPattern = new("^[A-Za-z0-9_-]{16,128}$", AdmissionRegexOptions, AdmissionMatchTimeout);
+    private static readonly Regex SourceShaPattern = new("^[0-9a-f]{40}$", AdmissionRegexOptions, AdmissionMatchTimeout);
+    private static readonly Regex BinaryShaPattern = new("^[0-9a-f]{64}$", AdmissionRegexOptions, AdmissionMatchTimeout);
     internal static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -122,7 +128,7 @@ internal static class OwnerProtocol
             || input.OwnerDecisionId != OwnerDecision || input.ApprovalCommentId != "6529021741")
             throw new OwnerToolException("OWNER_SCOPE_REJECTED");
         if (!string.Equals(input.OwnerAccount, ApprovedOwner, StringComparison.OrdinalIgnoreCase)
-            || !Regex.IsMatch(input.ExpectedOwnerSid ?? "", @"^S-1-5-21-\d+-\d+-\d+-\d+$")
+            || !Matches(OwnerSidPattern, input.ExpectedOwnerSid)
             || input.ActualOwnerSid != input.ExpectedOwnerSid
             || !string.Equals(input.ExpectedOwnerProfile, ApprovedProfile, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(input.ActualOwnerProfile, ApprovedProfile, StringComparison.OrdinalIgnoreCase)
@@ -134,7 +140,7 @@ internal static class OwnerProtocol
             || binding.BinarySha256 != input.BinarySha256)
             throw new OwnerToolException("SOURCE_BINDING_REJECTED");
         if (!IsSha(input.DatabaseSourceCommit, 40)
-            || !Regex.IsMatch(input.InitializationId ?? "", "^[A-Za-z0-9_-]{16,128}$")
+            || !Matches(InitializationPattern, input.InitializationId)
             || input.DatabaseName != "zeka_m1_auth")
             throw new OwnerToolException("DATABASE_BINDING_REJECTED");
         if (input.SubjectId == Guid.Empty || string.IsNullOrWhiteSpace(input.IdempotencyKey)
@@ -157,8 +163,20 @@ internal static class OwnerProtocol
         return new(input);
     }
 
-    private static bool IsSha(string? value, int length) =>
-        value is not null && Regex.IsMatch(value, "^[0-9a-f]{" + length + "}$");
+    private static bool IsSha(string? value, int length) => length switch
+    {
+        40 => Matches(SourceShaPattern, value),
+        64 => Matches(BinaryShaPattern, value),
+        _ => false
+    };
+
+    private static bool Matches(Regex pattern, string? value)
+    {
+        if (value is null) return false;
+        // Matching is non-backtracking and bounded; expiry denies the field using its existing error code.
+        try { return pattern.IsMatch(value); }
+        catch (RegexMatchTimeoutException) { return false; }
+    }
 }
 
 internal sealed record OwnerReceipt(

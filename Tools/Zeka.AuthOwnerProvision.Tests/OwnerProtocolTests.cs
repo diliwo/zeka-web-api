@@ -76,6 +76,82 @@ public sealed class OwnerProtocolTests
         Assert.Throws<OwnerToolException>(() => OwnerProtocol.Parse(new byte[OwnerProtocol.MaximumInputBytes + 1]));
     }
 
+    [Theory]
+    [InlineData("S-1-5-21-0-0-0-0")]
+    [InlineData("S-1-5-21-111-222-333-4294967295")]
+    [InlineData("S-1-5-21-\u0661-\u0662-\u0663-\u0664")]
+    public void Existing_sid_digit_formats_remain_admitted(string sid)
+    {
+        var json = Valid(); json["expectedOwnerSid"] = sid; json["actualOwnerSid"] = sid;
+        Assert.Equal(sid, OwnerProtocol.Admit(Parse(json), Binding()).Value.ExpectedOwnerSid);
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(128)]
+    public void Initialization_identifier_length_boundaries_are_admitted(int length)
+    {
+        var json = Valid(); json["initializationId"] = new string('A', length);
+        Assert.Equal(length, OwnerProtocol.Admit(Parse(json), Binding()).Value.InitializationId.Length);
+    }
+
+    [Theory]
+    [InlineData(15)]
+    [InlineData(129)]
+    public void Initialization_identifier_outside_length_boundaries_is_rejected(int length)
+    {
+        var json = Valid(); json["initializationId"] = new string('A', length);
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal("DATABASE_BINDING_REJECTED", error.Code);
+    }
+
+    [Theory]
+    [InlineData('0')]
+    [InlineData('f')]
+    public void Lowercase_hex_boundaries_remain_admitted(char value)
+    {
+        var source = new string(value, 40); var binary = new string(value, 64);
+        var json = Valid(); json["sourceCommit"] = source; json["binarySha256"] = binary;
+        json["databaseSourceCommit"] = source;
+        var binding = new AssemblyBinding(source, "0.1.0+" + source, binary);
+        Assert.Equal(source, OwnerProtocol.Admit(Parse(json), binding).Value.SourceCommit);
+    }
+
+    [Theory]
+    [InlineData("sourceCommit", 39, "SOURCE_BINDING_REJECTED")]
+    [InlineData("sourceCommit", 41, "SOURCE_BINDING_REJECTED")]
+    [InlineData("binarySha256", 63, "SOURCE_BINDING_REJECTED")]
+    [InlineData("binarySha256", 65, "SOURCE_BINDING_REJECTED")]
+    [InlineData("databaseSourceCommit", 39, "DATABASE_BINDING_REJECTED")]
+    [InlineData("databaseSourceCommit", 41, "DATABASE_BINDING_REJECTED")]
+    public void Hash_length_near_misses_keep_the_existing_rejection_code(string field, int length, string code)
+    {
+        var json = Valid(); json[field] = new string('a', length);
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal(code, error.Code);
+    }
+
+    [Theory]
+    [InlineData("expectedOwnerSid", "OWNER_IDENTITY_REJECTED")]
+    [InlineData("initializationId", "DATABASE_BINDING_REJECTED")]
+    [InlineData("sourceCommit", "SOURCE_BINDING_REJECTED")]
+    [InlineData("binarySha256", "SOURCE_BINDING_REJECTED")]
+    [InlineData("databaseSourceCommit", "DATABASE_BINDING_REJECTED")]
+    public void Pathological_near_match_fields_fail_closed_inside_the_stdin_limit(string field, string code)
+    {
+        var json = Valid();
+        var value = field == "expectedOwnerSid"
+            ? "S-1-5-21-" + new string('9', 30000) + "-1-1-1!"
+            : new string('a', 60000) + "!";
+        json[field] = value;
+        if (field == "expectedOwnerSid") json["actualOwnerSid"] = value;
+        var bytes = Encoding.UTF8.GetBytes(json.ToJsonString());
+        Assert.InRange(bytes.Length, 1, OwnerProtocol.MaximumInputBytes);
+        var input = OwnerProtocol.Parse(bytes);
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(input, Binding()));
+        Assert.Equal(code, error.Code);
+    }
+
     [Fact]
     public void Assembly_informational_version_and_hash_are_both_required()
     {
