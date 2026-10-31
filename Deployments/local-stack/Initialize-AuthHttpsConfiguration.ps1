@@ -134,8 +134,12 @@ public static class ZekaM1AuthHttpsCryptography {
         if (new FileInfo(path).Length > 1048576) throw new CryptographicException("Certificate bundle too large");
         string pem = File.ReadAllText(path);
         const string pattern = @"-----BEGIN CERTIFICATE-----\s*[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----";
-        var blocks = Regex.Matches(pem, pattern, RegexOptions.CultureInvariant);
-        if (blocks.Count == 0 || !String.IsNullOrWhiteSpace(Regex.Replace(pem, pattern, "")))
+        // Non-backtracking matching and a finite deadline prevent malformed near-PEM
+        // input from monopolizing preparation. A timeout is rejected by the caller.
+        const RegexOptions options = RegexOptions.CultureInvariant | RegexOptions.NonBacktracking;
+        var timeout = TimeSpan.FromSeconds(2);
+        var blocks = Regex.Matches(pem, pattern, options, timeout);
+        if (blocks.Count == 0 || !String.IsNullOrWhiteSpace(Regex.Replace(pem, pattern, "", options, timeout)))
             throw new CryptographicException("Certificate-only PEM required");
         var certificates = new X509Certificate2Collection();
         certificates.ImportFromPem(pem);

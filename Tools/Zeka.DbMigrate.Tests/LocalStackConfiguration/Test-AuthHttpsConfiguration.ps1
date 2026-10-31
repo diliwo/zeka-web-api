@@ -33,7 +33,8 @@ function Require-AuthHttpsTest([bool]$Condition, [string]$Name) {
 }
 function New-AuthHttpsTestPrivate([string]$Name, [string]$Missing = '', [string]$San = 'auth.zeka-m1.test',
     [switch]$Expired, [switch]$MismatchedKey, [switch]$UntrustedCa, [switch]$ReusedSigningKey,
-    [switch]$WrongApplicationIssuer, [switch]$CaKeyInBundle) {
+    [switch]$WrongApplicationIssuer, [switch]$CaKeyInBundle,
+    [switch]$MalformedCertificate, [switch]$MalformedCaBundle) {
     $private = Join-Path $output $Name
     [IO.Directory]::CreateDirectory($private) | Out-Null
     Set-AuthHttpsNewDirectoryAcl $private
@@ -89,6 +90,13 @@ function New-AuthHttpsTestPrivate([string]$Name, [string]$Missing = '', [string]
             'auth/tls-key.pem' = $tlsKeyPem
             'auth/signing-key.pem' = $signingPem
             'trust/ca-bundle.pem' = $bundle
+        }
+        # The nested whitespace quantifiers in the former PEM regex stalled on
+        # near-valid delimiters. Keep these fixtures below the 1 MiB size cap.
+        if ($MalformedCertificate -or $MalformedCaBundle) {
+            $malformed = '-----BEGIN CERTIFICATE-----' + (' ' * 8192) + ('A' * 4096) + '-----END CERTIFICATX-----'
+            if ($MalformedCertificate) { $contents['auth/tls-certificate.pem'] = $malformed }
+            if ($MalformedCaBundle) { $contents['trust/ca-bundle.pem'] = $malformed }
         }
         foreach ($relative in $contents.Keys) {
             if ($relative -ne $Missing) {
@@ -170,7 +178,9 @@ try {
         @{ name='mismatched-key'; options=@{ MismatchedKey=$true } },
         @{ name='untrusted-ca'; options=@{ UntrustedCa=$true } },
         @{ name='key-reuse'; options=@{ ReusedSigningKey=$true } },
-        @{ name='ca-key-in-bundle'; options=@{ CaKeyInBundle=$true } }
+        @{ name='ca-key-in-bundle'; options=@{ CaKeyInBundle=$true } },
+        @{ name='malformed-certificate'; options=@{ MalformedCertificate=$true } },
+        @{ name='malformed-ca-bundle'; options=@{ MalformedCaBundle=$true } }
     )
     foreach ($case in $negativeCases) {
         $caseOptions = $case.options
