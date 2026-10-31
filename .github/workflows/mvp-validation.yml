@@ -739,6 +739,51 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Prove mandatory first-admin PostgreSQL cases on exact head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          evidence="$RUNNER_TEMP/zeka-owner-provider-evidence"
+          mkdir "$evidence"
+          status=0
+          timeout --signal=TERM --kill-after=10s 300s dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~PostgreSqlOrganisationProvisioningTests --logger "trx;LogFileName=owner-provider.trx" --results-directory "$evidence" > "$evidence/native.stdout" 2> "$evidence/native.stderr" || status=$?
+          export OWNER_PROVIDER_EVIDENCE="$evidence" OWNER_PROVIDER_EXIT="$status"
+          python - <<'PY'
+          import json, os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          directory = Path(os.environ["OWNER_PROVIDER_EVIDENCE"])
+          native = int(os.environ["OWNER_PROVIDER_EXIT"])
+          trx = directory / "owner-provider.trx"
+          counts, cases = {}, []
+          if trx.exists():
+              root = ET.parse(trx).getroot()
+              ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+              counters = root.find("t:ResultSummary/t:Counters", ns)
+              counts = dict(counters.attrib) if counters is not None else {}
+              cases = [{"name": item.attrib.get("testName"), "outcome": item.attrib.get("outcome")}
+                       for item in root.findall("t:Results/t:UnitTestResult", ns)]
+          valid = (native == 0 and counts.get("total") == "4" and counts.get("executed") == "4"
+                   and counts.get("passed") == "4" and counts.get("failed") == "0"
+                   and counts.get("notExecuted") == "0" and len(cases) == 4
+                   and all(item["outcome"] == "Passed" for item in cases))
+          (directory / "summary.json").write_text(json.dumps({"schema": "zeka-owner-provider-evidence/v1", "sourceCommit": os.environ["EXPECTED_HEAD"], "nativeExit": native, "mandatoryExpected": 4, "counters": counts, "cases": cases, "status": "PASS" if valid else "FAIL", "ownerWindowsWitness": "NOT_RUN"}, indent=2))
+          if not valid:
+              raise SystemExit("Mandatory first-admin PostgreSQL inventory or result failed; native output retained privately.")
+          PY
+
+      - name: Retain safe first-admin PostgreSQL evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: owner-provisioning-postgresql-focused
+          path: ${{ runner.temp }}/zeka-owner-provider-evidence/summary.json
+          if-no-files-found: error
+          retention-days: 14
+
       # AuthenticationStartupTests owns its RabbitMQ/API containers and private network;
       # the runner needs Docker only, with no pre-provisioned broker or credentials.
       - name: Run container-backed integration test projects including real ClientManagement startup
@@ -884,7 +929,7 @@ jobs:
         with:
           dotnet-version: 8.0.129
 
-      - name: Build source-bound private owner helper and prove rejected stdin
+      - name: Verify source-bound owner helper image containment
         env:
           PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
           PACKAGE_USERNAME: ${{ github.repository_owner }}
@@ -896,26 +941,10 @@ jobs:
           export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
           payload="$RUNNER_TEMP/zeka-owner-helper-publish"
           evidence="$RUNNER_TEMP/zeka-owner-helper-evidence"
-          mkdir "$evidence"
           dotnet publish Tools/Zeka.AuthOwnerProvision/Zeka.AuthOwnerProvision.csproj --configuration Release --runtime linux-x64 --self-contained false --output "$payload" -p:ZekaSourceSha="$EXPECTED_HEAD"
           binary_sha=$(sha256sum "$payload/zeka-auth-owner-provision.dll" | cut -d' ' -f1)
-          docker build --file Tools/Zeka.AuthOwnerProvision/Dockerfile --build-arg SOURCE_COMMIT="$EXPECTED_HEAD" --build-arg BINARY_SHA256="$binary_sha" --tag "zeka-owner-helper-ci:$EXPECTED_HEAD" "$payload"
-          image_id=$(docker image inspect --format '{{.Id}}' "zeka-owner-helper-ci:$EXPECTED_HEAD")
-          set +e
-          printf '{}\n' | docker run --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16777216,mode=1777 --cap-drop ALL --security-opt no-new-privileges --label com.diliwo.zeka.scope=m1-owner-provision-negative-ci --interactive "$image_id" > "$evidence/rejected-stdin.json" 2> "$evidence/rejected-stdin.stderr"
-          status=$?
-          set -e
-          test "$status" -eq 2
-          export OWNER_BINARY_SHA="$binary_sha" OWNER_IMAGE_ID="$image_id" OWNER_EVIDENCE="$evidence"
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          evidence = Path(os.environ["OWNER_EVIDENCE"])
-          receipt = json.loads((evidence / "rejected-stdin.json").read_text())
-          if receipt.get("status") != "BLOCKED" or receipt.get("stage") != "admission" or receipt.get("code") != "INPUT_SCHEMA_REJECTED" or receipt.get("exitCode") != 2:
-              raise SystemExit("Owner helper must reject invalid stdin before any database or identity work.")
-          (evidence / "build-result.json").write_text(json.dumps({"sourceCommit": os.environ["EXPECTED_HEAD"], "binarySha256": os.environ["OWNER_BINARY_SHA"], "imageId": os.environ["OWNER_IMAGE_ID"], "rejectedStdinExit": 2, "runtimeProvisioning": "NOT RUN"}, indent=2))
-          PY
+          docker pull mcr.microsoft.com/dotnet/aspnet:8.0.29
+          python Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerImageContainment.py --publish "$payload" --evidence "$evidence" --source-commit "$EXPECTED_HEAD" --binary-sha256 "$binary_sha"
 
       - name: Retain safe owner helper image evidence
         if: ${{ always() }}
@@ -923,8 +952,7 @@ jobs:
         with:
           name: owner-helper-source-and-rejection
           path: |
-            ${{ runner.temp }}/zeka-owner-helper-evidence/build-result.json
-            ${{ runner.temp }}/zeka-owner-helper-evidence/rejected-stdin.json
+            ${{ runner.temp }}/zeka-owner-helper-evidence/result.json
           if-no-files-found: error
           retention-days: 14
   powershell_coverage:
@@ -969,13 +997,16 @@ jobs:
           $directory = Join-Path $env:RUNNER_TEMP 'zeka-owner-admission-tests'
           [IO.Directory]::CreateDirectory($directory) | Out-Null
           & ./Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1 -ReportFile (Join-Path $directory 'owner-admission.json')
+          & ./Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerHelperBuildContext.ps1 -ReportFile (Join-Path $directory 'build-context.json')
 
       - name: Retain safe synthetic owner admission proof
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: owner-admission-synthetic-windows
-          path: ${{ runner.temp }}/zeka-owner-admission-tests/owner-admission.json
+          path: |
+            ${{ runner.temp }}/zeka-owner-admission-tests/owner-admission.json
+            ${{ runner.temp }}/zeka-owner-admission-tests/build-context.json
           if-no-files-found: error
           retention-days: 14
       - name: Retain only coverage XML and source-bound safe counts
@@ -1153,7 +1184,7 @@ jobs:
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
             /d:sonar.coverageReportPaths="TestResults/powershell-coverage/powershell-coverage.xml" \
-            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellCoverageChild.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1,Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1" \
+            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellCoverageChild.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1,Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1,Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerHelperBuildContext.ps1,Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerImageContainment.py" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
@@ -1170,6 +1201,9 @@ jobs:
           base = Path.cwd()
           namespace = {"s": "http://www.sonarsource.com/msbuild/integration/2015/1"}
           script_projects = {
+              **{(base / "Tools/Zeka.AuthOwnerProvision.Tests/BuildContext" / name).resolve():
+                  (base / "Tools/Zeka.AuthOwnerProvision.Tests/Zeka.AuthOwnerProvision.Tests.csproj").resolve()
+                  for name in ("Test-OwnerHelperBuildContext.ps1", "Test-OwnerImageContainment.py")},
               (base / "Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1").resolve():
                   (base / "Tools/Zeka.AuthOwnerProvision.Tests/Zeka.AuthOwnerProvision.Tests.csproj").resolve(),
               (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve():
@@ -1199,7 +1233,7 @@ jobs:
           for script, project in script_projects.items():
               if owners[script] != {(project, "Test", "false")}:
                   raise SystemExit(f"Assertion script must be included by its exact non-excluded test project: {script.relative_to(base)}")
-          print("Ten test harness/infrastructure scripts are owned by their exact TEST projects; production coverage is unchanged.")
+          print(f"{len(script_projects)} assertion sources are owned by their exact TEST projects; production classification is unchanged.")
           PY
 
       - name: Run Python accounting regressions and collect coverage for analysis
@@ -1266,6 +1300,8 @@ jobs:
 
           base = Path.cwd()
           assertion_scripts = {
+              *{(base / "Tools/Zeka.AuthOwnerProvision.Tests/BuildContext" / name).resolve()
+                for name in ("Test-OwnerHelperBuildContext.ps1", "Test-OwnerImageContainment.py")},
               (base / "Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1").resolve(),
               (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve(),
               *{
@@ -1274,9 +1310,10 @@ jobs:
               },
           }
           main_scripts = {
-              (base / "Deployments/local-stack" / name).resolve()
-              for name in ("Test-Configuration.ps1", "Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1",
-                           "Initialize-Databases.ps1", "W3-NativeDiagnostics.ps1", "Initialize-AuthHttpsConfiguration.ps1", "Invoke-OwnerFirstAdmin.ps1")
+              (base / "Tools/Zeka.AuthOwnerProvision/Prepare-OwnerHelperBuildContext.ps1").resolve(),
+              *{(base / "Deployments/local-stack" / name).resolve()
+                for name in ("Test-Configuration.ps1", "Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1",
+                             "Initialize-Databases.ps1", "W3-NativeDiagnostics.ps1", "Initialize-AuthHttpsConfiguration.ps1", "Invoke-OwnerFirstAdmin.ps1")}
           }
           text = (base / ".sonarqube/out/sonar-project.properties").read_text(encoding="utf-8-sig")
           text = re.sub(r"\\\r?\n[ \t]*", "", text)
