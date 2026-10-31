@@ -115,7 +115,8 @@ def contains(stream, marker, deadline):
         tail = combined[-len(marker):]
 
 def inspect_layers(archive_path, image, layers, base_layers, forbidden, marker):
-    files = owned = 0
+    files = owned = inherited_directories = 0
+    base_directories = {}
     deadline = time.monotonic() + 300
     allowed = {"app/" + item["name"] for item in image["runtimeFiles"]}
     with tarfile.open(archive_path, "r:*") as archive:
@@ -132,14 +133,23 @@ def inspect_layers(archive_path, image, layers, base_layers, forbidden, marker):
                     require(time.monotonic() < deadline, "LAYER_INSPECTION_DEADLINE")
                     path = member.name.removeprefix("./").rstrip("/")
                     require(forbidden not in path, "FORBIDDEN_FILENAME_IN_LAYER")
+                    directory_metadata = (member.uid, member.gid, member.mode)
+                    if index < len(base_layers) and member.isdir():
+                        base_directories[path] = directory_metadata
                     if index >= len(base_layers) and path:
-                        require((member.isdir() and path == "app") or (member.isfile() and path in allowed),
-                                "UNEXPECTED_OWN_LAYER_ENTRY")
+                        # BuildKit's RUN mount setup can repeat the inherited empty /etc directory.
+                        # Admit only unchanged base metadata, never an added file/link or another directory.
+                        inherited_etc = (path == "etc" and member.isdir() and member.size == 0
+                                         and base_directories.get(path) == directory_metadata)
+                        require((member.isdir() and path == "app") or (member.isfile() and path in allowed)
+                                or inherited_etc, "UNEXPECTED_OWN_LAYER_ENTRY")
+                        inherited_directories += int(inherited_etc)
                         owned += int(member.isfile())
                     if member.isfile():
                         files += 1
                         require(not contains(layer.extractfile(member), marker, deadline), "FORBIDDEN_SENTINEL_IN_LAYER")
     return {"layerCount": len(layers), "filesScanned": files, "ownFileEntries": owned,
+            "inheritedEtcDirectoryMetadataEntries": inherited_directories,
             "forbiddenFilenameFound": False, "forbiddenSentinelFound": False, "archiveSha256": digest(archive_path)}
 
 def create(native, image, name, run_id, receipt):
