@@ -32,8 +32,8 @@ public sealed class AuthenticationFixture : IDisposable
     }
     public string Token(string invalid = "", string? kid = KeyId, RSA? key = null, string? subject = null)
     {
-        using var wrong = RSA.Create(2048);
-        SecurityKey signing = new RsaSecurityKey(invalid == "signature" ? wrong : key ?? Key) { KeyId = kid };
+        using var wrong = invalid == "signature" ? RSA.Create(2048) : null;
+        SecurityKey signing = new RsaSecurityKey(wrong ?? key ?? Key) { KeyId = kid };
         var algorithm = invalid == "algorithm" ? SecurityAlgorithms.RsaSha512 : SecurityAlgorithms.RsaSha256;
         if (invalid is "hs256" or "substitution")
         {

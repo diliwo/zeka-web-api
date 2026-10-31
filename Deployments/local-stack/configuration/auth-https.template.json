@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "zeka-m1-auth-https-configuration/v1",
+  "project": "zeka-m1",
+  "environment": "LocalStack",
+  "issuer": "https://auth.zeka-m1.test:19443",
+  "jwksUri": "https://auth.zeka-m1.test:19443/.well-known/jwks.json",
+  "requiredDnsSan": "auth.zeka-m1.test",
+  "internalDnsAlias": "auth.zeka-m1.test",
+  "hostPublication": "127.0.0.1:19443:19443",
+  "httpHealthPort": 8080,
+  "materials": [
+    {
+      "relativePath": "auth/tls-certificate.pem",
+      "environmentName": "ZEKA_M1_AUTH_TLS_CERTIFICATE_SOURCE",
+      "containerPath": "/run/secrets/auth_tls_certificate.pem",
+      "consumers": [
+        "auth"
+      ],
+      "readOnly": true
+    },
+    {
+      "relativePath": "auth/tls-key.pem",
+      "environmentName": "ZEKA_M1_AUTH_TLS_KEY_SOURCE",
+      "containerPath": "/run/secrets/auth_tls_key.pem",
+      "consumers": [
+        "auth"
+      ],
+      "readOnly": true
+    },
+    {
+      "relativePath": "trust/ca-bundle.pem",
+      "environmentName": "ZEKA_M1_CA_BUNDLE_SOURCE",
+      "containerPath": "/run/secrets/local_ca_bundle.pem",
+      "consumers": [
+        "auth",
+        "adminarea",
+        "client",
+        "gateway"
+      ],
+      "readOnly": true
+    }
+  ],
+  "preserve": [
+    "auth/signing-key.pem",
+    "auth/browser-session-hash.key",
+    "database components",
+    "existing application configuration",
+    "HTTP 8080 health/admission"
+  ],
+  "notPerformed": [
+    "CA or key generation",
+    "Windows trust installation",
+    "hosts changes",
+    "Docker/WSL execution",
+    "certificate contents/SAN/key-match validation",
+    "TLS handshake or application startup"
+  ],
+  "applicationReady": false
+}

@@ -20,11 +20,11 @@ public sealed class MembershipMigrationTests : IAsyncLifetime
         await using var database = new DeploymentDbContext(new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(postgres.GetConnectionString()).Options);
         var migrator = database.GetService<IMigrator>();
         await migrator.MigrateAsync("20250427103057_Initial Migration");
+        await LegacyAdminAreaRows.SeedAsync(database);
         var organisation = Guid.NewGuid(); var membership = Guid.NewGuid();
         await database.Database.ExecuteSqlInterpolatedAsync($"""
-            UPDATE "StaffMembers" SET "UserName" = 'jdoe' WHERE "Id" = 1;
             CREATE TABLE "__OrganisationTenantMap" ("TenantName" text PRIMARY KEY, "OrganisationId" uuid NOT NULL UNIQUE);
-            INSERT INTO "__OrganisationTenantMap" VALUES ('Zeka', {organisation});
+            INSERT INTO "__OrganisationTenantMap" VALUES ('Legacy', {organisation});
             """);
         await migrator.MigrateAsync("20260907185334_CityReferenceIdentity");
         var missing = await Assert.ThrowsAsync<PostgresException>(() =>
@@ -46,9 +46,27 @@ public sealed class MembershipMigrationTests : IAsyncLifetime
         await database.Database.ExecuteSqlInterpolatedAsync($"""DELETE FROM "__StaffMembershipMap" WHERE "LocalId" = 1 AND "OrganisationMembershipId" <> {membership}""");
         await migrator.MigrateAsync("20260910165920_ExplicitTenantEnforcement");
         var worker = await database.StaffMembers.SingleAsync(x => x.Id == 1);
-        Assert.Equal(membership, worker.OrganisationMembershipId); Assert.Equal("jdoe", worker.UserName);
+        Assert.Equal(membership, worker.OrganisationMembershipId); Assert.Equal("staff-1", worker.UserName);
         Assert.Equal(organisation, worker.OrganisationId); Assert.Equal(1, worker.ProjectionVersion);
         var rollback = await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync("20260907185334_CityReferenceIdentity"));
         Assert.Contains("Automatic rollback is disabled", rollback.MessageText);
     }
+}
+
+internal static class LegacyAdminAreaRows
+{
+    // Deliberately explicit legacy rows: migration tests must not depend on demo model seeds.
+    public static Task SeedAsync(DeploymentDbContext database) => database.Database.ExecuteSqlRawAsync("""
+        INSERT INTO "Teams"
+          ("Id", "Name", "Acronym", "CreatedBy", "Created", "LastModifiedBy", "Softdelete", "TenantName")
+        VALUES (1, 'Fixture team', 'FIX', 'test', timestamp '2026-01-01', '', false, 'Legacy');
+        INSERT INTO "StaffMembers"
+          ("Id", "FirstName", "LastName", "UserName", "TeamId", "CreatedBy", "Created", "LastModifiedBy", "Softdelete", "TenantName")
+        VALUES
+          (1, 'First', 'Fixture', 'staff-1', 1, 'test', timestamp '2026-01-01', '', false, 'Legacy'),
+          (2, 'Second', 'Fixture', 'staff-2', 1, 'test', timestamp '2026-01-01', '', false, 'Legacy'),
+          (3, 'Third', 'Fixture', 'staff-3', 1, 'test', timestamp '2026-01-01', '', false, 'Legacy');
+        SELECT setval(pg_get_serial_sequence('"Teams"', 'Id'), 1, true);
+        SELECT setval(pg_get_serial_sequence('"StaffMembers"', 'Id'), 3, true);
+        """);
 }

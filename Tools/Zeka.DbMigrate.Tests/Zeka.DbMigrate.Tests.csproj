@@ -15,5 +15,16 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Zeka.DbMigrate/Zeka.DbMigrate.csproj" />
+    <ProjectReference Include="../Zeka.LocalStack.DatabaseSetup/Zeka.LocalStack.DatabaseSetup.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="LocalStackConfiguration/Test-DatabaseBootstrap.ps1" />
+    <Content Include="LocalStackConfiguration/Test-W3NativeDiagnostics.ps1" />
+    <Content Include="LocalStackConfiguration/Test-W3AtomicWrite.ps1" />
+    <Content Include="LocalStackConfiguration/PowerShellLineCoverage.ps1" />
+    <Content Include="LocalStackConfiguration/Test-PowerShellLineCoverage.ps1" />
+    <Content Include="LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1" />
+    <Content Include="LocalStackConfiguration/PowerShellCoverageChild.ps1" />
+    <Content Include="LocalStackConfiguration/Test-PowerShellCoverageChild.ps1" />
   </ItemGroup>
 </Project>

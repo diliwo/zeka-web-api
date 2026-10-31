@@ -48,4 +48,8 @@
     <Compile Include="../../../ClientManagement/Client.API/TenantAuthentication.cs" Link="ClientBearerRegistration.cs" />
   </ItemGroup>
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/RealHostStartupTests.cs" Link="RealHostStartupTests.cs" /></ItemGroup>
+  <ItemGroup>
+    <!-- Existing synthetic Compose assertion suite, physically owned by this test project. -->
+    <Content Include="Configuration/Test-Configuration.ps1" />
+  </ItemGroup>
 </Project>

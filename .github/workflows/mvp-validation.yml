@@ -49,6 +49,8 @@ jobs:
     steps:
       - name: Check out pull-request code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Install pinned .NET SDK
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
@@ -76,6 +78,7 @@ jobs:
           test_projects=(
             "Services/AuthManager/Tests/Domain.UnitTests/Domain.UnitTests.csproj"
             "Services/AuthManager/Tests/Application.UnitTests/Application.UnitTests.csproj"
+            "Tools/Zeka.AuthOwnerProvision.Tests/Zeka.AuthOwnerProvision.Tests.csproj"
             "Services/AuthManager/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj"
             "Services/AdminAreaManagement/Tests/Domain.UnitTests/Domain.UnitTests.csproj"
             "Services/AdminAreaManagement/Tests/Application.UnitTests/Application.UnitTests.csproj"
@@ -736,6 +739,51 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Prove mandatory first-admin PostgreSQL cases on exact head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          evidence="$RUNNER_TEMP/zeka-owner-provider-evidence"
+          mkdir "$evidence"
+          status=0
+          timeout --signal=TERM --kill-after=10s 300s dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~PostgreSqlOrganisationProvisioningTests --logger "trx;LogFileName=owner-provider.trx" --results-directory "$evidence" > "$evidence/native.stdout" 2> "$evidence/native.stderr" || status=$?
+          export OWNER_PROVIDER_EVIDENCE="$evidence" OWNER_PROVIDER_EXIT="$status"
+          python - <<'PY'
+          import json, os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          directory = Path(os.environ["OWNER_PROVIDER_EVIDENCE"])
+          native = int(os.environ["OWNER_PROVIDER_EXIT"])
+          trx = directory / "owner-provider.trx"
+          counts, cases = {}, []
+          if trx.exists():
+              root = ET.parse(trx).getroot()
+              ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+              counters = root.find("t:ResultSummary/t:Counters", ns)
+              counts = dict(counters.attrib) if counters is not None else {}
+              cases = [{"name": item.attrib.get("testName"), "outcome": item.attrib.get("outcome")}
+                       for item in root.findall("t:Results/t:UnitTestResult", ns)]
+          valid = (native == 0 and counts.get("total") == "4" and counts.get("executed") == "4"
+                   and counts.get("passed") == "4" and counts.get("failed") == "0"
+                   and counts.get("notExecuted") == "0" and len(cases) == 4
+                   and all(item["outcome"] == "Passed" for item in cases))
+          (directory / "summary.json").write_text(json.dumps({"schema": "zeka-owner-provider-evidence/v1", "sourceCommit": os.environ["EXPECTED_HEAD"], "nativeExit": native, "mandatoryExpected": 4, "counters": counts, "cases": cases, "status": "PASS" if valid else "FAIL", "ownerWindowsWitness": "NOT_RUN"}, indent=2))
+          if not valid:
+              raise SystemExit("Mandatory first-admin PostgreSQL inventory or result failed; native output retained privately.")
+          PY
+
+      - name: Retain safe first-admin PostgreSQL evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: owner-provisioning-postgresql-focused
+          path: ${{ runner.temp }}/zeka-owner-provider-evidence/summary.json
+          if-no-files-found: error
+          retention-days: 14
+
       # AuthenticationStartupTests owns its RabbitMQ/API containers and private network;
       # the runner needs Docker only, with no pre-provisioned broker or credentials.
       - name: Run container-backed integration test projects including real ClientManagement startup
@@ -811,6 +859,8 @@ jobs:
     steps:
       - name: Check out pull-request code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Install pinned .NET SDK
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
@@ -855,6 +905,8 @@ jobs:
     steps:
       - name: Check out pull-request code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Verify Docker and Compose
         run: |
@@ -872,9 +924,118 @@ jobs:
             authman.api \
             zekaocelotgw
 
+      - name: Install pinned SDK for the owner helper
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - name: Verify source-bound owner helper image containment
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
+          export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
+          payload="$RUNNER_TEMP/zeka-owner-helper-publish"
+          evidence="$RUNNER_TEMP/zeka-owner-helper-evidence"
+          dotnet publish Tools/Zeka.AuthOwnerProvision/Zeka.AuthOwnerProvision.csproj --configuration Release --runtime linux-x64 --self-contained false --output "$payload" -p:ZekaSourceSha="$EXPECTED_HEAD"
+          binary_sha=$(sha256sum "$payload/zeka-auth-owner-provision.dll" | cut -d' ' -f1)
+          docker pull mcr.microsoft.com/dotnet/aspnet:8.0.29
+          python Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerImageContainment.py --publish "$payload" --evidence "$evidence" --source-commit "$EXPECTED_HEAD" --binary-sha256 "$binary_sha"
+
+      - name: Retain safe owner helper image evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: owner-helper-source-and-rejection
+          path: |
+            ${{ runner.temp }}/zeka-owner-helper-evidence/result.json
+          if-no-files-found: error
+          retention-days: 14
+  powershell_coverage:
+    name: Windows PowerShell core coverage
+    needs: source_policy
+    if: ${{ needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact source with LF bytes for cross-runner source hashes
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: core.autocrlf
+          GIT_CONFIG_VALUE_0: "false"
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Prove real PowerShell line collection and run credential-free core regressions
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualHead = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualHead -cne $env:EXPECTED_HEAD) { throw 'POWERSHELL_COVERAGE_HEAD_MISMATCH' }
+          # Core scope is native9 + atomic2 only. TLS file-only assertions remain owner-local evidence:
+          # their mandatory Sonar CLI admission requires an unreleased Windows CI credential path.
+          # The TLS test stays TEST source, and operational TLS code stays MAIN/uncovered in Sonar.
+          $directory = Join-Path $env:RUNNER_TEMP 'zeka-powershell-coverage'
+          & ./Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1 -Directory $directory
+          [IO.File]::WriteAllText((Join-Path $directory 'source-revision.txt'), $actualHead, [Text.UTF8Encoding]::new($false))
+          Write-Output 'TLS file-only CI coverage BLOCKED: mandatory Sonar CLI authentication is unavailable in this credential-free Windows job; no TLS runtime readiness is claimed.'
+
+      - name: Prove owner admission with synthetic facts only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $directory = Join-Path $env:RUNNER_TEMP 'zeka-owner-admission-tests'
+          [IO.Directory]::CreateDirectory($directory) | Out-Null
+          & ./Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1 -ReportFile (Join-Path $directory 'owner-admission.json')
+          & ./Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerHelperBuildContext.ps1 -ReportFile (Join-Path $directory 'build-context.json')
+
+      - name: Retain safe synthetic owner admission proof
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: owner-admission-synthetic-windows
+          path: |
+            ${{ runner.temp }}/zeka-owner-admission-tests/owner-admission.json
+            ${{ runner.temp }}/zeka-owner-admission-tests/build-context.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain only coverage XML and source-bound safe counts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: powershell-line-coverage
+          path: |
+            ${{ runner.temp }}/zeka-powershell-coverage/powershell-coverage.xml
+            ${{ runner.temp }}/zeka-powershell-coverage/powershell-coverage-result.json
+            ${{ runner.temp }}/zeka-powershell-coverage/source-revision.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Retain safe launcher and native receipts separately from coverage import
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: powershell-core-diagnostics
+          path: |
+            ${{ runner.temp }}/zeka-powershell-coverage/launcher-proof.json
+            ${{ runner.temp }}/zeka-powershell-coverage/launcher-result.json
+            ${{ runner.temp }}/zeka-powershell-coverage/native-result.json
+          if-no-files-found: error
+          retention-days: 14
+
   sonar:
     name: SonarQube Cloud / Quality Gate
-    needs: source_policy
+    needs: [source_policy, powershell_coverage]
     if: ${{ needs.source_policy.outputs.trusted == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
@@ -884,6 +1045,7 @@ jobs:
       - name: Check out full pull-request history
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Install pinned .NET SDK
@@ -895,6 +1057,80 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: 3.12.14
+
+      - name: Download same-run execution-derived PowerShell coverage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: powershell-line-coverage
+          path: TestResults/powershell-coverage
+
+      - name: Verify PowerShell coverage source bytes, schema and actual count receipts
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import xml.etree.ElementTree as ET
+
+          directory = Path("TestResults/powershell-coverage")
+          report = directory / "powershell-coverage.xml"
+          summary_file = directory / "powershell-coverage-result.json"
+          revision_file = directory / "source-revision.txt"
+          if {item.name for item in directory.iterdir()} != {report.name, summary_file.name, revision_file.name}:
+              raise SystemExit("PowerShell coverage artifact must contain exactly its three allowlisted files.")
+          if (report.stat().st_size > 1_000_000 or summary_file.stat().st_size > 64_000
+                  or revision_file.read_text(encoding="utf-8").strip() != os.environ["EXPECTED_HEAD"]):
+              raise SystemExit("PowerShell coverage artifact is oversized or belongs to another source revision.")
+          summary = json.loads(summary_file.read_text(encoding="utf-8"))
+          if (summary.get("status") != "PASS" or summary.get("collectorProof") != "PASS"
+                  or summary.get("nativeCasesPassed") != 9 or summary.get("atomicCasesPassed") != 2
+                  or summary.get("coverageReport") != report.name
+                  or hashlib.sha256(report.read_bytes()).hexdigest() != summary.get("coverageSha256")):
+              raise SystemExit("PowerShell collector proof, regression counts or XML hash receipt is invalid.")
+          expected = {"Deployments/local-stack/W3-NativeDiagnostics.ps1", "Deployments/local-stack/Initialize-Databases.ps1"}
+          hashes = summary.get("sourceHashes", [])
+          if len(hashes) != 2 or {item.get("path") for item in hashes} != expected:
+              raise SystemExit("PowerShell coverage must name exactly its two core operational source files.")
+          for item in hashes:
+              digest = item.get("sha256", "")
+              if (not re.fullmatch(r"[0-9a-f]{64}", digest)
+                      or hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest() != digest):
+                  raise SystemExit("PowerShell coverage source bytes differ from this exact Linux checkout.")
+          coverage = ET.parse(report).getroot()
+          if coverage.tag != "coverage" or coverage.attrib != {"version": "1"}:
+              raise SystemExit("PowerShell coverage must use the supported generic XML version 1 schema.")
+          counts = {}
+          for source in coverage:
+              if source.tag != "file" or set(source.attrib) != {"path"} or source.get("path") not in expected or source.get("path") in counts:
+                  raise SystemExit("PowerShell coverage contains an unexpected or duplicate source file.")
+              path = source.attrib["path"]
+              maximum = len(Path(path).read_text(encoding="utf-8-sig").splitlines())
+              seen = set()
+              covered = 0
+              for line in source:
+                  if line.tag != "lineToCover" or set(line.attrib) != {"lineNumber", "covered"}:
+                      raise SystemExit("PowerShell coverage contains unsupported line metadata.")
+                  number = int(line.attrib["lineNumber"])
+                  if number <= 0 or number > maximum or number in seen or line.attrib["covered"] not in {"true", "false"}:
+                      raise SystemExit("PowerShell coverage line numbers or actual-hit flags are invalid.")
+                  seen.add(number)
+                  covered += line.attrib["covered"] == "true"
+              if not seen:
+                  raise SystemExit("PowerShell coverage must report nonempty source line candidates.")
+              counts[path] = (len(seen), covered)
+          native = counts.get("Deployments/local-stack/W3-NativeDiagnostics.ps1")
+          initialization = counts.get("Deployments/local-stack/Initialize-Databases.ps1")
+          if (set(counts) != expected or not native or native[1] <= 0 or not initialization or initialization[1] != 0
+                  or native != (summary.get("nativeStatementLines"), summary.get("nativeExecutedLines"))
+                  or initialization != (summary.get("initializationStatementLines"), summary.get("initializationExecutedLines"))):
+              raise SystemExit("PowerShell XML counts disagree with source-bound execution receipts.")
+          print(f"Verified actual PowerShell core line hits: helper {native[1]}/{native[0]}; database initialization 0/{initialization[0]} (NOT RUN).")
+          print("TLS CI coverage remains BLOCKED by mandatory scanner authentication; operational TLS code remains MAIN/uncovered.")
+          PY
 
       - name: Verify SonarQube Cloud prerequisites
         env:
@@ -947,13 +1183,58 @@ jobs:
             /d:sonar.pullrequest.base="${SONAR_PR_BASE}" \
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
-            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py" \
+            /d:sonar.coverageReportPaths="TestResults/powershell-coverage/powershell-coverage.xml" \
+            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellCoverageChild.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1,Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1,Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerHelperBuildContext.ps1,Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerImageContainment.py" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
 
       - name: Build for analysis
         run: dotnet build zeka-web-api.sln --configuration Release --no-restore --no-incremental
+
+      - name: Verify configuration assertions are classified as test source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          base = Path.cwd()
+          namespace = {"s": "http://www.sonarsource.com/msbuild/integration/2015/1"}
+          script_projects = {
+              **{(base / "Tools/Zeka.AuthOwnerProvision.Tests/BuildContext" / name).resolve():
+                  (base / "Tools/Zeka.AuthOwnerProvision.Tests/Zeka.AuthOwnerProvision.Tests.csproj").resolve()
+                  for name in ("Test-OwnerHelperBuildContext.ps1", "Test-OwnerImageContainment.py")},
+              (base / "Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1").resolve():
+                  (base / "Tools/Zeka.AuthOwnerProvision.Tests/Zeka.AuthOwnerProvision.Tests.csproj").resolve(),
+              (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve():
+                  (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj").resolve(),
+              **{
+                  (base / "Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration" / name).resolve():
+                      (base / "Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj").resolve()
+                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1", "PowerShellLineCoverage.ps1", "Test-PowerShellLineCoverage.ps1", "Test-AuthHttpsConfiguration.ps1", "PowerShellCoverageChild.ps1", "Test-PowerShellCoverageChild.ps1")
+              },
+          }
+          for script, project in script_projects.items():
+              if not script.is_relative_to(project.parent):
+                  raise SystemExit("Configuration assertions must physically belong to their test project.")
+          owners = {script: set() for script in script_projects}
+          for info in Path(".sonarqube/out").rglob("ProjectInfo.xml"):
+              root = ET.parse(info).getroot()
+              for result in root.findall("s:AnalysisResultFiles/s:AnalysisResultFile", namespace):
+                  if result.get("Id") != "FilesToAnalyze":
+                      continue
+                  paths = Path(result.attrib["Location"]).read_text(encoding="utf-8-sig").splitlines()
+                  analyzed = {Path(value).resolve() for value in paths if value}
+                  owner = Path(root.findtext("s:FullPath", namespaces=namespace)).resolve()
+                  category = root.findtext("s:ProjectType", namespaces=namespace)
+                  excluded = root.findtext("s:IsExcluded", namespaces=namespace)
+                  for script in owners.keys() & analyzed:
+                      owners[script].add((owner, category, excluded))
+          for script, project in script_projects.items():
+              if owners[script] != {(project, "Test", "false")}:
+                  raise SystemExit(f"Assertion script must be included by its exact non-excluded test project: {script.relative_to(base)}")
+          print(f"{len(script_projects)} assertion sources are owned by their exact TEST projects; production classification is unchanged.")
+          PY
 
       - name: Run Python accounting regressions and collect coverage for analysis
         shell: bash
@@ -1009,6 +1290,49 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+      - name: Verify the final scanner input keeps assertions in TEST scope
+        if: ${{ always() }}
+        run: |
+          python - <<'PY'
+          import csv
+          import re
+          from pathlib import Path
+
+          base = Path.cwd()
+          assertion_scripts = {
+              *{(base / "Tools/Zeka.AuthOwnerProvision.Tests/BuildContext" / name).resolve()
+                for name in ("Test-OwnerHelperBuildContext.ps1", "Test-OwnerImageContainment.py")},
+              (base / "Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1").resolve(),
+              (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve(),
+              *{
+                  (base / "Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration" / name).resolve()
+                  for name in ("Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1", "PowerShellLineCoverage.ps1", "Test-PowerShellLineCoverage.ps1", "Test-AuthHttpsConfiguration.ps1", "PowerShellCoverageChild.ps1", "Test-PowerShellCoverageChild.ps1")
+              },
+          }
+          main_scripts = {
+              (base / "Tools/Zeka.AuthOwnerProvision/Prepare-OwnerHelperBuildContext.ps1").resolve(),
+              *{(base / "Deployments/local-stack" / name).resolve()
+                for name in ("Test-Configuration.ps1", "Test-DatabaseBootstrap.ps1", "Test-W3NativeDiagnostics.ps1", "Test-W3AtomicWrite.ps1",
+                             "Initialize-Databases.ps1", "W3-NativeDiagnostics.ps1", "Initialize-AuthHttpsConfiguration.ps1", "Invoke-OwnerFirstAdmin.ps1")}
+          }
+          text = (base / ".sonarqube/out/sonar-project.properties").read_text(encoding="utf-8-sig")
+          text = re.sub(r"\\\r?\n[ \t]*", "", text)
+          scopes = {"sonar.tests": set(), "sonar.sources": set()}
+          for line in text.splitlines():
+              key, separator, value = line.partition("=")
+              scope = next((name for name in scopes if key.strip().endswith(name)), None)
+              if not separator or scope is None:
+                  continue
+              value = re.sub(r"\\([\\:= ,#!])", r"\1", value)
+              scopes[scope].update(Path(path).resolve() for path in next(csv.reader([value], skipinitialspace=True)) if path)
+          for script in assertion_scripts:
+              if script not in scopes["sonar.tests"] or script in scopes["sonar.sources"]:
+                  raise SystemExit(f"Assertion script must be TEST source in the final scanner input: {script.relative_to(base)}")
+          for script in main_scripts:
+              if script not in scopes["sonar.sources"] or script in scopes["sonar.tests"]:
+                  raise SystemExit(f"Forwarding and operational entrypoints must remain MAIN source: {script.relative_to(base)}")
+          print("Final scanner input: ten test harness/infrastructure scripts are TEST; forwarding and operational entrypoints remain MAIN.")
+          PY
 
   mvp_validation:
     name: MVP Validation
@@ -1019,6 +1343,7 @@ jobs:
       - life05a_verifier
       - production_conformance
       - docker_images
+      - powershell_coverage
       - sonar
     if: ${{ always() }}
     runs-on: ubuntu-24.04
@@ -1032,6 +1357,7 @@ jobs:
           LIFE05A_VERIFIER_RESULT: ${{ needs.life05a_verifier.result }}
           PRODUCTION_CONFORMANCE_RESULT: ${{ needs.production_conformance.result }}
           DOCKER_IMAGES_RESULT: ${{ needs.docker_images.result }}
+          POWERSHELL_COVERAGE_RESULT: ${{ needs.powershell_coverage.result }}
           SONAR_RESULT: ${{ needs.sonar.result }}
         run: |
           if [[ "${TRUSTED_SOURCE}" != "true" ]]; then
@@ -1046,6 +1372,7 @@ jobs:
             "LIFE-05A synthetic verifier (exact head):${LIFE05A_VERIFIER_RESULT}" \
             "Issue 46 production conformance targets:${PRODUCTION_CONFORMANCE_RESULT}" \
             "Docker images (4):${DOCKER_IMAGES_RESULT}" \
+            "Windows PowerShell core coverage:${POWERSHELL_COVERAGE_RESULT}" \
             "SonarQube Cloud / Quality Gate:${SONAR_RESULT}"
           do
             component_name="${component_result%%:*}"

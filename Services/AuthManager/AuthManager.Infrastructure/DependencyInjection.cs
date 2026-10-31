@@ -1,4 +1,4 @@
-﻿using AuthManager.Infrastructure.CustomTokenProviders;
+using AuthManager.Infrastructure.CustomTokenProviders;
 using AuthManager.Application.Common.Interfaces;
 using AuthManager.Infrastructure.Identity;
 using AuthManager.Infrastructure.Identity.Models;

@@ -1,0 +1,39 @@
+name: zeka-m1
+services:
+  postgres:
+    image: postgres:17
+    restart: "no"
+    networks: [internal]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    secrets: [postgres_admin_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    labels:
+      com.diliwo.zeka.initialization-id: ${ZEKA_M1_INITIALIZATION_ID:?Initialization ID required}
+      com.diliwo.zeka.scope: m1-database-bootstrap
+      com.diliwo.zeka.owner: windows-codex-m1
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: {driver: none}
+    mem_limit: 1g
+networks:
+  internal:
+    internal: true
+    labels:
+      com.diliwo.zeka.initialization-id: ${ZEKA_M1_INITIALIZATION_ID:?Initialization ID required}
+      com.diliwo.zeka.scope: m1-database-bootstrap
+      com.diliwo.zeka.owner: windows-codex-m1
+volumes:
+  postgres_data:
+    labels:
+      com.diliwo.zeka.initialization-id: ${ZEKA_M1_INITIALIZATION_ID:?Initialization ID required}
+      com.diliwo.zeka.scope: m1-database-bootstrap
+      com.diliwo.zeka.owner: windows-codex-m1
+secrets:
+  postgres_admin_password:
+    file: ${ZEKA_M1_POSTGRES_ADMIN_SOURCE:?Verified physical administrator file required}

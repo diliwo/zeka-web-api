@@ -1,0 +1,206 @@
+name: zeka-m1
+
+# Standalone: do not merge the historical root Compose/override files.
+x-api: &api
+  restart: "no"
+  networks: [internal]
+  environment:
+    ASPNETCORE_ENVIRONMENT: LocalStack
+    ASPNETCORE_HTTP_PORTS: "8080"
+  configs:
+    - source: http_healthcheck
+      target: /run/zeka/http-healthcheck.sh
+  healthcheck:
+    test: ["CMD", "/bin/bash", "/run/zeka/http-healthcheck.sh"]
+    interval: 15s
+    timeout: 5s
+    start_period: 30s
+    retries: 3
+  logging:
+    driver: none
+  mem_limit: 512m
+
+services:
+  postgres:
+    image: postgres:17
+    restart: "no"
+    networks: [internal]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+    secrets: [postgres_admin_password]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: none
+    mem_limit: 1g
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: "no"
+    networks: [internal]
+    secrets:
+      - source: rabbitmq_configuration
+        target: /etc/rabbitmq/rabbitmq.conf
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: none
+    mem_limit: 512m
+
+  auth:
+    <<: *api
+    profiles: [applications]
+    image: zeka-m1-auth:local
+    build:
+      context: ../..
+      dockerfile: Services/AuthManager/AuthManager.API/Dockerfile
+      secrets: [github_token]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    secrets:
+      - source: auth_configuration
+        target: /app/appsettings.LocalStack.json
+      - source: auth_signing_key
+        target: /run/secrets/auth_signing_key.pem
+      - source: auth_session_hash_key
+        target: /run/secrets/auth_session_hash_key
+      - source: local_ca_bundle
+        target: /run/secrets/local_ca_bundle.pem
+    environment:
+      ASPNETCORE_ENVIRONMENT: LocalStack
+      ASPNETCORE_HTTP_PORTS: "8080"
+      SSL_CERT_FILE: /run/secrets/local_ca_bundle.pem
+
+  adminarea:
+    <<: *api
+    profiles: [applications]
+    image: zeka-m1-adminarea:local
+    build:
+      context: ../..
+      dockerfile: Services/AdminAreaManagement/AdminAreaManagement.API/Dockerfile
+      secrets: [github_token]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    secrets:
+      - source: adminarea_configuration
+        target: /app/appsettings.LocalStack.json
+      - source: local_ca_bundle
+        target: /run/secrets/local_ca_bundle.pem
+    environment:
+      ASPNETCORE_ENVIRONMENT: LocalStack
+      ASPNETCORE_HTTP_PORTS: "8080"
+      SSL_CERT_FILE: /run/secrets/local_ca_bundle.pem
+    volumes:
+      - adminarea_files:/var/lib/zeka/files
+
+  client:
+    <<: *api
+    profiles: [applications]
+    image: zeka-m1-client:local
+    build:
+      context: ../..
+      dockerfile: Services/ClientManagement/Client.API/Dockerfile
+      secrets: [github_token]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    secrets:
+      - source: client_configuration
+        target: /app/appsettings.LocalStack.json
+      - source: local_ca_bundle
+        target: /run/secrets/local_ca_bundle.pem
+    environment:
+      ASPNETCORE_ENVIRONMENT: LocalStack
+      ASPNETCORE_HTTP_PORTS: "8080"
+      SSL_CERT_FILE: /run/secrets/local_ca_bundle.pem
+    volumes:
+      - client_files:/var/lib/zeka/files
+
+  gateway:
+    <<: *api
+    profiles: [applications]
+    image: zeka-m1-gateway:local
+    build:
+      context: ../..
+      dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile
+      secrets: [github_token]
+    depends_on:
+      auth:
+        condition: service_healthy
+      adminarea:
+        condition: service_healthy
+      client:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:19000:8080"
+    secrets:
+      - source: gateway_configuration
+        target: /app/appsettings.LocalStack.json
+      - source: local_ca_bundle
+        target: /run/secrets/local_ca_bundle.pem
+    environment:
+      ASPNETCORE_ENVIRONMENT: LocalStack
+      ASPNETCORE_HTTP_PORTS: "8080"
+      SSL_CERT_FILE: /run/secrets/local_ca_bundle.pem
+    configs:
+      - source: http_healthcheck
+        target: /run/zeka/http-healthcheck.sh
+      - source: gateway_routes
+        target: /app/ocelot.json
+    mem_limit: 256m
+
+networks:
+  internal:
+    internal: true
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  adminarea_files:
+  client_files:
+
+configs:
+  http_healthcheck:
+    file: ./http-healthcheck.sh
+  gateway_routes:
+    file: ./ocelot.json
+
+# File-based Compose secrets are bind mounts, not encrypted Swarm secrets.
+secrets:
+  postgres_admin_password:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/postgres/admin-password
+  rabbitmq_configuration:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/rabbitmq/rabbitmq.conf
+  auth_configuration:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/auth/appsettings.LocalStack.json
+  auth_signing_key:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/auth/signing-key.pem
+  auth_session_hash_key:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/auth/browser-session-hash.key
+  adminarea_configuration:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/adminarea/appsettings.LocalStack.json
+  client_configuration:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/client/appsettings.LocalStack.json
+  gateway_configuration:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/gateway/appsettings.LocalStack.json
+  local_ca_bundle:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/trust/ca-bundle.pem
+  github_token:
+    file: ${ZEKA_M1_PRIVATE_DIR:?Set an absolute protected directory outside this checkout}/build/github-token
