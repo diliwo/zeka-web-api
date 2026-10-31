@@ -132,9 +132,30 @@ try {
         (Get-FileHash -LiteralPath $key -Algorithm SHA256).Hash -ceq $keyHash) 'disposable_valid_material_is_validated_without_runtime_claims'
     Assert-AuthHttpsPrivateMetadata $prepared $true
 
+    $environmentFile = Join-Path $prepared 'auth-https.environment.json'
+    $metadataFile = Join-Path $prepared 'auth-https.metadata.json'
+    $environmentHash = (Get-FileHash -LiteralPath $environmentFile -Algorithm SHA256).Hash
+    $metadataHash = (Get-FileHash -LiteralPath $metadataFile -Algorithm SHA256).Hash
+    $rerun = Initialize-AuthHttpsConfiguration -PrivateDirectory $private -OutputDirectory $prepared -SourceCommit $source -Fixture
+    Require-AuthHttpsTest ($rerun.status -ceq 'CONFIGURATION_PREPARED' -and
+        (Get-FileHash -LiteralPath $environmentFile -Algorithm SHA256).Hash -ceq $environmentHash -and
+        (Get-FileHash -LiteralPath $metadataFile -Algorithm SHA256).Hash -ceq $metadataHash) 'matching_protected_output_is_idempotent'
+
+    $originalMetadata = [IO.File]::ReadAllBytes($metadataFile)
+    try {
+        [IO.File]::WriteAllBytes($metadataFile, ($originalMetadata + [byte[]](10)))
+        Expect-AuthHttpsRefusal {
+            Initialize-AuthHttpsConfiguration -PrivateDirectory $private -OutputDirectory $prepared -SourceCommit $source -Fixture
+        } 'AUTH_HTTPS_OUTPUT_ALREADY_EXISTS' 'altered_existing_output_is_refused'
+    } finally { [IO.File]::WriteAllBytes($metadataFile, $originalMetadata) }
+    Require-AuthHttpsTest ((Get-FileHash -LiteralPath $metadataFile -Algorithm SHA256).Hash -ceq $metadataHash) 'tampered_fixture_is_restored'
+
+    $partial = Join-Path $output 'partial-output'
+    [IO.Directory]::CreateDirectory($partial) | Out-Null
+    Set-AuthHttpsNewDirectoryAcl $partial
     Expect-AuthHttpsRefusal {
-        Initialize-AuthHttpsConfiguration -PrivateDirectory $private -OutputDirectory $prepared -SourceCommit $source -Fixture
-    } 'AUTH_HTTPS_OUTPUT_ALREADY_EXISTS' 'existing_output_is_preserved'
+        Initialize-AuthHttpsConfiguration -PrivateDirectory $private -OutputDirectory $partial -SourceCommit $source -Fixture
+    } 'AUTH_HTTPS_OUTPUT_ALREADY_EXISTS' 'partial_existing_output_is_refused'
 
     $missing = New-AuthHttpsTestPrivate 'missing-private' 'auth/tls-key.pem'
     $missingOutput = Join-Path $output 'missing-output'

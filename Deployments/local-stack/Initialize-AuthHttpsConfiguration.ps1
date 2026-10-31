@@ -248,6 +248,24 @@ function Save-AuthHttpsNewJson([string]$Path, $Value) {
     try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
     [IO.File]::Move($temporary, $Path)
 }
+function Assert-AuthHttpsExistingOutput([string]$Path, $Environment, $Manifest) {
+    Assert-AuthHttpsPrivateMetadata $Path $true
+    if (!(Test-Path -LiteralPath $Path -PathType Container)) { Stop-AuthHttpsConfiguration 'AUTH_HTTPS_OUTPUT_ALREADY_EXISTS' }
+    $names = @([IO.Directory]::EnumerateFileSystemEntries($Path) | ForEach-Object { [IO.Path]::GetFileName($_) } | Sort-Object)
+    if (($names -join ',') -cne 'auth-https.environment.json,auth-https.metadata.json') { Stop-AuthHttpsConfiguration 'AUTH_HTTPS_OUTPUT_ALREADY_EXISTS' }
+    foreach ($entry in @(
+        @{ Name='auth-https.environment.json'; Value=$Environment },
+        @{ Name='auth-https.metadata.json'; Value=$Manifest }
+    )) {
+        $file = Join-Path $Path $entry.Name
+        Assert-AuthHttpsPrivateMetadata $file
+        if (!(Test-Path -LiteralPath $file -PathType Leaf) -or
+            ![StringComparer]::OrdinalIgnoreCase.Equals((Resolve-AuthHttpsPhysicalPath $file), [IO.Path]::GetFullPath($file)) -or
+            [IO.File]::ReadAllText($file) -cne ($entry.Value | ConvertTo-Json -Depth 12)) {
+            Stop-AuthHttpsConfiguration 'AUTH_HTTPS_OUTPUT_ALREADY_EXISTS'
+        }
+    }
+}
 function Initialize-AuthHttpsConfiguration {
     [CmdletBinding()]
     param([string]$PrivateDirectory, [string]$OutputDirectory, [string]$SourceCommit, [switch]$Fixture, [string]$TemplateFile)
@@ -264,7 +282,6 @@ function Initialize-AuthHttpsConfiguration {
     $ownerRoot = 'C:\Users\herve\AppData\Local\Zeka\M1\private'
     if ((!$Fixture -and ![StringComparer]::OrdinalIgnoreCase.Equals($private, $ownerRoot)) -or
         ($Fixture -and [StringComparer]::OrdinalIgnoreCase.Equals($private, $ownerRoot))) { Stop-AuthHttpsConfiguration 'AUTH_HTTPS_PRIVATE_ROOT_REJECTED' }
-    if (Test-Path -LiteralPath $output) { Stop-AuthHttpsConfiguration 'AUTH_HTTPS_OUTPUT_ALREADY_EXISTS' }
     Assert-AuthHttpsNoAncestorReparse $private
     Assert-AuthHttpsPrivateMetadata $private $true
     $physicalRepo = Resolve-AuthHttpsPhysicalPath $repo
@@ -321,16 +338,10 @@ function Initialize-AuthHttpsConfiguration {
     Assert-AuthHttpsMaterialCryptography $environment['ZEKA_M1_AUTH_TLS_CERTIFICATE_SOURCE'] $environment['ZEKA_M1_AUTH_TLS_KEY_SOURCE'] `
         $environment['ZEKA_M1_CA_BUNDLE_SOURCE'] $physicalSigningKey
     Assert-AuthHttpsApplicationAuthorities $private $physicalRoot
-    [IO.Directory]::CreateDirectory($output) | Out-Null
-    $createdOutput = Resolve-AuthHttpsPhysicalPath $output
-    Assert-AuthHttpsOutsideSource $createdOutput $physicalRepo
-    if (![StringComparer]::OrdinalIgnoreCase.Equals($output, $createdOutput)) { Stop-AuthHttpsConfiguration 'AUTH_HTTPS_PHYSICAL_IDENTITY_REJECTED' }
-    Set-AuthHttpsNewDirectoryAcl $output
-    # The common logical root belongs to the DB contract. This physical override
-    # is only a proposed environment for a future isolated Compose child.
+    # Build both documents before publishing. Existing output is reusable only when
+    # it is protected and byte-for-byte equivalent to the current validated inputs.
     $composeEnvironment = [ordered]@{ ZEKA_M1_PRIVATE_DIR=$physicalRoot }
     foreach ($entry in $environment.GetEnumerator()) { $composeEnvironment[$entry.Key] = $entry.Value }
-    Save-AuthHttpsNewJson (Join-Path $output 'auth-https.environment.json') $composeEnvironment
     $manifest = [ordered]@{
         status='CONFIGURATION_PREPARED'; requestedSourceCommit=$SourceCommit
         schemaVersion=$policy.schemaVersion; issuer=$policy.issuer; jwksUri=$policy.jwksUri
@@ -341,7 +352,23 @@ function Initialize-AuthHttpsConfiguration {
         publicCaBundleOnlyVerified=$true; applicationAuthoritiesValidated=$true; hostsChanged=$false
         keysGenerated=$false; applicationConfigurationVerified=$false; applicationReady=$false
     }
-    Save-AuthHttpsNewJson (Join-Path $output 'auth-https.metadata.json') $manifest
+    if (Test-Path -LiteralPath $output) {
+        if (![StringComparer]::OrdinalIgnoreCase.Equals((Resolve-AuthHttpsPhysicalPath $output), $output)) {
+            Stop-AuthHttpsConfiguration 'AUTH_HTTPS_PHYSICAL_IDENTITY_REJECTED'
+        }
+        Assert-AuthHttpsExistingOutput $output $composeEnvironment $manifest
+    } else {
+        $staging = Join-Path (Split-Path -Parent $output) ('.auth-https-' + [Guid]::NewGuid().ToString('N'))
+        [IO.Directory]::CreateDirectory($staging) | Out-Null
+        Set-AuthHttpsNewDirectoryAcl $staging
+        Save-AuthHttpsNewJson (Join-Path $staging 'auth-https.environment.json') $composeEnvironment
+        Save-AuthHttpsNewJson (Join-Path $staging 'auth-https.metadata.json') $manifest
+        [IO.Directory]::Move($staging, $output)
+        if (![StringComparer]::OrdinalIgnoreCase.Equals((Resolve-AuthHttpsPhysicalPath $output), $output)) {
+            Stop-AuthHttpsConfiguration 'AUTH_HTTPS_PHYSICAL_IDENTITY_REJECTED'
+        }
+        Assert-AuthHttpsExistingOutput $output $composeEnvironment $manifest
+    }
     foreach ($entry in $environment.GetEnumerator()) { [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process') }
     return [pscustomobject]$manifest
 }
