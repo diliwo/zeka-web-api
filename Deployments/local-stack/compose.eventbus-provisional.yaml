@@ -1,0 +1,11 @@
+# Additive M1 compatibility overlay only. No TEST/production or historical-queue migration.
+# Requires the separately reviewed, pinned RC before C1 acceptance; source builds are provisional.
+services:
+  rabbitmq:
+    image: rabbitmq:3.13.7-management
+  adminarea:
+    environment:
+      RabbitMq__ManagementEndpoint: http://rabbitmq:15672/
+  client:
+    environment:
+      RabbitMq__ManagementEndpoint: http://rabbitmq:15672/
