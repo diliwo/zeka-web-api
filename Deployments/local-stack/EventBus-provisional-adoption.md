@@ -2,7 +2,7 @@
 
 Chief-authored source only; Codex independently reviews and integrates. Base: PR101
 `a548ca8979efd54031af8db51a088ec6ddf94b51`. Library source:
-`cbf410c15d105d4b3eca9aa03a83718c488da014`. Neither this source reference nor a local
+`4a62dcae25ce5c1989c08af6f90ceaa2a91d299d`. Neither this source reference nor a local
 build is a reviewed/distributed package or accepted C1 integration evidence.
 
 ## Shared contract and startup
@@ -40,7 +40,7 @@ provisional source evidence with the Greptile-reviewed, authorized/distributed R
 verified content identity and committed packages.lock.json/clean locked restore on
 the final integration SHA before C1 acceptance. No automatic stable release/merge.
 
-Library fail-stop contract: https://github.com/diliwo/eventbus-dotnet-lib/blob/cbf410c15d105d4b3eca9aa03a83718c488da014/docs/publisher-failstop-m1.md
+Library fail-stop contract: https://github.com/diliwo/eventbus-dotnet-lib/blob/4a62dcae25ce5c1989c08af6f90ceaa2a91d299d/docs/publisher-failstop-m1.md
 
 ## Outbox and evidence boundary
 
@@ -88,3 +88,20 @@ faults. A post-commit wrapper stall is not a natural blocked driver/socket write
 Client duplicate/closure provider tests remain separately identifiable; a combined
 live Auth/broker/Client/M1/supervisor run and distributed package/locks/protected CI
 are not established by a passing source fixture. TLS acceptance stays separate.
+
+### Independent review successor (R1/R3)
+
+The pinned library succeeds the independently reviewed `cbf410c` without rewriting
+its history. Automatic deadline/terminal settlement is atomically arbitrated;
+settlement closes global admission under the existing short mutex before removing
+the stopped attempt, even if the transport-stop thread has not run. Registration
+and send commitment observe the stop request under that same mutex. No I/O is added
+to the mutex, and the fail-stop watchdog remains independent.
+
+The original blocked-DLX BrokerUnreachableException remains FAIL/unexplained; no
+speculative retry or transport repair is included. Both original Windows six-second
+child checks remain FAIL. New child evidence capture preserves native output and
+separates natural exit from bounded external cleanup without changing the deadline
+or Windows reporting policy. Linux evidence is not Windows or actual M1 supervision.
+These source corrections require Codex's independent exact-pair re-review; no P1,
+package, protected-CI, deployment or C1 acceptance is implied.
