@@ -1,94 +1,93 @@
-# M1 owner-assisted worker rotation
+# M1 owner-controlled worker rotation
 
-This candidate implements the owner-approved, isolated LocalStack path from
-ZEK-17 approvals fb4cefbe and handoff 54886786. It does not admit application
-startup. Chief must independently review the new security changes.
+Owner decision bf0cc74a and handoff e956b00a replace the earlier usage-confirmation
+cutover design. This is a source candidate for Chief's one independent review
+on the pushed draft head. It does not authorize runtime startup or C1 acceptance.
 
-## Source and configuration boundary
+## Fixed authority and lifetimes
 
-The Auth API reuses its admitted Identity, signing-key and published-key state.
-The existing first-admin command and browser session policy remain separate.
-Only the configured genuine owner may operate on the configured existing M1
-organisation. The two fixed profiles are adminarea-retry and client-projection.
-Each receives its own passwordless subject, current least-privileged membership,
-real stored session and signed access token. Automatic issuance/refresh is absent.
+Auth keeps its signing-key and published-key custody. The existing first-admin
+command and browser policy remain separate. Only the configured genuine owner
+may issue for the configured existing M1 organisation. The two fixed profiles
+are adminarea-retry and client-projection. Each has a distinct least-privileged
+passwordless subject, membership, genuine stored session and signed access JWT.
+Access JWTs expire sixty minutes from issuance; stored session idle and absolute
+deadlines are sixty minutes from genuine creation. Effective access ends when
+either deadline expires. Automatic issuance and refresh are absent.
 
-The access-token duration is sixty minutes from actual issuance. The stored
-session idle and absolute deadlines are sixty minutes from genuine creation.
-They are independent deadlines: effective access ends when either expires.
-Neither policy backdates the JWT or extends the issuer's existing one-hour ceiling.
+M1WorkerRotation is OFF by default and LocalStack-only. Its RegistryId must match
+the independently admitted protected operator registry, alongside the exact real
+OwnerSubjectId and OrganisationId. No generated identity placeholder is usable.
+The preparation JSON files remain incomplete, disabled documents, not runtime
+appsettings. The four static settings volumes remain unopened.
 
-The four JSON files in configuration/worker-rotation-preparation are incomplete
-preparation documents, not runnable appsettings files. Their switches are OFF.
-Resolve every required input from its approved source before constructing the
-four real protected files. The existing 120-second processing and 86400-second
-retention values come from the first-admin operator; they are operation limits,
-not worker expiry policy. Do not create the four static settings volumes yet.
+## Forward-only owner command
 
-## Dual cutover and recovery
+1. Each explicit owner invocation uses a fresh operation identity and prepares
+   both real sessions in one Auth transaction. Replaying the same operation never
+   remints a lost private response. A later explicit run may issue a fresh pair.
+2. Durably stage both Auth-hash-bound envelopes outside Git and build contexts.
+3. Atomically replace current.json in each service's distinct rotation volume.
+   Verify both actual resulting files, generations, hashes, ownership, modes and
+   actual read-only consumer mount scopes. Two volumes are not one transaction.
+4. Only after BOTH deliveries pass, call Auth revoke-others. In one transaction,
+   preserve each newly delivered session and revoke all other active families of
+   those exact two worker identities. Never include the owner or another identity.
+5. Return success only when revocation is confirmed. A partial publish performs
+   no old-session revocation. A failed/uncertain revocation is not global success.
+   Another explicit owner run moves forward with a fresh generation; there is no
+   usage-confirmation wait, CUTOVER_STARTED veto or automatic renewal ceremony.
 
-1. Prepare both worker outcomes in one Auth transaction. Old sessions remain
-   usable. A lost secret response requires inspection/recovery, never blind remint.
-2. Durably stage both private envelopes outside Git, build contexts and logs.
-3. Commit begin-cutover before the first rotation-volume publication.
-4. Publish each service's complete envelope using its own rotation-only volume.
-   Use atomic replacement of current.json inside a stable directory; an isolated
-   file mount may retain the old inode and is insufficient.
-5. Obtain both publication receipts and actual successful-use witnesses, with
-   unchanged container identity and process instance. A copy alone is not adoption.
-6. Finalize old-session revocation only after both workers meet those conditions.
+Concurrent owner runs are serialized. Destination and provider generation fences
+reject rollback. Failed helper evidence is preserved. A still-running exact-owned
+rotation helper must be safely stopped and reverified before another publisher;
+foreign or unverifiable helpers and unexpected protection modes block execution.
+No historical W3 helper is eligible for that bounded operation.
 
-Before cutover, abort may revoke an unused prepared pair. After publication may
-have begun, partial/uncertain delivery is degraded recovery, not safe abort.
-Preserve old sessions until both new workers are witnessed. Inspect the same
-operation after interruption; do not automatically generate another pair.
-There is no atomic transaction spanning PostgreSQL and two Docker volumes.
+First issuance before admitted consumer mounts exist may verify files but remains
+mount-scope pending, without revocation. This is delivery admission, not use/adoption.
 
-## Protected runtime delivery
+## Authorization retry and independent adoption proof
 
-Each worker reads its own protected file on each relevant cycle/event. It retains
-no long-lived token fallback. A file must pass identity, ownership, mode, complete
-encoding, checksum, profile, scope, lifetime and monotonic-generation checks.
-A file cannot authenticate itself: existing Auth signature, session and current
-organisation authority checks remain required before business persistence.
+A worker authorization request returning 401 rereads the protected credential and
+retries once within the same operation. One operation-local budget is shared by
+tenant-access and Client membership calls. A second 401 is transient/unavailable;
+403 is denied without retry. Existing 503 retry allowance and two-second deadlines
+remain. The worker-only 503-then-401 edge may use three HTTP sends (including the
+explicit one-time401 retry) within that same deadline. Nonworker behavior stays
+unchanged. No business message or handler is retried locally.
 
-Consumer directory mounts are read-only at /run/zeka-worker-credential. Consumer
-UID/GID are 1654, capabilities are dropped and no-new-privileges is required.
-The files are 0400; stable private directories are 0500 and owned 1654:1654. Only an
-admitted short-lived publisher may temporarily make its own directory writable,
-flush and replace the child atomically, then restore 0500. Failed helpers and
-uncertain publication evidence are preserved for inspection.
+After revocation, independent runtime evidence must prove unchanged container ID,
+main PID/start identity, real Auth denial of the old session, successful meaningful
+synthetic business work with the replacement, and one operation already in flight
+at revocation per worker. Copy success is not adoption. Raw logs are unnecessary;
+logging.driver=none is preserved. Those runtime observations remain NOT_RUN.
 
-The five sealed TLS/JWT/CA volumes and four future static settings volumes are
-separate. Do not reown/unseal/repurpose them. Do not share rotation volumes across
-services, mount a Docker socket in applications, or retain Windows secret binds.
+Client runtime acceptance additionally waits for accepted, pinned and actually
+adopted EventBus 1.3.0 (or the qualifying approved 1.3.0-rc.1 exception). Prove the
+same original EventId survives a remaining transient 401 through recoverable broker
+redelivery, no ACK before durable success, one durable effect, and no rotation-only
+exhaustion of delivery limit 5 into DLQ. No EventBus/library, DLQ, topology, delivery
+limit or worker-local message-retry workaround is included. ZEK-22 remains blocked.
+AdminArea can earn its separately admitted runtime evidence first.
 
-## Evidence and admission limitations
+## Protected delivery and retained evidence
 
-No application, database or Docker operation is authorized merely by running
-source tests. Before runtime validation, independently admit exact source/image,
-Windows identity, engine, resource labels/IDs, protected inputs and migration state.
-Do not start historical resources or replay mismatched migrations.
+Consumers read their own complete protected file per operation through a read-only
+directory mount at /run/zeka-worker-credential. UID/GID 1654, cap-drop ALL and
+no-new-privileges remain required; files 0400 and private directories 0500. Only an
+exact admitted short-lived publisher receives RW access. Atomic child replacement
+preserves the mounted directory; file-subpath replacement is insufficient.
 
-The base Compose logging driver is none. This candidate must leave adoption
-pending when a bounded sanitized successful-use witness is unavailable. Do not
-silently enable retained raw application logs to manufacture a witness. Compare
-Docker's host process identity before/after and the application's namespace process
-ID plus process-instance marker separately; those PID namespaces differ.
-
-A first issue before workers start is pending first use. A quiet Client without a
-real event is pending adoption. Do not synthesize business work or restart workers
-just to obtain a receipt. Unit tests, configuration parsing, protected runtime
-proof and CI are separate claims. C1 remains 0/7, CONFIGURATION_READY BLOCKED and
-C1_TLS_PASS NOT_RUN until independently evidenced. No merge or release is included.
-
-
-## Explicit recovery limit for review
-
-If a cutover has started and its new sessions expire before both uses are
-witnessed, this version requires an owner-reviewed recovery disposition.
-Inspection retains CUTOVER_STARTED and its deadlines; finalization refuses
-expired families, abort refuses a possibly adopted pair, and another prepare
-refuses the unresolved operation. This is deliberate fail-closed behavior,
-not complete recovery support. Do not reset the ledger or fabricate adoption.
-Chief must assess this limitation before runtime admission.
+Five sealed TLS/JWT/CA volumes, host-only CA, four pending static settings volumes,
+original database/network resources, frozen TLS source, EventBus branches and W1/W2
+history remain preserved. No private inputs or runtime resources are admitted by
+source tests. The original 712a34a patch and 107 tests stay historical. Original
+EXACT_ACTUAL_USE_EVENT remains a historical synthetic observability failure. A new
+matched-source reproduction proves the old parser fails on normal PowerShell 7.4
+because DateKind is unsupported, while the app's 7.6 host accepts it. The historical
+binary version was not captured, so attribution remains explicitly qualified. The
+successor preserves date strings without that option and tests the installed 7.4
+executable. Chief must assess this explanation before C1 EVIDENCE closure; the
+original failure receipt stays unchanged. C1 remains 0/7, CONFIGURATION_READY BLOCKED
+and C1_TLS_PASS NOT_RUN. No merge or release is authorized.

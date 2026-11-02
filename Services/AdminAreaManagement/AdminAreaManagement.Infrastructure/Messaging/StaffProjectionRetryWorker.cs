@@ -74,7 +74,8 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
             await using var scope = scopes.CreateAsyncScope();
             try
             {
-                var identity = new WorkerIdentity(snapshot.SubjectId.ToString("D"), organisation, snapshot.Token);
+                var credentialOperation = new WorkerCredentialOperation(credentials, snapshot, organisation);
+                var identity = new WorkerIdentity(credentialOperation, organisation);
                 using var http = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("TenantWorkerAccess");
                 if (!Uri.TryCreate(configuration["TenantAuthorization:AuthManagementUrl"], UriKind.Absolute, out var uri)
                     || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query))
@@ -91,7 +92,7 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
                 var transactions = scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
                 await transactions.ExecuteAsync(token =>
                     new DispatchStaffProjectionsCommand.Handler(outbox).Handle(new(), token), budget.Token);
-                credentials.MarkSuccessfulUse(snapshot);
+                credentialOperation.MarkSuccessfulUse();
                 Cycles.Add(1, new KeyValuePair<string, object?>("outcome", "completed"));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -105,6 +106,13 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
         return failed;
     }
 
-    private sealed record WorkerIdentity(string SubjectId, Guid SelectedOrganisationId, string? BearerToken)
-        : IOperationIdentity, ITenantAccessCredential;
+    private sealed class WorkerIdentity(WorkerCredentialOperation operation, Guid organisationId)
+        : IOperationIdentity, ITenantAccessCredential, IWorkerCredential401Retry
+    {
+        public string SubjectId => operation.Snapshot.SubjectId.ToString("D");
+        public Guid SelectedOrganisationId => organisationId;
+        public string? BearerToken => operation.Snapshot.Token;
+        public ValueTask<bool> ReloadAfterUnauthorizedAsync(CancellationToken cancellationToken) =>
+            operation.ReloadAfterUnauthorizedAsync(cancellationToken);
+    }
 }

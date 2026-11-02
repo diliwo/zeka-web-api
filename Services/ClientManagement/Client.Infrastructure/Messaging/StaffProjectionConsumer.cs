@@ -25,7 +25,8 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
         if (!snapshot.OrganisationIds.Contains(message.OrganisationId))
             throw new TenantAccessException(AccessFailure.Denied);
         await using var scope = scopes.CreateAsyncScope();
-        var identity = new WorkerIdentity(snapshot.SubjectId.ToString("D"), message.OrganisationId, snapshot.Token);
+        var credentialOperation = new WorkerCredentialOperation(credentials, snapshot, message.OrganisationId);
+        var identity = new WorkerIdentity(credentialOperation, message.OrganisationId);
         var factory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
         using var http = factory.CreateClient("TenantWorkerAccess");
         var baseAddress = configuration["TenantAuthorization:AuthManagementUrl"];
@@ -50,14 +51,14 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
         {
             if (message.Revision < current.ProjectionVersion)
             {
-                credentials.MarkSuccessfulUse(snapshot);
+                credentialOperation.MarkSuccessfulUse();
                 return;
             }
             if (message.Revision == current.ProjectionVersion)
             {
                 if (message.Id == current.LastProjectionEventId)
                 {
-                    credentials.MarkSuccessfulUse(snapshot);
+                    credentialOperation.MarkSuccessfulUse();
                     return;
                 }
                 throw new InvalidOperationException("Conflicting staff projection revision.");
@@ -88,9 +89,16 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
                 message.FirstName, message.LastName, message.UserName, message.TeamName, message.TeamAcronym);
             await database.SaveChangesAsync(cancellationToken);
         }, CancellationToken.None); // Unique key + revision concurrency token make competing deliveries retryable.
-        credentials.MarkSuccessfulUse(snapshot);
+        credentialOperation.MarkSuccessfulUse();
     }
 
-    private sealed record WorkerIdentity(string SubjectId, Guid SelectedOrganisationId, string? BearerToken)
-        : IOperationIdentity, ITenantAccessCredential;
+    private sealed class WorkerIdentity(WorkerCredentialOperation operation, Guid organisationId)
+        : IOperationIdentity, ITenantAccessCredential, IWorkerCredential401Retry
+    {
+        public string SubjectId => operation.Snapshot.SubjectId.ToString("D");
+        public Guid SelectedOrganisationId => organisationId;
+        public string? BearerToken => operation.Snapshot.Token;
+        public ValueTask<bool> ReloadAfterUnauthorizedAsync(CancellationToken cancellationToken) =>
+            operation.ReloadAfterUnauthorizedAsync(cancellationToken);
+    }
 }

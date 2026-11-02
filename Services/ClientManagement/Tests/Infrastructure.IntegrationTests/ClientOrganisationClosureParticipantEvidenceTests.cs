@@ -430,8 +430,9 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
             Header(Guid.NewGuid(), organisation, Guid.NewGuid(), Guid.NewGuid()), DateTimeOffset.UtcNow);
         await Invoke(provider, organisation, participant => participant.EnterFenceAsync(enter));
 
-        var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), configuration,
-            WorkerCredentialFixture.For([organisation], WorkerCredentialEncoding.ClientProfile));
+        var credentials = WorkerCredentialFixture.For([organisation], WorkerCredentialEncoding.ClientProfile);
+        handler.ExpectedTokenHash = WorkerCredentialFixture.TokenSha256((await credentials.ReadAsync(default)).Token);
+        var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), configuration, credentials);
         var rejected = await Assert.ThrowsAsync<InvalidOperationException>(() => consumer.Handle(
             new StaffProjectionChangedV1(organisation, membership, 1, true,
                 "Closure", "Evidence", "closure-worker", "Team", "T")));
@@ -794,11 +795,12 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
 
     private sealed class ClosureConsumerAccessHandler(Guid organisation, Guid membership) : HttpMessageHandler
     {
+        public string? ExpectedTokenHash { get; set; }
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            Assert.Equal("synthetic-life-02-token", request.Headers.Authorization?.Parameter);
+            Assert.Equal(ExpectedTokenHash, WorkerCredentialFixture.TokenSha256(request.Headers.Authorization?.Parameter));
             if (request.RequestUri!.AbsolutePath.Contains("/memberships/", StringComparison.Ordinal))
                 return Task.FromResult(request.RequestUri.AbsolutePath.EndsWith(membership.ToString(),
                     StringComparison.OrdinalIgnoreCase)

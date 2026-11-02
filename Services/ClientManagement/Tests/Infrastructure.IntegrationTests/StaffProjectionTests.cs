@@ -38,8 +38,9 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
         services.AddSingleton<IHttpClientFactory>(new Factory(handler));
         await using var provider = services.BuildServiceProvider();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(fixture.ConnectionString).Options;
-        var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), config,
-            WorkerCredentialFixture.For([a, b], WorkerCredentialEncoding.ClientProfile));
+        var credentials = WorkerCredentialFixture.For([a, b], WorkerCredentialEncoding.ClientProfile);
+        handler.ExpectedTokenHash = WorkerCredentialFixture.TokenSha256((await credentials.ReadAsync(default)).Token);
+        var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), config, credentials);
         var created = Message(a, membership, 1, true, "original");
         await consumer.Handle(created); await consumer.Handle(created);
         await using (var context = new ApplicationDbContext(options, TenantEnforcementTests.Scope(a)))
@@ -84,12 +85,13 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
     private sealed class AccessHandler : HttpMessageHandler
     {
         public bool Allow { get; set; } = true;
+        public string? ExpectedTokenHash { get; set; }
         public bool AllowMembership { get; set; } = true;
         public Dictionary<Guid, Guid> Memberships { get; } = new();
         public HashSet<Guid> Inactive { get; } = new();
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Assert.Equal("synthetic-test-token", request.Headers.Authorization?.Parameter);
+            Assert.Equal(ExpectedTokenHash, WorkerCredentialFixture.TokenSha256(request.Headers.Authorization?.Parameter));
             if (request.RequestUri!.AbsolutePath.Contains("/memberships/"))
             {
                 var segments = request.RequestUri.Segments;

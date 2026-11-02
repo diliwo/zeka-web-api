@@ -14,6 +14,7 @@ public static class WorkerRotationRegistration
         {
             Enabled = section.GetValue<bool>("Enabled"), LocalStack = environment.IsEnvironment("LocalStack"),
             OwnerSubjectId = section.GetValue<Guid>("OwnerSubjectId"), OrganisationId = section.GetValue<Guid>("OrganisationId"),
+            RegistryId = section.GetValue<Guid>("RegistryId"),
             ProcessingTimeout = TimeSpan.FromSeconds(section.GetValue<int>("ProcessingTimeoutSeconds")),
             Retention = TimeSpan.FromSeconds(section.GetValue<int>("RetentionSeconds"))
         });

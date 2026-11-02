@@ -5,7 +5,7 @@
   "configurationReady": false,
   "copyAsRuntimeConfiguration": false,
   "policyApproval": "65c15c08-d0a1-4c00-8450-395febcef195",
-  "workerApproval": "fb4cefbe-ce38-49d8-8ad2-ff8626df6cb2",
+  "workerApproval": "bf0cc74a-bbe1-4b0f-8ad8-4d6fa306e157",
   "sourceBase": "bf94bca1d49bccbcd7bb0839a321e5db2d5961d2",
   "settingsFragment": {
     "Authentication": {
@@ -33,7 +33,8 @@
     "TenantWorker OrganisationIds from matching fixed M1 membership",
     "Distinct admitted rotation-only volume with protected current.json",
     "Admitted EventBus source/package and broker configuration",
-    "Explicit LocalStack runtime admission before enabling CredentialRotationEnabled"
+    "Explicit LocalStack runtime admission before enabling CredentialRotationEnabled",
+    "Independently accepted and actually adopted pinned EventBus1.3.0/qualifying approvedRC reliability and delivery-limit5 evidence"
   ],
   "operationalValueProvenance": "Invoke-OwnerFirstAdmin.ps1 processing120s/retention86400s, reused without changing token policy"
 }

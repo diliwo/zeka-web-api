@@ -12,22 +12,17 @@ public static class WorkerRotationEndpoints
     {
         // Mapping itself is closed outside the explicit isolated M1 environment.
         if (!app.Environment.IsEnvironment("LocalStack") || !app.Configuration.GetValue<bool>("M1WorkerRotation:Enabled")) return;
-        foreach (var phase in new[] { "prepare", "begin-cutover", "abort", "inspect" })
-        {
-            var selected = phase;
-            app.MapPost("/internal/m1/worker-rotation/" + phase, (WorkerRotationRequest request,
-                HttpContext http, WorkerRotationService service, IBrowserSessions sessions) =>
-                    ExecuteAsync(selected, request, null, http, service, sessions))
-                .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme });
-        }
-        app.MapPost("/internal/m1/worker-rotation/finalize", (WorkerFinalizeRequest request,
+        app.MapPost("/internal/m1/worker-rotation/prepare", (WorkerRotationRequest request,
             HttpContext http, WorkerRotationService service, IBrowserSessions sessions) =>
-                ExecuteAsync("finalize", new(request.OperationId, request.OrganisationId), request.Witnesses, http, service, sessions))
+                ExecuteAsync("prepare", request, null, http, service, sessions))
+            .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme });
+        app.MapPost("/internal/m1/worker-rotation/revoke-others", (WorkerRevokeOthersRequest request,
+            HttpContext http, WorkerRotationService service, IBrowserSessions sessions) =>
+                ExecuteAsync("revoke-others", new(request.OperationId, request.OrganisationId), request.Deliveries, http, service, sessions))
             .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme });
     }
-
     private static async Task<IResult> ExecuteAsync(string phase, WorkerRotationRequest request,
-        IReadOnlyList<WorkerUseWitness>? witnesses, HttpContext http, WorkerRotationService service, IBrowserSessions sessions)
+        IReadOnlyList<WorkerDeliveryReceipt>? deliveries, HttpContext http, WorkerRotationService service, IBrowserSessions sessions)
     {
         http.Response.Headers.CacheControl = "no-store";
         http.Response.Headers.Pragma = "no-cache";
@@ -39,7 +34,7 @@ public static class WorkerRotationEndpoints
             var active = await sessions.CheckActiveAsync(caller.SubjectId, caller.SessionId, deadline.Token);
             if (active == BrowserSessionOutcome.Unavailable) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             if (active != BrowserSessionOutcome.Success) return Results.Unauthorized();
-            return Results.Json(await service.ExecuteAsync(phase, caller, request, witnesses, deadline.Token));
+            return Results.Json(await service.ExecuteAsync(phase, caller, request, deliveries, deadline.Token));
         }
         catch (WorkerRotationException error)
         {

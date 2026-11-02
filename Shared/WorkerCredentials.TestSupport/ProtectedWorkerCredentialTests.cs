@@ -50,6 +50,7 @@ internal static class WorkerCredentialFixture
             issued: DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds())))), ids,
             profile, TimeProvider.System);
     }
+    internal static string TokenSha256(string? token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token ?? "")));
     internal sealed class Clock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;

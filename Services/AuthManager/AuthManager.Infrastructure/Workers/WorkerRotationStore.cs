@@ -11,6 +11,7 @@ using AuthManager.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.IdentityModel.JsonWebTokens;
+using Zeka.WorkerCredentials;
 
 namespace AuthManager.Infrastructure.Workers;
 
@@ -26,11 +27,12 @@ public sealed class WorkerRotationStore(AuthDbContext database, WorkerIdentitySo
     private sealed record PairMember(string Profile, Guid SubjectId, Guid MembershipId);
     private sealed record Pair(string Schema, Guid OrganisationId, PairMember[] Workers);
     private sealed record Family(string Profile, Guid SubjectId, Guid MembershipId, Guid FamilyId, long Generation,
-        DateTimeOffset CreatedAtUtc, DateTimeOffset IssuedAtUtc, DateTimeOffset AccessExpiresAtUtc, DateTimeOffset ExpiresAtUtc);
-    private sealed record Prepared(string Schema, Guid OperationId, Guid OrganisationId, long Generation, Family[] Workers, Guid[] PreviousFamilies);
+        DateTimeOffset CreatedAtUtc, DateTimeOffset IssuedAtUtc, DateTimeOffset AccessExpiresAtUtc, DateTimeOffset ExpiresAtUtc,
+        string? PayloadSha256, string? PublicationSha256);
+    private sealed record Prepared(string Schema, Guid OperationId, Guid OrganisationId, long Generation, Family[] Workers);
 
     public async Task<WorkerRotationResult> ExecuteAsync(string phase, WorkerRotationCaller caller,
-        WorkerRotationRequest request, IReadOnlyList<WorkerUseWitness>? witnesses, CancellationToken cancellationToken)
+        WorkerRotationRequest request, IReadOnlyList<WorkerDeliveryReceipt>? deliveries, CancellationToken cancellationToken)
     {
         if (database.Database.CurrentTransaction is not null) throw Error("WORKER_CALLER_TRANSACTION_REJECTED");
         var attempted = false;
@@ -47,7 +49,7 @@ public sealed class WorkerRotationStore(AuthDbContext database, WorkerIdentitySo
                 await identities.ValidateOwnerAsync(caller, request.OrganisationId, ct);
                 var result = phase == "prepare"
                     ? await PrepareAsync(caller, request, ct)
-                    : await PhaseAsync(phase, caller, request, witnesses, ct);
+                    : await RevokeOthersAsync(caller, request, deliveries, ct);
                 await database.SaveChangesAsync(ct);
                 commitStarted = true;
                 await transaction.CommitAsync(ct);
@@ -83,19 +85,14 @@ public sealed class WorkerRotationStore(AuthDbContext database, WorkerIdentitySo
         if (prior is not null)
         {
             ValidatePrepared(prior, request);
-            return Result(prior, await StateAsync(caller.SubjectId, request.OperationId, ct) == "PREPARED"
-                ? "PREPARED_REPLAY_RECOVERY_REQUIRED" : await StateAsync(caller.SubjectId, request.OperationId, ct));
+            return Result(prior, "ISSUED_REPLAY_NO_PRIVATE_VALUES");
         }
         var all = await database.IdempotencyRecords.AsNoTracking().Where(x => x.UserId == caller.SubjectId
             && x.Operation == PrepareOperation && x.ResourceId == request.OrganisationId && x.Status == IdempotencyStatus.Completed)
             .Select(x => x.SafeResponse).ToListAsync(ct);
         var previous = all.Select(Parse<Prepared>).ToArray();
-        foreach (var pending in previous)
-        {
-            ValidatePrepared(pending, new(pending.OperationId, request.OrganisationId));
-            var state = await StateAsync(caller.SubjectId, pending.OperationId, ct);
-            if (state is not ("FINALIZED" or "ABORTED")) throw Error("WORKER_PREVIOUS_OPERATION_RECOVERY_REQUIRED");
-        }
+        foreach (var priorOperation in previous)
+            ValidatePrepared(priorOperation, new(priorOperation.OperationId, request.OrganisationId));
         var pair = await ReadAsync<Pair>(caller.SubjectId, PairOperation, request.OrganisationId.ToString("D"), ct);
         if (pair is null)
         {
@@ -117,11 +114,6 @@ public sealed class WorkerRotationStore(AuthDbContext database, WorkerIdentitySo
         await BeginAsync(caller.SubjectId, PrepareOperation, request.OperationId.ToString("D"),
             JsonSerializer.Serialize(new { schema = Schema, request.OperationId, request.OrganisationId }, Json), ct);
         var generation = await NextGenerationAsync(previous.Select(x => x.Generation).DefaultIfEmpty(0).Max(), ct);
-        var workerIds = pair.Workers.Select(x => x.SubjectId).ToArray();
-        var old = await database.BrowserSessionFamilies.Where(x => workerIds.Contains(x.UserId) && x.RevokedAtUtc == null)
-            .Select(x => x.Id).ToArrayAsync(ct);
-        var knownFamilies = previous.SelectMany(x => x.Workers).Select(x => x.FamilyId).ToHashSet();
-        if (old.Any(id => !knownFamilies.Contains(id))) throw Error("WORKER_FAMILY_HISTORY_INSPECTION_REQUIRED", true);
         var saved = new List<Family>();
         var payload = new List<WorkerPreparedIdentity>();
         foreach (var member in pair.Workers)
@@ -139,62 +131,59 @@ public sealed class WorkerRotationStore(AuthDbContext database, WorkerIdentitySo
             if (jwt.Subject != user.Id.ToString("D") || !jwt.TryGetClaim("sid", out var sid) || sid.Value != family.Id.ToString("D")
                 || expires <= clock.GetUtcNow() || expires - issued != TimeSpan.FromMinutes(60))
                 throw Error("WORKER_ISSUED_SESSION_REJECTED");
-            var metadata = new Family(member.Profile, user.Id, member.MembershipId, family.Id, generation, now, issued, expires, family.AbsoluteExpiresAtUtc);
+            var package = WorkerCredentialEncoding.Create(request.OperationId, generation, user.Id, family.Id, member.Profile,
+                [request.OrganisationId], issued, expires, now, family.AbsoluteExpiresAtUtc, value);
+            var publicationHash = Convert.ToHexString(SHA256.HashData(WorkerCredentialEncoding.Serialize(package))).ToLowerInvariant();
+            var metadata = new Family(member.Profile, user.Id, member.MembershipId, family.Id, generation, now, issued, expires,
+                family.AbsoluteExpiresAtUtc, package.PayloadSha256, publicationHash);
             saved.Add(metadata);
             payload.Add(ToPrivate(metadata, value));
         }
-        var prepared = new Prepared(Schema, request.OperationId, request.OrganisationId, generation, saved.ToArray(), old);
+        var prepared = new Prepared(Schema, request.OperationId, request.OrganisationId, generation, saved.ToArray());
         await CompleteAsync(caller.SubjectId, PrepareOperation, request.OperationId.ToString("D"), request.OrganisationId, prepared, ct);
         await AuditAsync(caller.SubjectId, request, "prepared", generation, ct);
-        return new() { OperationId = request.OperationId, OrganisationId = request.OrganisationId, State = "PREPARED", Workers = payload };
+        return new() { OperationId = request.OperationId, OrganisationId = request.OrganisationId, State = "ISSUED", Workers = payload };
     }
 
-    private async Task<WorkerRotationResult> PhaseAsync(string phase, WorkerRotationCaller caller, WorkerRotationRequest request,
-        IReadOnlyList<WorkerUseWitness>? witnesses, CancellationToken ct)
+    private async Task<WorkerRotationResult> RevokeOthersAsync(WorkerRotationCaller caller, WorkerRotationRequest request,
+        IReadOnlyList<WorkerDeliveryReceipt>? deliveries, CancellationToken ct)
     {
+        if (!WorkerRotationService.ValidDeliveries(deliveries, options.RegistryId))
+            throw Error("WORKER_BOTH_VERIFIED_DELIVERIES_REQUIRED");
         var prepared = await ReadAsync<Prepared>(caller.SubjectId, PrepareOperation, request.OperationId.ToString("D"), ct)
             ?? throw Error("WORKER_OPERATION_NOT_FOUND");
         ValidatePrepared(prepared, request);
-        var state = await StateAsync(caller.SubjectId, request.OperationId, ct);
-        if (phase == "inspect") return Result(prepared, state);
-        if (phase == "begin-cutover")
-        {
-            if (state == "CUTOVER_STARTED") return Result(prepared, state);
-            if (state != "PREPARED") throw Error("WORKER_CUTOVER_STATE_REJECTED");
-            await ValidateNewFamiliesAsync(prepared, ct);
-            await RecordPhaseAsync(caller.SubjectId, request, phase, prepared.Generation, null, ct);
-            return Result(prepared, "CUTOVER_STARTED");
-        }
-        if (phase == "abort")
-        {
-            if (state == "ABORTED") return Result(prepared, state);
-            // After the durable publication marker either worker may already use a new family.
-            if (state != "PREPARED") throw Error("WORKER_ABORT_AFTER_CUTOVER_REFUSED");
-            await RevokeAsync(prepared.Workers.Select(x => x.FamilyId).ToArray(), ct);
-            await RecordPhaseAsync(caller.SubjectId, request, phase, prepared.Generation, null, ct);
-            return Result(prepared, "ABORTED");
-        }
-        if (phase != "finalize") throw Error("WORKER_PHASE_REJECTED");
-        if (!WorkerRotationService.ValidWitnesses(witnesses)) throw Error("WORKER_BOTH_SUCCESSFUL_USES_REQUIRED");
+        var pair = await ReadAsync<Pair>(caller.SubjectId, PairOperation, request.OrganisationId.ToString("D"), ct)
+            ?? throw Error("WORKER_PAIR_REGISTRY_MISSING_INSPECTION_REQUIRED", true);
+        ValidatePair(pair, request.OrganisationId);
         foreach (var worker in prepared.Workers)
         {
-            var witness = witnesses!.Single(x => x.Profile == worker.Profile);
-            if (witness.SessionId != worker.FamilyId || witness.Generation != worker.Generation)
-                throw Error("WORKER_SUCCESSFUL_USE_REVISION_MISMATCH");
+            var member = pair.Workers.Single(x => x.Profile == worker.Profile);
+            var delivery = deliveries!.Single(x => x.Profile == worker.Profile);
+            if (member.SubjectId == caller.SubjectId || member.SubjectId != worker.SubjectId || member.MembershipId != worker.MembershipId
+                || delivery.OperationId != request.OperationId || delivery.Generation != worker.Generation
+                || delivery.SubjectId != worker.SubjectId || delivery.SessionId != worker.FamilyId
+                || string.IsNullOrWhiteSpace(worker.PayloadSha256) || delivery.PayloadSha256 != worker.PayloadSha256
+                || string.IsNullOrWhiteSpace(worker.PublicationSha256) || delivery.PublicationSha256 != worker.PublicationSha256)
+                throw Error("WORKER_DELIVERY_REVISION_MISMATCH");
         }
-        if (state == "FINALIZED")
-        {
-            // Same operation may be inspected/recovered; altered attestations never replace the original evidence.
-            await RecordPhaseAsync(caller.SubjectId, request, phase, prepared.Generation, witnesses, ct);
-            return Result(prepared, state);
-        }
-        if (state != "CUTOVER_STARTED") throw Error("WORKER_FINALIZE_BEFORE_CUTOVER_REFUSED");
+        var metadata = await database.IdempotencyRecords.AsNoTracking().Where(x => x.UserId == caller.SubjectId
+            && x.Operation == PrepareOperation && x.ResourceId == request.OrganisationId && x.Status == IdempotencyStatus.Completed)
+            .Select(x => x.SafeResponse).ToListAsync(ct);
+        if (metadata.Select(Parse<Prepared>).Any(x => x.Generation > prepared.Generation))
+            throw Error("WORKER_STALE_DELIVERY_GENERATION_REFUSED");
+        // Validate BOTH current identities/families and exact deliveries before touching any other family.
         await ValidateNewFamiliesAsync(prepared, ct);
-        await RevokeAsync(prepared.PreviousFamilies, ct);
-        await RecordPhaseAsync(caller.SubjectId, request, phase, prepared.Generation, witnesses, ct);
-        return Result(prepared, "FINALIZED");
+        var subjects = pair.Workers.Select(x => x.SubjectId).ToArray();
+        var retained = prepared.Workers.Select(x => x.FamilyId).ToArray();
+        var others = await database.BrowserSessionFamilies.Where(x => subjects.Contains(x.UserId)
+            && !retained.Contains(x.Id) && x.RevokedAtUtc == null).ToListAsync(ct);
+        var now = clock.GetUtcNow();
+        foreach (var family in others.Where(x => x.IdleExpiresAtUtc > now && x.AbsoluteExpiresAtUtc > now))
+            family.RevokedAtUtc = now;
+        await RecordPhaseAsync(caller.SubjectId, request, "revoke-others", prepared.Generation, deliveries, ct);
+        return Result(prepared, "REVOKED_OTHERS");
     }
-
     private async Task<long> NextGenerationAsync(long previous, CancellationToken ct)
     {
         if (!database.Database.IsNpgsql()) return checked(previous + 1); // Controlled SQLite tests only.
@@ -220,18 +209,12 @@ public sealed class WorkerRotationStore(AuthDbContext database, WorkerIdentitySo
                 throw Error("WORKER_NEW_FAMILY_UNAVAILABLE_RECOVERY_REQUIRED");
         }
     }
-    private async Task RevokeAsync(Guid[] ids, CancellationToken ct)
-    {
-        var families = await database.BrowserSessionFamilies.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
-        if (families.Count != ids.Distinct().Count()) throw Error("WORKER_PREVIOUS_FAMILY_STATE_REJECTED");
-        foreach (var family in families) family.RevokedAtUtc ??= clock.GetUtcNow();
-    }
     private async Task RecordPhaseAsync(Guid actor, WorkerRotationRequest request, string phase, long generation,
-        IReadOnlyList<WorkerUseWitness>? witnesses, CancellationToken ct)
+        IReadOnlyList<WorkerDeliveryReceipt>? deliveries, CancellationToken ct)
     {
         var operation = Prefix + phase + "/v1";
         var canonical = JsonSerializer.Serialize(new { schema = Schema, request.OperationId, request.OrganisationId, generation,
-            witnesses = witnesses?.OrderBy(x => x.Profile, StringComparer.Ordinal).ToArray() }, Json);
+            deliveries = deliveries?.OrderBy(x => x.Profile, StringComparer.Ordinal).ToArray() }, Json);
         var decision = await idempotency.TryBeginAsync(actor, operation, request.OperationId.ToString("D"), canonical,
             options.ProcessingTimeout, options.Retention, ct);
         if (decision.Kind == IdempotencyDecisionKind.Replay) return;
@@ -261,13 +244,6 @@ public sealed class WorkerRotationStore(AuthDbContext database, WorkerIdentitySo
         return Parse<T>(row.SafeResponse);
     }
     private static T Parse<T>(string? json) => JsonSerializer.Deserialize<T>(json ?? "", Json) ?? throw Error("WORKER_LEDGER_REJECTED");
-    private async Task<string> StateAsync(Guid actor, Guid operation, CancellationToken ct)
-    {
-        foreach (var phase in new[] { ("finalize", "FINALIZED"), ("abort", "ABORTED"), ("begin-cutover", "CUTOVER_STARTED") })
-            if (await ReadAsync<JsonDocument>(actor, Prefix + phase.Item1 + "/v1", operation.ToString("D"), ct) is { } record)
-            { record.Dispose(); return phase.Item2; }
-        return "PREPARED";
-    }
     private static void ValidatePair(Pair pair, Guid org)
     {
         if (pair.Schema != Schema || pair.OrganisationId != org || pair.Workers.Length != 2
@@ -285,7 +261,8 @@ public sealed class WorkerRotationStore(AuthDbContext database, WorkerIdentitySo
     private static WorkerPreparedIdentity ToPrivate(Family value, string? privateValue = null) => new()
     { Profile = value.Profile, SubjectId = value.SubjectId, MembershipId = value.MembershipId, SessionId = value.FamilyId,
       Generation = value.Generation, SessionCreatedAtUtc = value.CreatedAtUtc, TokenIssuedAtUtc = value.IssuedAtUtc,
-      AccessExpiresAtUtc = value.AccessExpiresAtUtc, SessionExpiresAtUtc = value.ExpiresAtUtc, Token = privateValue };
+      AccessExpiresAtUtc = value.AccessExpiresAtUtc, SessionExpiresAtUtc = value.ExpiresAtUtc,
+      PayloadSha256 = value.PayloadSha256, PublicationSha256 = value.PublicationSha256, Token = privateValue };
     private static WorkerRotationResult Result(Prepared value, string state) => new()
     { OperationId = value.OperationId, OrganisationId = value.OrganisationId, State = state, Workers = value.Workers.Select(x => ToPrivate(x)).ToArray() };
     private static WorkerRotationException Error(string code, bool inspection = false) => new(code, inspection);

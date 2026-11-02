@@ -49,7 +49,7 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
         var services = new ServiceCollection().AddLogging(builder => builder.AddProvider(logs))
             .AddSingleton<IEventBus>(publisher);
         AddWorkerRuntime(services, config);
-        services.AddSingleton<IHttpClientFactory>(new Factory(authority));
+        services.AddSingleton<IHttpClientFactory>(new Factory(authority, config));
         await using var provider = services.BuildServiceProvider();
         var hosted = Assert.Single(provider.GetServices<IHostedService>());
         Assert.IsType<StaffProjectionRetryWorker>(hosted);
@@ -89,7 +89,7 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
         var config = Configuration(organisation);
         var services = new ServiceCollection().AddLogging().AddSingleton<IEventBus>(publisher);
         AddWorkerRuntime(services, config);
-        services.AddSingleton<IHttpClientFactory>(new Factory(authority));
+        services.AddSingleton<IHttpClientFactory>(new Factory(authority, config));
         await using var provider = services.BuildServiceProvider();
         var worker = (StaffProjectionRetryWorker)Assert.Single(provider.GetServices<IHostedService>());
         Assert.True(await worker.DispatchCycleAsync(default));
@@ -113,7 +113,7 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
         AddWorkerRuntime(services, config);
         services.RemoveAll<IAdminAreaClosureGate>();
         services.AddScoped<IAdminAreaClosureGate, DenyingClosureGate>();
-        services.AddSingleton<IHttpClientFactory>(new Factory(new Authority()));
+        services.AddSingleton<IHttpClientFactory>(new Factory(new Authority(), config));
 
         await using var provider = services.BuildServiceProvider();
         var worker = (StaffProjectionRetryWorker)Assert.Single(provider.GetServices<IHostedService>());
@@ -209,8 +209,12 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
         services.AddSingleton<IConfiguration>(configuration);
         var organisations = configuration.GetSection("TenantWorker:OrganisationIds").Get<string[]>() ?? [];
         if (organisations.Length > 0)
-            services.AddSingleton<IWorkerCredentialProvider>(WorkerCredentialFixture.For(
-                organisations.Select(Guid.Parse), WorkerCredentialEncoding.AdminAreaProfile));
+        {
+            var credentials = WorkerCredentialFixture.For(organisations.Select(Guid.Parse), WorkerCredentialEncoding.AdminAreaProfile);
+            configuration["SyntheticWorker:TokenHash"] = WorkerCredentialFixture.TokenSha256(
+                credentials.ReadAsync(default).AsTask().GetAwaiter().GetResult().Token);
+            services.AddSingleton<IWorkerCredentialProvider>(credentials);
+        }
         AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
         // This fixture intentionally exercises the historical pre-LIFE-02 schema. Its explicit
         // pre-boundary gate keeps the retry tests focused without weakening the production gate's
@@ -247,16 +251,23 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
             Messages.Add((StaffProjectionChangedV1)message); Published.TrySetResult(); return Task.CompletedTask;
         }
     }
-    private sealed class Factory(Authority authority) : IHttpClientFactory
-    { public HttpClient CreateClient(string name) => new(authority, disposeHandler: false); }
+    private sealed class Factory(Authority authority, IConfiguration configuration) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+        {
+            authority.ExpectedTokenHash = configuration["SyntheticWorker:TokenHash"];
+            return new(authority, disposeHandler: false);
+        }
+    }
     private sealed class Authority : HttpMessageHandler
     {
         public bool Allow { get; set; } = true;
+        public string? ExpectedTokenHash { get; set; }
         public int Calls { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Calls++;
-            Assert.Equal("synthetic-test-token", request.Headers.Authorization?.Parameter);
+            Assert.Equal(ExpectedTokenHash, WorkerCredentialFixture.TokenSha256(request.Headers.Authorization?.Parameter));
             return Task.FromResult(Allow ? new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = JsonContent.Create(new
