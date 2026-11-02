@@ -1,3 +1,4 @@
+using Zeka.WorkerCredentials;
 using ClientManagement.Application.Common.Authorization;
 using ClientManagement.Core.Entities;
 using ClientManagement.Infrastructure.Authorization;
@@ -12,7 +13,7 @@ using Zeka.Extensions.MultiTenancy.Abstractions;
 namespace ClientManagement.Infrastructure.Messaging;
 
 // Owns a new operation scope for every delivery; no tenant state lives on the subscriber.
-public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfiguration configuration)
+public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfiguration configuration, IWorkerCredentialProvider credentials)
     : IEventHandler<StaffProjectionChangedV1>
 {
     public async Task Handle(StaffProjectionChangedV1 message)
@@ -20,9 +21,12 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
         if (message.OrganisationId == Guid.Empty || message.OrganisationMembershipId == Guid.Empty
             || message.Id == Guid.Empty || message.Revision <= 0)
             throw new TenantAccessException(AccessFailure.Denied);
+        var snapshot = await credentials.ReadAsync(CancellationToken.None);
+        if (!snapshot.OrganisationIds.Contains(message.OrganisationId))
+            throw new TenantAccessException(AccessFailure.Denied);
         await using var scope = scopes.CreateAsyncScope();
-        var identity = new WorkerIdentity(configuration["TenantWorker:SubjectId"] ?? string.Empty,
-            message.OrganisationId, configuration["TenantWorker:BearerToken"]);
+        var credentialOperation = new WorkerCredentialOperation(credentials, snapshot, message.OrganisationId);
+        var identity = new WorkerIdentity(credentialOperation, message.OrganisationId);
         var factory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
         using var http = factory.CreateClient("TenantWorkerAccess");
         var baseAddress = configuration["TenantAuthorization:AuthManagementUrl"];
@@ -46,11 +50,17 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
         if (current is not null)
         {
             if (message.Revision < current.ProjectionVersion)
+            {
+                credentialOperation.MarkSuccessfulUse();
                 return;
+            }
             if (message.Revision == current.ProjectionVersion)
             {
                 if (message.Id == current.LastProjectionEventId)
+                {
+                    credentialOperation.MarkSuccessfulUse();
                     return;
+                }
                 throw new InvalidOperationException("Conflicting staff projection revision.");
             }
         }
@@ -79,8 +89,16 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
                 message.FirstName, message.LastName, message.UserName, message.TeamName, message.TeamAcronym);
             await database.SaveChangesAsync(cancellationToken);
         }, CancellationToken.None); // Unique key + revision concurrency token make competing deliveries retryable.
+        credentialOperation.MarkSuccessfulUse();
     }
 
-    private sealed record WorkerIdentity(string SubjectId, Guid SelectedOrganisationId, string? BearerToken)
-        : IOperationIdentity, ITenantAccessCredential;
+    private sealed class WorkerIdentity(WorkerCredentialOperation operation, Guid organisationId)
+        : IOperationIdentity, ITenantAccessCredential, IWorkerCredential401Retry
+    {
+        public string SubjectId => operation.Snapshot.SubjectId.ToString("D");
+        public Guid SelectedOrganisationId => organisationId;
+        public string? BearerToken => operation.Snapshot.Token;
+        public ValueTask<bool> ReloadAfterUnauthorizedAsync(CancellationToken cancellationToken) =>
+            operation.ReloadAfterUnauthorizedAsync(cancellationToken);
+    }
 }

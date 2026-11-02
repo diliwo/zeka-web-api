@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using Zeka.WorkerCredentials;
 using AdminAreaManagement.Application.Common.Authorization;
 using AdminAreaManagement.Application.Staffs;
 using AdminAreaManagement.Infrastructure.Authorization;
@@ -15,7 +16,7 @@ namespace AdminAreaManagement.Infrastructure.Messaging;
 
 // Explicit configured selections are untrusted: each cycle resolves live access before opening tenant persistence.
 public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, IConfiguration configuration,
-    ILogger<StaffProjectionRetryWorker> logger) : BackgroundService
+    ILogger<StaffProjectionRetryWorker> logger, IWorkerCredentialProvider credentials) : BackgroundService
 {
     private static readonly Meter Metrics = new(StaffProjectionOutbox.DiagnosticsName);
     private static readonly Counter<long> Cycles = Metrics.CreateCounter<long>("staff_outbox.retry_cycles");
@@ -23,8 +24,8 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
     public override Task StartAsync(CancellationToken cancellationToken)
     {
         if (Organisations(configuration).Length == 0 || string.IsNullOrWhiteSpace(configuration["TenantWorker:SubjectId"])
-            || string.IsNullOrWhiteSpace(configuration["TenantWorker:BearerToken"]))
-            throw new InvalidOperationException("Staff outbox retry requires explicit TenantWorker organisation selections and a renewable worker credential.");
+            )
+            throw new InvalidOperationException("Staff outbox retry requires explicit TenantWorker organisation selections and protected worker credentials.");
         return base.StartAsync(cancellationToken);
     }
 
@@ -60,6 +61,10 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
 
     public async Task<bool> DispatchCycleAsync(CancellationToken cancellationToken)
     {
+        var snapshot = await credentials.ReadAsync(cancellationToken);
+        var selections = Organisations(configuration);
+        if (selections.Length == 0 || !selections.OrderBy(x => x).SequenceEqual(snapshot.OrganisationIds.OrderBy(x => x)))
+            throw new WorkerCredentialUnavailableException("WORKER_SCOPE_REJECTED");
         var failed = false;
         foreach (var organisation in Organisations(configuration))
         {
@@ -69,8 +74,8 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
             await using var scope = scopes.CreateAsyncScope();
             try
             {
-                var identity = new WorkerIdentity(configuration["TenantWorker:SubjectId"] ?? "", organisation,
-                    configuration["TenantWorker:BearerToken"]);
+                var credentialOperation = new WorkerCredentialOperation(credentials, snapshot, organisation);
+                var identity = new WorkerIdentity(credentialOperation, organisation);
                 using var http = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("TenantWorkerAccess");
                 if (!Uri.TryCreate(configuration["TenantAuthorization:AuthManagementUrl"], UriKind.Absolute, out var uri)
                     || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query))
@@ -87,6 +92,7 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
                 var transactions = scope.ServiceProvider.GetRequiredService<ITenantTransactionExecutor>();
                 await transactions.ExecuteAsync(token =>
                     new DispatchStaffProjectionsCommand.Handler(outbox).Handle(new(), token), budget.Token);
+                credentialOperation.MarkSuccessfulUse();
                 Cycles.Add(1, new KeyValuePair<string, object?>("outcome", "completed"));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -100,6 +106,13 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
         return failed;
     }
 
-    private sealed record WorkerIdentity(string SubjectId, Guid SelectedOrganisationId, string? BearerToken)
-        : IOperationIdentity, ITenantAccessCredential;
+    private sealed class WorkerIdentity(WorkerCredentialOperation operation, Guid organisationId)
+        : IOperationIdentity, ITenantAccessCredential, IWorkerCredential401Retry
+    {
+        public string SubjectId => operation.Snapshot.SubjectId.ToString("D");
+        public Guid SelectedOrganisationId => organisationId;
+        public string? BearerToken => operation.Snapshot.Token;
+        public ValueTask<bool> ReloadAfterUnauthorizedAsync(CancellationToken cancellationToken) =>
+            operation.ReloadAfterUnauthorizedAsync(cancellationToken);
+    }
 }

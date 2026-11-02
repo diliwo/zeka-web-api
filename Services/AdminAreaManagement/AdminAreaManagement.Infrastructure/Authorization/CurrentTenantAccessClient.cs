@@ -1,3 +1,4 @@
+using Zeka.WorkerCredentials;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Net;
@@ -38,8 +39,9 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
             cancellationToken.ThrowIfCancellationRequested();
             var token = credential.BearerToken;
             if (string.IsNullOrWhiteSpace(token)) return Finish(TenantAccessOutcome.Unauthenticated);
-            // Two safe GETs at most; delay and body consumption share the overall deadline.
-            for (var attempt = 1; attempt <= 2; attempt++)
+            // Two ordinary safe GETs, plus at most one worker-only 401 retry. All share this deadline.
+            var retriedUnauthorized = false;
+            for (int attempt = 1, maximumAttempts = 2; attempt <= maximumAttempts; attempt++)
             {
                 Attempts.Add(1, new KeyValuePair<string, object?>("attempt", attempt));
                 activity?.SetTag("attempt.count", attempt);
@@ -49,14 +51,27 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
                 try
                 {
                     using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-                    if (response.StatusCode == HttpStatusCode.Unauthorized) return Finish(TenantAccessOutcome.Unauthenticated);
+                    if (response.StatusCode == HttpStatusCode.Unauthorized)
+                    {
+                        if (!retriedUnauthorized && credential is IWorkerCredential401Retry worker
+                            && await worker.ReloadAfterUnauthorizedAsync(deadline.Token))
+                        {
+                            token = credential.BearerToken;
+                            if (string.IsNullOrWhiteSpace(token)) return Finish(TenantAccessOutcome.Unavailable);
+                            retriedUnauthorized = true;
+                            maximumAttempts++;
+                            continue; // The same safe Auth query, never the business operation.
+                        }
+                        return Finish(credential is IWorkerCredential401Retry
+                            ? TenantAccessOutcome.Unavailable : TenantAccessOutcome.Unauthenticated);
+                    }
                     if (response.StatusCode == HttpStatusCode.Forbidden) return Finish(TenantAccessOutcome.Denied);
                     if (!response.IsSuccessStatusCode)
                     {
                         Failures.Add(1, new KeyValuePair<string, object?>("reason", "http"));
                         var transient = response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests
                             || (int)response.StatusCode >= 500;
-                        if (!transient || attempt == 2) return Finish(TenantAccessOutcome.Unavailable);
+                        if (!transient || attempt == maximumAttempts) return Finish(TenantAccessOutcome.Unavailable);
                     }
                     else
                     {
@@ -78,7 +93,7 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
                 catch (HttpRequestException)
                 {
                     Failures.Add(1, new KeyValuePair<string, object?>("reason", "transport"));
-                    if (attempt == 2) return Finish(TenantAccessOutcome.Unavailable);
+                    if (attempt == maximumAttempts) return Finish(TenantAccessOutcome.Unavailable);
                 }
                 await Task.Delay(TimeSpan.FromMilliseconds(100), deadline.Token);
             }
@@ -87,6 +102,10 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             Failures.Add(1, new KeyValuePair<string, object?>("reason", "timeout"));
+            return Finish(TenantAccessOutcome.Unavailable);
+        }
+        catch (WorkerCredentialUnavailableException)
+        {
             return Finish(TenantAccessOutcome.Unavailable);
         }
         catch (JsonException)

@@ -1,3 +1,5 @@
+using Zeka.WorkerCredentials;
+using Zeka.WorkerCredentials.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -218,7 +220,8 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         evidence.Clear();
 
         var worker = new StaffProjectionRetryWorker(provider.GetRequiredService<IServiceScopeFactory>(), configuration,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<StaffProjectionRetryWorker>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<StaffProjectionRetryWorker>.Instance,
+            WorkerCredentialFixture.For([organisation], WorkerCredentialEncoding.AdminAreaProfile));
         Assert.False(await worker.DispatchCycleAsync(default));
         Assert.Single(publisher.Messages);
         AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfRead, expectedAttempts: 1,
@@ -418,7 +421,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
                 ? database.SingleConnectionRuntimeString
                 : database.RuntimeConnectionString,
             ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
-            ["TenantWorker:SubjectId"] = "worker",
+            ["TenantWorker:SubjectId"] = WorkerCredentialFixture.Subject.ToString("D"),
             ["TenantWorker:BearerToken"] = "synthetic-test-token",
             ["TenantWorker:OrganisationIds:0"] = organisation.ToString(),
             ["FileServerPath"] = Path.GetTempPath()
@@ -621,7 +624,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
                 Content = JsonContent.Create(new
                 {
                     ContractVersion = 1,
-                    SubjectId = "worker",
+                    SubjectId = WorkerCredentialFixture.Subject.ToString("D"),
                     OrganisationId = Guid.Parse(request.RequestUri!.Segments.Last()),
                     OrganisationMembershipId = Guid.NewGuid(),
                     EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },

@@ -1,0 +1,45 @@
+# Additive M1-only overlay. It does not enable API admission, change logging,
+# start workers, or write any of the five sealed volumes. External rotation
+# volumes and their private subdirectories must already be operator-admitted.
+services:
+  adminarea:
+    user: "1654:1654"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      TenantWorker__CredentialRotationEnabled: "true"
+      TenantWorker__CredentialDirectory: /run/zeka-worker-credential
+      TenantWorker__SubjectId: ${ZEKA_M1_ADMINAREA_WORKER_SUBJECT_ID:?genuine admitted worker subject required}
+      TenantWorker__OrganisationIds__0: ${ZEKA_M1_ORGANISATION_ID:?admitted M1 organisation required}
+    volumes:
+      - type: volume
+        source: adminarea_worker_rotation
+        target: /run/zeka-worker-credential
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: private
+  client:
+    user: "1654:1654"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      TenantWorker__CredentialRotationEnabled: "true"
+      TenantWorker__CredentialDirectory: /run/zeka-worker-credential
+      TenantWorker__SubjectId: ${ZEKA_M1_CLIENT_WORKER_SUBJECT_ID:?distinct genuine worker subject required}
+      TenantWorker__OrganisationIds__0: ${ZEKA_M1_ORGANISATION_ID:?admitted M1 organisation required}
+    volumes:
+      - type: volume
+        source: client_worker_rotation
+        target: /run/zeka-worker-credential
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: private
+volumes:
+  adminarea_worker_rotation:
+    external: true
+    name: ${ZEKA_M1_ADMINAREA_ROTATION_VOLUME:?separate admitted rotation volume required}
+  client_worker_rotation:
+    external: true
+    name: ${ZEKA_M1_CLIENT_ROTATION_VOLUME:?separate admitted rotation volume required}
