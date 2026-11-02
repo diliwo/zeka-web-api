@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "zeka.m1.settings-preparation/v1",
+  "service": "auth",
+  "intendedPrivateFile": "auth/appsettings.LocalStack.json",
+  "configurationReady": false,
+  "copyAsRuntimeConfiguration": false,
+  "policyApproval": "65c15c08-d0a1-4c00-8450-395febcef195",
+  "workerApproval": "fb4cefbe-ce38-49d8-8ad2-ff8626df6cb2",
+  "sourceBase": "bf94bca1d49bccbcd7bb0839a321e5db2d5961d2",
+  "settingsFragment": {
+    "Authentication": {
+      "Issuer": "https://auth.zeka-m1.test:19443",
+      "Audience": "zeka-m1",
+      "JwksUri": "https://auth.zeka-m1.test:19443/.well-known/jwks.json",
+      "ClockSkew": "00:00:30",
+      "JwksRefreshInterval": "00:01:00",
+      "JwksMaximumStaleness": "00:05:00"
+    },
+    "AuthenticationIssuer": {
+      "AccessTokenLifetime": "00:30:00"
+    },
+    "BrowserSession": {
+      "AccessLifetime": "00:30:00",
+      "IdleLifetime": "01:00:00",
+      "AbsoluteLifetime": "04:00:00"
+    },
+    "M1WorkerRotation": {
+      "Enabled": false,
+      "ProcessingTimeoutSeconds": 120,
+      "RetentionSeconds": 86400
+    }
+  },
+  "requiredInputs": [
+    "Admitted restricted runtime database settings, where applicable",
+    "Exact approved static security mount references and image/source identity",
+    "Admitted browser Origin and existing transport policy, where applicable",
+    "AuthenticationIssuer ActiveSigningKeyReference and ActiveKeyId from sealed Auth custody",
+    "BrowserSession HashKeyReference from sealed Auth custody",
+    "M1WorkerRotation OwnerSubjectId from genuine owner provisioning",
+    "M1WorkerRotation OrganisationId from genuine owner provisioning",
+    "Explicit LocalStack runtime admission before enabling M1WorkerRotation"
+  ],
+  "operationalValueProvenance": "Invoke-OwnerFirstAdmin.ps1 processing120s/retention86400s, reused without changing token policy"
+}
