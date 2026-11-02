@@ -1,3 +1,5 @@
+using Zeka.WorkerCredentials;
+using Zeka.WorkerCredentials.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -207,7 +209,8 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         services.AddSingleton<IHttpClientFactory>(new ConsumerHttpClientFactory());
         await using var provider = services.BuildServiceProvider();
 
-        var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), configuration);
+        var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), configuration,
+            WorkerCredentialFixture.For([organisation], WorkerCredentialEncoding.ClientProfile));
         await consumer.Handle(new StaffProjectionChangedV1(organisation, membership, 1, true,
             "Synthetic", "Consumer", "consumer", "Team", "T"));
 
@@ -258,7 +261,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         {
             ["ConnectionStrings:ClientApiConnection"] = database.RuntimeConnectionString,
             ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
-            ["TenantWorker:SubjectId"] = "worker",
+            ["TenantWorker:SubjectId"] = WorkerCredentialFixture.Subject.ToString("D"),
             ["TenantWorker:BearerToken"] = "synthetic-test-token",
             ["FileServerPath"] = Path.GetTempPath()
         });
@@ -315,7 +318,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
                 Content = JsonContent.Create(new
                 {
                     ContractVersion = 1,
-                    SubjectId = "worker",
+                    SubjectId = WorkerCredentialFixture.Subject.ToString("D"),
                     OrganisationId = Guid.Parse(request.RequestUri.Segments.Last()),
                     OrganisationMembershipId = Guid.NewGuid(),
                     EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },

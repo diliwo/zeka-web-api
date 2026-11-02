@@ -1,3 +1,5 @@
+using Zeka.WorkerCredentials;
+using Zeka.WorkerCredentials.Testing;
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Net;
@@ -177,7 +179,7 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
         });
         AddWorkerRuntime(services, config);
         await using var provider = services.BuildServiceProvider();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Assert.Single(provider.GetServices<IHostedService>()).StartAsync(default));
+        await Assert.ThrowsAsync<WorkerCredentialUnavailableException>(() => Assert.Single(provider.GetServices<IHostedService>()).StartAsync(default));
     }
 
     private async Task Seed(Guid organisation, Guid membership, bool active)
@@ -194,8 +196,7 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
         var configuration = new ConfigurationManager();
         configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["TenantWorker:SubjectId"] = "worker",
-            ["TenantWorker:BearerToken"] = "synthetic-test-token",
+            ["TenantWorker:SubjectId"] = WorkerCredentialFixture.Subject.ToString("D"),
             ["TenantWorker:OrganisationIds:0"] = organisation.ToString(),
             ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
             ["ConnectionStrings:ClientApiConnection"] = fixture.ConnectionString
@@ -206,6 +207,10 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
     private static void AddWorkerRuntime(IServiceCollection services, ConfigurationManager configuration)
     {
         services.AddSingleton<IConfiguration>(configuration);
+        var organisations = configuration.GetSection("TenantWorker:OrganisationIds").Get<string[]>() ?? [];
+        if (organisations.Length > 0)
+            services.AddSingleton<IWorkerCredentialProvider>(WorkerCredentialFixture.For(
+                organisations.Select(Guid.Parse), WorkerCredentialEncoding.AdminAreaProfile));
         AdminAreaManagement.Infrastructure.DependencyInjection.AddInfrastructure(services, configuration);
         // This fixture intentionally exercises the historical pre-LIFE-02 schema. Its explicit
         // pre-boundary gate keeps the retry tests focused without weakening the production gate's
@@ -257,7 +262,7 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
                 Content = JsonContent.Create(new
                 {
                     ContractVersion = 1,
-                    SubjectId = "worker",
+                    SubjectId = WorkerCredentialFixture.Subject.ToString("D"),
                     OrganisationId = Guid.Parse(request.RequestUri!.Segments.Last()),
                     OrganisationMembershipId = Guid.NewGuid(),
                     EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },

@@ -19,4 +19,5 @@
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/ValidatorContractTests.cs" Link="ValidatorContractTests.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/RealHostStartupTests.cs" Link="RealHostStartupTests.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/TenantAttemptEvidenceCollector.cs" Link="TenantAttemptEvidenceCollector.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../../Shared/WorkerCredentials.TestSupport/ProtectedWorkerCredentialTests.cs" Link="ProtectedWorkerCredentialTests.cs" /></ItemGroup>
 </Project>

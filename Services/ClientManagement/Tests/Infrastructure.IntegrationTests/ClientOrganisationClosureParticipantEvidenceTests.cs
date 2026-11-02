@@ -1,3 +1,5 @@
+using Zeka.WorkerCredentials;
+using Zeka.WorkerCredentials.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -428,8 +430,8 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
             Header(Guid.NewGuid(), organisation, Guid.NewGuid(), Guid.NewGuid()), DateTimeOffset.UtcNow);
         await Invoke(provider, organisation, participant => participant.EnterFenceAsync(enter));
 
-        var consumer = new StaffProjectionConsumer(
-            provider.GetRequiredService<IServiceScopeFactory>(), configuration);
+        var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), configuration,
+            WorkerCredentialFixture.For([organisation], WorkerCredentialEncoding.ClientProfile));
         var rejected = await Assert.ThrowsAsync<InvalidOperationException>(() => consumer.Handle(
             new StaffProjectionChangedV1(organisation, membership, 1, true,
                 "Closure", "Evidence", "closure-worker", "Team", "T")));
@@ -469,7 +471,7 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
         {
             ["ConnectionStrings:ClientApiConnection"] = database.RuntimeConnectionString,
             ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
-            ["TenantWorker:SubjectId"] = "life-02-worker",
+            ["TenantWorker:SubjectId"] = WorkerCredentialFixture.Subject.ToString("D"),
             ["TenantWorker:BearerToken"] = "synthetic-life-02-token",
             ["FileServerPath"] = Path.GetTempPath()
         });
@@ -807,7 +809,7 @@ public sealed class ClientOrganisationClosureParticipantEvidenceTests(PostgreSql
                 Content = JsonContent.Create(new
                 {
                     ContractVersion = 1,
-                    SubjectId = "life-02-worker",
+                    SubjectId = WorkerCredentialFixture.Subject.ToString("D"),
                     OrganisationId = organisation,
                     OrganisationMembershipId = Guid.NewGuid(),
                     EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },
