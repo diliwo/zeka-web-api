@@ -42,7 +42,7 @@ public static class BrowserSessionEndpoints
                 http.Items[CallerAddress] = address;
                 await next(http);
             });
-            branch.UseForwardedHeaders(admission.Forwarding);
+            if (!admission.IsDirectClient) branch.UseForwardedHeaders(admission.Forwarding);
             branch.Use(async (http, next) =>
             {
                 var address = (string)http.Items[CallerAddress]!;
@@ -55,7 +55,7 @@ public static class BrowserSessionEndpoints
         });
     }
 
-    // Receiving-side policy has no production defaults. Only explicitly configured exact proxy peers are trusted.
+    // Production keeps exact proxy admission. LocalStack direct mode requires an explicit selection.
     public sealed class BrowserSessionAdmission : IDisposable
     {
         private readonly HashSet<string> peers = new(StringComparer.Ordinal);
@@ -69,10 +69,19 @@ public static class BrowserSessionEndpoints
         public ForwardedHeadersOptions Forwarding { get; } = new()
         { ForwardedHeaders = ForwardedHeaders.XForwardedFor, ForwardLimit = 1 };
         public int PartitionCount { get { lock (gate) return partitions.Sum(budget => budget.Count); } }
-        public BrowserSessionAdmission(IConfiguration configuration)
+        public bool IsDirectClient { get; }
+        public BrowserSessionAdmission(IConfiguration configuration, IHostEnvironment environment)
         {
             Forwarding.KnownNetworks.Clear(); Forwarding.KnownProxies.Clear();
             var configured = configuration.GetSection("BrowserSession:TrustedProxyPeers").Get<string[]>() ?? [];
+            var mode = configuration["BrowserSession:TransportMode"];
+            if (mode is not null && mode != "LocalStackDirect") return;
+            if (mode == "LocalStackDirect")
+            {
+                // Empty arrays and omitted sections bind alike on .NET 8, so the mode must be explicit.
+                if (!environment.IsEnvironment("LocalStack") || configured.Length != 0) return;
+                IsDirectClient = true;
+            }
             foreach (var peer in configured)
             {
                 if (!IPAddress.TryParse(peer, out var address) || peer.Contains('%') || Canonical(address) is not { } canonical
@@ -84,7 +93,7 @@ public static class BrowserSessionEndpoints
                 || !int.TryParse(configuration["BrowserSession:Limits:MaxPartitions"], out capacity)
                 || !int.TryParse(configuration["BrowserSession:Limits:Aggregate"], out var total)
                 || !int.TryParse(configuration["BrowserSession:Limits:WindowSeconds"], out var seconds)
-                || peers.Count == 0 || perAddress is < 1 or > 10000 || capacity is < 1 or > 4096
+                || (!IsDirectClient && peers.Count == 0) || perAddress is < 1 or > 10000 || capacity is < 1 or > 4096
                 || total < perAddress || total > 100000 || seconds is < 1 or > 3600) return;
             window = TimeSpan.FromSeconds(seconds);
             aggregate = [Create(total), Create(total)];
@@ -93,8 +102,18 @@ public static class BrowserSessionEndpoints
         public bool TryAttribute(HttpContext http, out string address)
         {
             address = "";
-            if (!valid || Canonical(http.Connection.RemoteIpAddress) is not { } peer || !peers.Contains(peer)
-                || http.Request.Headers["X-Forwarded-For"].Count != 1) return false;
+            if (!valid || Canonical(http.Connection.RemoteIpAddress) is not { } peer) return false;
+            if (IsDirectClient)
+            {
+                var socket = http.Connection.RemoteIpAddress!;
+                if (socket.IsIPv4MappedToIPv6) socket = socket.MapToIPv4();
+                if (socket.Equals(IPAddress.Any) || socket.Equals(IPAddress.IPv6Any) || socket.IsIPv6Multicast
+                    || (socket.AddressFamily == AddressFamily.InterNetwork && socket.GetAddressBytes()[0] >= 224)) return false;
+                // Use only the physical socket; caller forwarding headers never influence direct admission.
+                address = peer;
+                return true;
+            }
+            if (!peers.Contains(peer) || http.Request.Headers["X-Forwarded-For"].Count != 1) return false;
             var raw = http.Request.Headers["X-Forwarded-For"][0];
             if (string.IsNullOrWhiteSpace(raw) || raw.Contains(',') || raw.Contains('%')
                 || !IPAddress.TryParse(raw, out var client) || Canonical(client) is not { } canonical) return false;

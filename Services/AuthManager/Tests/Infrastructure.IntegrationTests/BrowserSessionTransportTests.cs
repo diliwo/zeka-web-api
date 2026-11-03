@@ -21,6 +21,161 @@ namespace Infrastructure.IntegrationTests;
 [Trait("Issue", "89")]
 public sealed class BrowserSessionTransportTests
 {
+    private static void LocalStackDirect(Dictionary<string, string?> values)
+    {
+        values.Remove("BrowserSession:TrustedProxyPeers:0");
+        values["BrowserSession:TransportMode"] = "LocalStackDirect";
+    }
+
+    [Fact]
+    public async Task LocalStack_direct_transport_uses_socket_identity_and_preserves_origin_csrf_and_cookie_security()
+    {
+        await using var test = await Host.StartAsync(LocalStackDirect, "LocalStack", directClient: true);
+        test.Http.DefaultRequestHeaders.Add("Forwarded", "for=203.0.113.5;proto=http;host=forged.example.invalid");
+        test.Http.DefaultRequestHeaders.Add("X-Forwarded-For", "203.0.113.5, 203.0.113.6");
+        test.Http.DefaultRequestHeaders.Add("X-Forwarded-Host", "forged.example.invalid");
+        test.Http.DefaultRequestHeaders.Add("X-Forwarded-Proto", "http");
+        test.Http.DefaultRequestHeaders.Add("X-Forwarded-Origin", "https://app.example.invalid");
+        test.Http.DefaultRequestHeaders.Add("X-Original-For", "203.0.113.5");
+        var csrf = await test.CsrfAsync();
+        Assert.Equal("127.0.0.2", test.Received.RemoteAddress);
+        Assert.Equal("https", test.Received.Scheme);
+        Assert.Equal(test.Http.BaseAddress!.Authority, test.Received.Host);
+        using var wrongOrigin = await test.PostAsync("sign-in", csrf, "https://forged.example.invalid");
+        Assert.Equal(HttpStatusCode.Forbidden, wrongOrigin.StatusCode);
+        using var wrongCsrf = await test.PostAsync("sign-in", "invalid");
+        Assert.Equal(HttpStatusCode.Forbidden, wrongCsrf.StatusCode);
+        using var noOrigin = await test.PostAsync("sign-in", csrf, origin: null);
+        Assert.Equal(HttpStatusCode.Forbidden, noOrigin.StatusCode);
+        using var nonJson = new HttpRequestMessage(HttpMethod.Post, "/api/v1/browser-session/sign-in")
+            { Content = new StringContent("{}") };
+        nonJson.Headers.Add("Origin", "https://app.example.invalid");
+        nonJson.Headers.Add("X-Zeka-CSRF", csrf);
+        using var rejectedNonJson = await test.Http.SendAsync(nonJson);
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, rejectedNonJson.StatusCode);
+        Assert.Equal(0, test.Sessions.Mutations);
+        using var signedIn = await test.PostAsync("sign-in", csrf);
+        Assert.Equal(HttpStatusCode.OK, signedIn.StatusCode);
+        Assert.Equal(1, test.Sessions.Mutations);
+        Assert.Equal("127.0.0.2", test.Received.RemoteAddress);
+        Assert.Equal("https", test.Received.Scheme);
+        var cookie = signedIn.Headers.GetValues("Set-Cookie").Single();
+        Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/api/v1/browser-session", cookie, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocalStack_direct_forged_forwarding_cannot_create_new_rate_partitions()
+    {
+        await using var test = await Host.StartAsync(values =>
+        {
+            LocalStackDirect(values);
+            values["BrowserSession:Limits:PerAddress"] = "1";
+        }, "LocalStack", directClient: true);
+        test.Http.DefaultRequestHeaders.Add("X-Forwarded-For", "198.51.100.1");
+        Assert.Equal(HttpStatusCode.OK, (await test.Http.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        test.Http.DefaultRequestHeaders.Remove("X-Forwarded-For");
+        test.Http.DefaultRequestHeaders.Add("X-Forwarded-For", "198.51.100.2");
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await test.Http.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        using var differentSocket = test.Client("127.0.0.3", direct: true);
+        Assert.Equal(HttpStatusCode.OK, (await differentSocket.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        Assert.Equal(2, test.Admission.PartitionCount);
+        Assert.Equal(0, test.Sessions.Mutations);
+    }
+
+    [Fact]
+    public async Task LocalStack_direct_aggregate_and_partition_capacity_remain_bounded()
+    {
+        await using var test = await Host.StartAsync(values =>
+        {
+            LocalStackDirect(values);
+            values["BrowserSession:Limits:PerAddress"] = "1";
+            values["BrowserSession:Limits:MaxPartitions"] = "2";
+            values["BrowserSession:Limits:Aggregate"] = "2";
+        }, "LocalStack", directClient: true);
+        using var two = test.Client("127.0.0.3", direct: true);
+        using var three = test.Client("127.0.0.4", direct: true);
+        Assert.Equal(HttpStatusCode.OK, (await test.Http.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await two.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await three.GetAsync("/api/v1/browser-session/csrf")).StatusCode);
+        Assert.Equal(2, test.Admission.PartitionCount);
+    }
+
+    [Theory]
+    [InlineData("Production", "LocalStackDirect", false)]
+    [InlineData("Staging", "LocalStackDirect", false)]
+    [InlineData("LocalStack", null, false)]
+    [InlineData("LocalStack", "unknown", false)]
+    [InlineData("LocalStack", "LocalStackDirect", true)]
+    public async Task Direct_transport_requires_explicit_localstack_mode_and_no_trusted_peers(
+        string environment, string? mode, bool retainPeer)
+    {
+        await using var test = await Host.StartAsync(values =>
+        {
+            if (!retainPeer) values.Remove("BrowserSession:TrustedProxyPeers:0");
+            if (mode is not null) values["BrowserSession:TransportMode"] = mode;
+        }, environment, directClient: true);
+        using var response = await test.Http.GetAsync("/api/v1/browser-session/csrf");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+        Assert.Equal(0, test.Admission.PartitionCount);
+        Assert.Equal(0, test.Sessions.Mutations);
+    }
+
+    [Theory]
+    [InlineData("PerAddress", "0")]
+    [InlineData("PerAddress", "not-an-integer")]
+    [InlineData("MaxPartitions", "0")]
+    [InlineData("MaxPartitions", "4097")]
+    [InlineData("Aggregate", "1")]
+    [InlineData("WindowSeconds", "0")]
+    public async Task Direct_transport_keeps_invalid_rate_configuration_fail_closed(string setting, string value)
+    {
+        await using var test = await Host.StartAsync(values =>
+        {
+            LocalStackDirect(values);
+            values["BrowserSession:Limits:" + setting] = value;
+        }, "LocalStack", directClient: true);
+        using var response = await test.Http.GetAsync("/api/v1/browser-session/csrf");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+        Assert.Equal(0, test.Admission.PartitionCount);
+        Assert.Equal(0, test.Sessions.Mutations);
+    }
+
+    [Theory]
+    [InlineData("198.51.100.7")]
+    [InlineData("::ffff:198.51.100.7")]
+    public async Task Direct_transport_canonicalizes_mapped_socket_addresses(string socketAddress)
+    {
+        await using var test = await Host.StartAsync(LocalStackDirect, "LocalStack", directClient: true);
+        var http = new DefaultHttpContext();
+        http.Connection.RemoteIpAddress = IPAddress.Parse(socketAddress);
+        http.Request.Headers["X-Forwarded-For"] = "203.0.113.5";
+        Assert.True(test.Admission.TryAttribute(http, out var address));
+        Assert.Equal("198.51.100.7", address);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("0.0.0.0")]
+    [InlineData("::")]
+    [InlineData("::ffff:0.0.0.0")]
+    [InlineData("255.255.255.255")]
+    [InlineData("224.0.0.1")]
+    [InlineData("ff02::1")]
+    public async Task Direct_transport_refuses_missing_or_non_unicast_socket_addresses(string? raw)
+    {
+        await using var test = await Host.StartAsync(LocalStackDirect, "LocalStack", directClient: true);
+        var http = new DefaultHttpContext();
+        http.Connection.RemoteIpAddress = raw is null ? null : IPAddress.Parse(raw);
+        http.Request.Headers["X-Forwarded-For"] = "198.51.100.10";
+        Assert.False(test.Admission.TryAttribute(http, out _));
+        Assert.Equal(0, test.Admission.PartitionCount);
+    }
+
     [Fact]
     public async Task Mutation_requires_exact_origin_json_and_framework_csrf_and_returns_only_memory_bearer()
     {
@@ -121,6 +276,9 @@ public sealed class BrowserSessionTransportTests
         public string? ContentType { get; set; }
         public long? ProxyContentLength { get; set; }
         public bool ProxyChunked { get; set; }
+        public string? RemoteAddress { get; set; }
+        public string? Scheme { get; set; }
+        public string? Host { get; set; }
     }
 
     private sealed class Sessions : IBrowserSessions
@@ -233,7 +391,7 @@ public sealed class BrowserSessionTransportTests
         Assert.Equal(0, test.Sessions.Mutations);
     }
 
-    private sealed class Host(WebApplication app, WebApplication proxy, HttpClient upstream,
+    private sealed class Host(WebApplication app, WebApplication? proxy, HttpClient? upstream,
         HttpClient http, Sessions sessions, X509Certificate2 certificate, ReceivedRequest received) : IAsyncDisposable
     {
         public HttpClient Http => http;
@@ -241,14 +399,15 @@ public sealed class BrowserSessionTransportTests
         public ReceivedRequest Received => received;
         public BrowserSessionEndpoints.BrowserSessionAdmission Admission => app.Services.GetRequiredService<BrowserSessionEndpoints.BrowserSessionAdmission>();
         public HttpClient Client(string localAddress, bool direct = false)
-            => CreateClient(direct ? Address(app) : Address(proxy), localAddress, certificate);
-        public static async Task<Host> StartAsync(Action<Dictionary<string, string?>>? configure = null)
+            => CreateClient(direct ? Address(app) : Address(proxy ?? throw new InvalidOperationException("No proxy in direct fixture.")), localAddress, certificate);
+        public static async Task<Host> StartAsync(Action<Dictionary<string, string?>>? configure = null,
+            string? environment = null, bool directClient = false)
         {
             using var rsa = RSA.Create(2048);
             var request = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             using var temporary = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
             var certificate = new X509Certificate2(temporary.Export(X509ContentType.Pfx));
-            var builder = WebApplication.CreateBuilder();
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, endpoint => endpoint.UseHttps(certificate)));
             var values = new Dictionary<string, string?> { ["BrowserSession:Origin"] = "https://app.example.invalid",
@@ -274,8 +433,18 @@ public sealed class BrowserSessionTransportTests
                 }
                 await next(context);
             });
-            app.UseBrowserSessionAttribution(); app.UseRateLimiter(); app.MapBrowserSessions();
+            app.UseBrowserSessionAttribution();
+            app.Use(async (context, next) =>
+            {
+                received.RemoteAddress = context.Connection.RemoteIpAddress?.ToString();
+                received.Scheme = context.Request.Scheme;
+                received.Host = context.Request.Host.Value;
+                await next(context);
+            });
+            app.UseRateLimiter(); app.MapBrowserSessions();
             app.MapGet("/unrelated", () => Results.Ok()); await app.StartAsync();
+            if (directClient)
+                return new(app, null, null, CreateClient(Address(app), "127.0.0.2", certificate), sessions, certificate, received);
             var upstream = CreateClient(Address(app), "127.0.0.1", certificate, cookies: false);
             var proxyBuilder = WebApplication.CreateBuilder(); proxyBuilder.Logging.ClearProviders();
             proxyBuilder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, endpoint => endpoint.UseHttps(certificate)));
@@ -339,6 +508,10 @@ public sealed class BrowserSessionTransportTests
             return http.SendAsync(request);
         }
         public async ValueTask DisposeAsync()
-        { http.Dispose(); upstream.Dispose(); await proxy.DisposeAsync(); await app.DisposeAsync(); certificate.Dispose(); }
+        {
+            http.Dispose(); upstream?.Dispose();
+            if (proxy is not null) await proxy.DisposeAsync();
+            await app.DisposeAsync(); certificate.Dispose();
+        }
     }
 }
