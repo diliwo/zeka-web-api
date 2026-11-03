@@ -189,6 +189,121 @@ Check 'network_refuses_wrong_label' {$h=HelperNetwork;$h.Config.Labels.'com.dili
 Check 'network_refuses_second_attachment' {$h=HelperNetwork;$h.NetworkSettings.Networks|Add-Member -NotePropertyName 'unexpected' -NotePropertyValue ([pscustomobject]@{NetworkID=('3'*64)});Get-OwnerHelperNetworkDecision $h (ExpectedHelperNetwork) -BeforeStart|Out-Null} 'OWNER_HELPER_NETWORK_REJECTED'
 Check 'network_refuses_wrong_attachment_name' {$h=HelperNetwork;$h.NetworkSettings.Networks=[pscustomobject]@{'unexpected'=[pscustomobject]@{NetworkID=('2'*64)}};Get-OwnerHelperNetworkDecision $h (ExpectedHelperNetwork) -BeforeStart|Out-Null} 'OWNER_HELPER_NETWORK_REJECTED'
 
+# Exercise the same durable command boundary used by the executable entry point.
+# Every canary is generated here and never printed; no credential/private source is read.
+$canary=[Guid]::NewGuid().ToString('N')
+$planted=@(('Password='+$canary),('Host=fixture;Database=fixture;Username=fixture;Password='+$canary),
+    ('Bearer '+$canary),('ghp_'+$canary),('C:\private\'+$canary),($canary+'@example.invalid'),
+    ('ENV_PRIVATE='+$canary),('-----BEGIN PRIVATE KEY-----'+$canary))
+function Assert-SafeFailure($Result,[string]$Stage,[string]$Type,[string]$Code='OWNER_PROVISIONING_REQUIRES_INSPECTION') {
+    if($Result.status-cne'BLOCKED'-or$Result.code-cne$Code-or!$Result.requiresInspection-or$Result.automaticRetry-or
+        $Result.stage-cne$Stage-or$Result.exceptionType-cne$Type-or[string]::IsNullOrWhiteSpace($Result.message)-or
+        $Result.message.Length-gt128-or$script:OwnerCommandExitCode-ne1){throw 'FAILURE_RECEIPT_CONTRACT'}
+    $json=$Result|ConvertTo-Json -Compress
+    foreach($value in $planted+@($canary)){if($json.Contains($value,[StringComparison]::Ordinal)){throw 'FAILURE_RECEIPT_LEAK'}}
+}
+$stages=@('command-entry','owner-identity','source-admission','private-support-import','private-path-acl',
+    'owner-directory-admission','owner-lock','inspection-admission','diagnostic-initialization',
+    'bootstrap-progress','bootstrap-resources','owner-profile-admission','owner-profile-preparation',
+    'owner-credential-preparation','owner-profile-persistence','helper-source-binary','helper-image-admission',
+    'credential-input-admission','helper-absence','inspection-marker-persistence','helper-create',
+    'helper-create-inspection','helper-network-admission','helper-isolation','helper-start',
+    'helper-running-admission','helper-stdin','database-provisioning','helper-output','helper-process-release',
+    'provisioning-receipt','receipt-persistence','inspection-marker-clear','owner-lock-release')
+foreach($phase in $stages){
+    $stage=$phase
+    Check ('failure_boundary_tracks_'+$stage) {
+        $r=Invoke-OwnerCommand {Set-OwnerProvisionStage $stage;Stop-OwnerProvision 'OWNER_PRIVATE_PATH_REJECTED'}
+        Assert-SafeFailure $r $stage 'InvalidOperationException' 'OWNER_PRIVATE_PATH_REJECTED'
+        if($r.message-cne'Private path admission refused.'){throw 'CATALOGUE_MESSAGE'}
+    }
+}
+foreach($secretShape in $planted){
+    $text=$secretShape
+    Check ('failure_boundary_withholds_shape_'+[Array]::IndexOf($planted,$secretShape)) {
+        $r=Invoke-OwnerCommand {Set-OwnerProvisionStage 'owner-credential-preparation';throw [InvalidOperationException]::new($text)}
+        Assert-SafeFailure $r 'owner-credential-preparation' 'InvalidOperationException'
+        if($r.message-cne'Detail withheld; requires inspection.'){throw 'GENERIC_FALLBACK'}
+    }
+}
+Check 'failure_boundary_no_arbitrary_owner_code_echo' {
+    $r=Invoke-OwnerCommand {Set-OwnerProvisionStage 'helper-start';throw [InvalidOperationException]::new('OWNER_'+$canary.ToUpperInvariant())}
+    Assert-SafeFailure $r 'helper-start' 'InvalidOperationException'
+}
+Check 'failure_boundary_catalogue_is_case_sensitive' {
+    $r=Invoke-OwnerCommand {Set-OwnerProvisionStage 'private-path-acl';throw [InvalidOperationException]::new('owner_private_path_rejected')}
+    Assert-SafeFailure $r 'private-path-acl' 'InvalidOperationException'
+}
+Check 'failure_boundary_imported_guard_uses_safe_message' {
+    $r=Invoke-OwnerCommand {Set-OwnerProvisionStage 'private-path-acl';throw [InvalidOperationException]::new('AUTH_HTTPS_PRIVATE_ACL_REJECTED')}
+    Assert-SafeFailure $r 'private-path-acl' 'InvalidOperationException'
+    if($r.message-cne'Private ACL admission refused.'){throw 'IMPORTED_CATALOGUE'}
+}
+Check 'failure_boundary_known_native_type_withholds_message' {
+    $r=Invoke-OwnerCommand {Set-OwnerProvisionStage 'owner-directory-admission';throw [UnauthorizedAccessException]::new($planted[4])}
+    Assert-SafeFailure $r 'owner-directory-admission' 'UnauthorizedAccessException'
+}
+Check 'failure_boundary_unwraps_known_invocation_without_message_leak' {
+    $r=Invoke-OwnerCommand {Set-OwnerProvisionStage 'receipt-persistence';throw [Reflection.TargetInvocationException]::new($planted[0],[IO.IOException]::new($planted[4]))}
+    Assert-SafeFailure $r 'receipt-persistence' 'IOException'
+}
+class OwnerFixtureUnexpectedException : System.Exception {
+    OwnerFixtureUnexpectedException([string]$text) : base($text) {}
+}
+Check 'failure_boundary_unknown_exception_type_fails_closed' {
+    $r=Invoke-OwnerCommand {Set-OwnerProvisionStage 'bootstrap-progress';throw [OwnerFixtureUnexpectedException]::new($planted[1])}
+    Assert-SafeFailure $r 'bootstrap-progress' 'UnexpectedException'
+    if($r.message-cne'Detail withheld; requires inspection.'){throw 'UNKNOWN_FALLBACK'}
+}
+Check 'failure_boundary_unknown_stage_is_not_echoed' {
+    $r=Invoke-OwnerCommand {Set-OwnerProvisionStage $planted[4];throw [Exception]::new($planted[0])}
+    Assert-SafeFailure $r 'command-entry' 'UnexpectedException'
+}
+Check 'failure_boundary_resets_previous_stage' {
+    Set-OwnerProvisionStage 'database-provisioning'
+    $r=Invoke-OwnerCommand {throw [Exception]::new($planted[0])}
+    Assert-SafeFailure $r 'command-entry' 'UnexpectedException'
+}
+Check 'failure_boundary_preserves_success_receipt_without_new_fields' {
+    $expected=Receipt
+    $r=Invoke-OwnerCommand {$expected}
+    if($script:OwnerCommandExitCode-ne0-or($r|ConvertTo-Json -Compress)-cne($expected|ConvertTo-Json -Compress)){
+        throw 'SUCCESS_SCHEMA_CHANGED'
+    }
+}
+foreach($failureMode in @('none','cleanup','diagnostic','both')) {
+    $mode=$failureMode
+    Check ('original_failure_survives_secondary_'+$mode) {
+        $script:cleanupCalls=0;$script:diagnosticCalls=0
+        $r=Invoke-OwnerCommand {
+            Set-OwnerProvisionStage 'helper-running-admission'
+            try {Stop-OwnerProvision 'OWNER_HELPER_NETWORK_DEADLINE'}
+            catch {
+                Invoke-OwnerFailureCleanup $_ {
+                    $script:cleanupCalls++
+                    Set-OwnerProvisionStage 'helper-process-release'
+                    $planted[0]
+                    if($mode-cin@('cleanup','both')){throw [UnauthorizedAccessException]::new($planted[4])}
+                } {
+                    $script:diagnosticCalls++
+                    Set-OwnerProvisionStage 'receipt-persistence'
+                    $planted[1]
+                    if($mode-cin@('diagnostic','both')){throw [IO.IOException]::new($planted[4])}
+                }
+            }
+        }
+        Assert-SafeFailure $r 'helper-running-admission' 'InvalidOperationException' 'OWNER_HELPER_NETWORK_DEADLINE'
+        if($r.message-cne'Helper network admission deadline reached.'-or$script:cleanupCalls-ne1-or$script:diagnosticCalls-ne1){
+            throw 'ORIGINAL_FAILURE_OR_BOUNDED_ATTEMPTS_CHANGED'
+        }
+    }
+}
+Check 'failure_boundary_discards_partial_success_output_on_exception' {
+    $r=@(Invoke-OwnerCommand {$planted[0];throw [Exception]::new($planted[1])})
+    if($r.Count-ne1){throw 'PARTIAL_OUTPUT_ESCAPED'}
+    Assert-SafeFailure $r[0] 'command-entry' 'UnexpectedException'
+}
+
 $result=[ordered]@{schema='zeka-m1-owner-admission-tests/v1';status='PASS';count=$checks.Count;checks=$checks.ToArray();runtimeOperationsExecuted=$false}
 if($ReportFile){
     $full=[IO.Path]::GetFullPath($ReportFile)
