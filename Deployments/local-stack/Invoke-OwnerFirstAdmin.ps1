@@ -6,6 +6,9 @@ param(
     [Guid]$ExistingSubjectId=[Guid]::Empty,
     [string]$DisplayName='M1 synthetic first organisation'
 )
+. (Join-Path $PSScriptRoot 'SafePostgresDiagnostics.ps1')
+$script:OwnerPostgresDiagnostic=$null
+
 # Error text is never copied into the public receipt. Only exact, reviewed catalogue entries leave this boundary.
 $script:OwnerProvisionStage = 'command-entry'
 function Set-OwnerProvisionStage([string]$Stage) {
@@ -85,12 +88,19 @@ function ConvertTo-OwnerFailureReceipt($Failure, [string]$Stage) {
         foreach($knownCode in $messages.Keys){if($exception.Message-ceq$knownCode){$code=$knownCode;$message=$messages[$knownCode];break}}
         if($code-ceq'OWNER_PROVISIONING_REQUIRES_INSPECTION'){foreach($knownCode in $importedMessages.Keys){if($exception.Message-ceq$knownCode){$message=$importedMessages[$knownCode];break}}}
     }
-    return [ordered]@{status='BLOCKED';code=$code;requiresInspection=$true;automaticRetry=$false;
+    $receipt=[ordered]@{status='BLOCKED';code=$code;requiresInspection=$true;automaticRetry=$false;
         stage=$safeStage;exceptionType=$safeType;message=$message}
+    $postgres=if($script:OwnerPostgresDiagnostic){$script:OwnerPostgresDiagnostic}else{Get-SafePostgresExceptionDiagnostic $Failure}
+    if($postgres){
+        foreach($field in @('message','hint')){if($null-ne$postgres[$field]-and(Get-Command ConvertTo-W3SafeText -ErrorAction SilentlyContinue)){$postgres[$field]=ConvertTo-W3SafeText $postgres[$field] -StructuredPostgresField}}
+        $receipt.postgresDiagnostic=$postgres
+    }
+    return $receipt
 }
 function Invoke-OwnerCommand([scriptblock]$Action) {
     $ErrorActionPreference='Stop'
     $script:OwnerCommandExitCode=0
+    $script:OwnerPostgresDiagnostic=$null
     Set-OwnerProvisionStage 'command-entry'
     try {$result=&$Action;return $result}
     catch {
@@ -364,7 +374,14 @@ function Invoke-OwnerPrivateTool([string]$ContainerId,[string]$Payload,[string]$
     }
 }
 function Read-OwnerToolReceipt([string]$Text,[int]$NativeExit,[int]$ErrorLength,[string]$Source,[string]$Binary,[string]$Subject) {
-    if($NativeExit-ne0-or$ErrorLength-ne0){Stop-OwnerProvision 'OWNER_TOOL_REJECTED_REQUIRES_INSPECTION'}
+    if($NativeExit-ne0-or$ErrorLength-ne0){
+        try {
+            if($Text.Length-gt65536){throw 'OVERSIZE_DIAGNOSTIC_WITHHELD'}
+            $failure=[Text.Json.JsonDocument]::Parse($Text)
+            try {$pg=$failure.RootElement.GetProperty('postgresDiagnostic');$script:OwnerPostgresDiagnostic=ConvertFrom-SafePostgresDiagnostic $pg.GetRawText()}finally{$failure.Dispose()}
+        } catch {}
+        Stop-OwnerProvision 'OWNER_TOOL_REJECTED_REQUIRES_INSPECTION'
+    }
     if($Text.Length-gt65536){Stop-OwnerProvision 'OWNER_TOOL_RECEIPT_REJECTED'}
     $document=$null
     try {

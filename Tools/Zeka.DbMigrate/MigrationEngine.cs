@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using Zeka.OwnerSqlEvidence;
+using Zeka.ToolingDiagnostics;
 using System.Data;
 using System.Diagnostics;
 using System.Reflection;
@@ -40,12 +43,15 @@ internal static class MigrationEngine
             "The result is host-produced evidence and is not an independently signed production attestation."
         };
 
-        await using var connection = new NpgsqlConnection(connectionString);
+        var postgres = new SafePostgresDiagnosticCapture();
+        postgres.RegisterConnection(connectionString);
+        await using var connection = new NpgsqlConnection(SafePostgresDiagnostic.WithoutErrorDetail(connectionString));
         try
         {
             try { await connection.OpenAsync(cancellationToken); }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                postgres.Capture(exception);
                 resultCode = "CONNECTION_REJECTED";
                 exitCode = ResultCodes.ConnectionRejected;
                 return Complete();
@@ -83,7 +89,7 @@ internal static class MigrationEngine
                 return Complete();
             }
 
-            await using var context = CreateContext(options.Service, connection);
+            await using var context = CreateContext(options.Service, connection, postgres);
             var compiled = context.Database.GetMigrations().ToArray();
             var applied = (await context.Database.GetAppliedMigrationsAsync(cancellationToken)).ToArray();
             if (compiled.Length == 0 || applied.Length > compiled.Length
@@ -210,8 +216,9 @@ internal static class MigrationEngine
             }
             return Complete();
         }
-        catch
+        catch (Exception error)
         {
+            postgres.Capture(error);
             resultCode = migration == "started" ? "MIGRATION_STATE_REQUIRES_INSPECTION" : "INTERNAL_FAILURE";
             classification = migration == "started" ? resultCode : classification;
             migration = migration == "started" ? "failed" : migration;
@@ -232,17 +239,17 @@ internal static class MigrationEngine
             lockAcquired, new RoleAssertions(options.Service.MigratorRole, sessionUser, options.Service.OwnerRole,
                 currentUser, restricted, membership, ownerAssumed),
             new PhaseResults(new PhaseResult(migration), new PhaseResult("not_started"), new PhaseResult(manifest),
-                new PhaseResult("untested")), startedAt, DateTimeOffset.UtcNow, caveats.ToArray()), exitCode);
+                new PhaseResult("untested")), startedAt, DateTimeOffset.UtcNow, caveats.ToArray()) { PostgresDiagnostic = postgres.Diagnostic }, exitCode);
     }
 
-    private static DbContext CreateContext(ServiceDescriptor descriptor, NpgsqlConnection connection) => descriptor.Key switch
+    private static DbContext CreateContext(ServiceDescriptor descriptor, NpgsqlConnection connection, SafePostgresDiagnosticCapture? capture = null) => descriptor.Key switch
     {
         "adminarea" => new AdminDeploymentDbContext(
-            new DbContextOptionsBuilder<AdminDeploymentDbContext>().UseNpgsql(connection).Options),
+            new DbContextOptionsBuilder<AdminDeploymentDbContext>().UseNpgsql(connection).AddInterceptors(capture is null ? [] : new[] { new SafePostgresCommandInterceptor(capture) }).Options),
         "auth" => new AuthDeploymentDbContext(
-            new DbContextOptionsBuilder<AuthDeploymentDbContext>().UseNpgsql(connection).Options),
+            new DbContextOptionsBuilder<AuthDeploymentDbContext>().UseNpgsql(connection).AddInterceptors(capture is null ? [] : new[] { new SafePostgresCommandInterceptor(capture) }).Options),
         "client" => new ClientDeploymentDbContext(
-            new DbContextOptionsBuilder<ClientDeploymentDbContext>().UseNpgsql(connection).Options),
+            new DbContextOptionsBuilder<ClientDeploymentDbContext>().UseNpgsql(connection).AddInterceptors(capture is null ? [] : new[] { new SafePostgresCommandInterceptor(capture) }).Options),
         _ => throw new InvalidOperationException()
     };
 
@@ -270,7 +277,7 @@ internal static class MigrationEngine
                 FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()
                 """, connection);
             command.Parameters.AddWithValue("namespace", AdvisoryNamespace);
-            if ((bool)(await command.ExecuteScalarAsync(cancellationToken))!) return true;
+            if ((bool)(await OwnerSqlExecution.ExecuteScalarAsync(command, cancellationToken))!) return true;
             if (watch.Elapsed >= timeout) return false;
             await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
         } while (true);
@@ -284,12 +291,17 @@ internal static class MigrationEngine
                    r.rolcreaterole,r.rolinherit,r.rolreplication
             FROM pg_catalog.pg_roles r WHERE r.rolname=session_user
             """, connection);
-        await using var reader = await role.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken)) return ("", "", false, false);
+        await using var reader = await OwnerSqlExecution.ExecuteReaderAsync(role, cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            await OwnerSqlExecution.CompleteReaderAsync(reader, cancellationToken);
+            return ("", "", false, false);
+        }
         var session = reader.GetString(0);
         var current = reader.GetString(1);
         var restricted = reader.GetBoolean(2) && !reader.GetBoolean(3) && !reader.GetBoolean(4)
             && !reader.GetBoolean(5) && !reader.GetBoolean(6) && !reader.GetBoolean(7) && !reader.GetBoolean(8);
+        await OwnerSqlExecution.CompleteReaderAsync(reader, cancellationToken);
         await reader.DisposeAsync();
 
         await using var memberships = new NpgsqlCommand("""
@@ -300,13 +312,14 @@ internal static class MigrationEngine
             WHERE member.rolname=@member ORDER BY parent.rolname
             """, connection);
         memberships.Parameters.AddWithValue("member", descriptor.MigratorRole);
-        await using var membershipReader = await memberships.ExecuteReaderAsync(cancellationToken);
+        await using var membershipReader = await OwnerSqlExecution.ExecuteReaderAsync(memberships, cancellationToken);
         var rows = new List<(string Parent, bool Admin, bool Inherit, bool Set)>();
         while (await membershipReader.ReadAsync(cancellationToken))
             rows.Add((membershipReader.GetString(0), membershipReader.GetBoolean(1), membershipReader.GetBoolean(2),
                 membershipReader.GetBoolean(3)));
         var matching = rows is [{ Parent: var parent, Admin: false, Inherit: false, Set: true }]
             && parent == descriptor.OwnerRole;
+        await OwnerSqlExecution.CompleteReaderAsync(membershipReader, cancellationToken);
         return (session, current, restricted, matching);
     }
 
@@ -314,16 +327,18 @@ internal static class MigrationEngine
         CancellationToken cancellationToken)
     {
         await using var command = new NpgsqlCommand("SELECT session_user,current_user", connection);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await OwnerSqlExecution.ExecuteReaderAsync(command, cancellationToken);
         await reader.ReadAsync(cancellationToken);
-        return (reader.GetString(0), reader.GetString(1));
+        var users = (reader.GetString(0), reader.GetString(1));
+        await OwnerSqlExecution.CompleteReaderAsync(reader, cancellationToken);
+        return users;
     }
 
     private static async Task ExecuteFixedAsync(NpgsqlConnection connection, string sql,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, [CallerFilePath] string producerFile = "", [CallerLineNumber] int producerLine = 0)
     {
         await using var command = new NpgsqlCommand(sql, connection);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await OwnerSqlExecution.ExecuteNonQueryAsync(command, cancellationToken, producerFile, producerLine);
     }
 
     private static async Task<string?> TryReadFinalMigrationAsync(ServiceDescriptor descriptor,

@@ -1,3 +1,4 @@
+using Zeka.ToolingDiagnostics;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -130,7 +131,7 @@ internal static class ManagedMigrationAdapter
             return new MigrationRun(receipt.NativeExit.Value, root.GetProperty("classification").GetString()!,
                 phases.GetProperty("migration").GetProperty("status").GetString() == "passed",
                 phases.GetProperty("manifestVerification").GetProperty("status").GetString() == "failed",
-                context.OperationId, receiptFile);
+                context.OperationId, receiptFile, root.TryGetProperty("postgresDiagnostic", out var diagnostic) ? SafePostgresDiagnostic.Parse(diagnostic) : null);
         }
         catch (SetupFailure) { throw; }
         catch { throw Failure("MIGRATION_EVIDENCE_REJECTED"); }
@@ -139,7 +140,8 @@ internal static class ManagedMigrationAdapter
     private static void ValidateEnvelope(JsonElement root, MigrationOperationContext context, int exit)
     {
         UniqueProperties(root);
-        if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 19
+        if (root.TryGetProperty("postgresDiagnostic", out var postgres)) _ = SafePostgresDiagnostic.Parse(postgres);
+        if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != (root.TryGetProperty("postgresDiagnostic", out var pg) ? 20 : 19)
             || root.GetProperty("schemaVersion").GetString() != "zeka-db-migrate-result/v0.1.0"
             || root.GetProperty("toolVersion").GetString() != "0.1.0"
             || root.GetProperty("operationId").GetGuid() != context.OperationId
@@ -271,9 +273,10 @@ internal sealed record NativeReceipt(Guid OperationId, string Operation, string 
     string PrivateEvidenceRoot, bool NativeStarted, int? NativeExit, string? ExecutionFailure,
     StreamObservation StandardOutput, StreamObservation StandardError);
 internal sealed record MigrationRun(int Exit, string Classification, bool MigrationPassed, bool ManifestFailed,
-    Guid OperationId, string ReceiptFile);
-internal sealed class SetupFailure(string code, int? nativeExit, Guid? operationId = null, string? receiptFile = null) : Exception
+    Guid OperationId, string ReceiptFile, SafePostgresDiagnostic? PostgresDiagnostic = null);
+internal sealed class SetupFailure(string code, int? nativeExit, Guid? operationId = null, string? receiptFile = null) : Exception, ISafePostgresDiagnosticFailure
 {
+    public SafePostgresDiagnostic? PostgresDiagnostic { get; init; }
     public string Code { get; } = code;
     public int? NativeExit { get; } = nativeExit;
     public Guid? OperationId { get; } = operationId;

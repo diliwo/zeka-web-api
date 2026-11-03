@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using Zeka.OwnerSqlEvidence;
 using System.Data.Common;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -183,7 +185,7 @@ public static class RlsSecurityManifestVerifier
             where (child_schema.nspname=any(@schemas) or parent_schema.nspname=any(@schemas))
               and child.relkind in ('r','p','f') and parent.relkind in ('r','p','f')
             order by 1,2,3,4,5,6,7
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         var expected = manifest.RelationTopology.Select(state => string.Join('|',
             state.Kind, state.Parent.Schema, state.Parent.Name, state.Child.Schema, state.Child.Name,
             state.Sequence, state.DetachPending.ToString().ToLowerInvariant()));
@@ -206,7 +208,7 @@ public static class RlsSecurityManifestVerifier
             join pg_catalog.pg_roles owner on owner.oid=c.relowner
             where n.nspname=any(@schemas) and c.relkind in ('f','m','v')
             order by n.nspname,c.relname
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         Equal([], rows.Select(row => string.Join('|', row)), "prohibited relation surfaces");
     }
 
@@ -223,7 +225,7 @@ public static class RlsSecurityManifestVerifier
             left join pg_catalog.pg_roles grantee on grantee.oid=acl.grantee
             where acl.grantee=0 or grantee.rolname=any(@roles)
             order by 1,2,3,4
-            """, cancellationToken, ("roles", managed));
+            """, cancellationToken, [ ("roles", managed)]);
         var expected = manifest.ParameterPrivileges.Select(grant =>
             $"{grant.Parameter.ToLowerInvariant()}|{grant.Grantee}|{grant.Privilege}|{grant.Grantable.ToString().ToLowerInvariant()}");
         Equal(expected, rows.Select(row => string.Join('|', row)), "parameter privileges");
@@ -239,7 +241,7 @@ public static class RlsSecurityManifestVerifier
                    rolcreaterole::text,rolinherit::text,rolreplication::text,rolconnlimit::text,
                    coalesce(array_to_string(rolconfig,','),'')
             from pg_catalog.pg_roles where rolname=any(@roles) order by rolname
-            """, cancellationToken, ("roles", managed));
+            """, cancellationToken, [ ("roles", managed)]);
         Equal(managed, roles.Select(row => row[0]), "managed roles");
         AssertRole(roles, manifest.OwnerRole, false);
         AssertRole(roles, manifest.MigratorRole, true);
@@ -250,7 +252,7 @@ public static class RlsSecurityManifestVerifier
             from pg_catalog.pg_auth_members m join pg_catalog.pg_roles parent on parent.oid=m.roleid
             join pg_catalog.pg_roles member on member.oid=m.member
             where parent.rolname=any(@roles) or member.rolname=any(@roles) order by member.rolname,parent.rolname
-            """, cancellationToken, ("roles", managed));
+            """, cancellationToken, [ ("roles", managed)]);
         if (memberships.Count != 1 || memberships[0][0] != manifest.MigratorRole
             || memberships[0][1] != manifest.OwnerRole || memberships[0][2] != "false"
             || memberships[0][3] != "false" || memberships[0][4] != "true")
@@ -259,7 +261,7 @@ public static class RlsSecurityManifestVerifier
             select role.rolname from pg_catalog.pg_db_role_setting setting
             join pg_catalog.pg_roles role on role.oid=setting.setrole
             where role.rolname=any(@roles)
-            """, cancellationToken, ("roles", managed));
+            """, cancellationToken, [ ("roles", managed)]);
         if (settings.Count != 0) throw new InvalidOperationException("Managed role/database settings drifted.");
     }
 
@@ -271,7 +273,7 @@ public static class RlsSecurityManifestVerifier
             from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid=c.relnamespace
             join pg_catalog.pg_roles owner on owner.oid=c.relowner
             where n.nspname=any(@schemas) and c.relkind in ('r','p') order by n.nspname,c.relname
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         var expectedTables = manifest.ProtectedTables.Concat(manifest.ExcludedTables)
             .Append(manifest.MigrationHistoryTable).Select(ObjectKey);
         Equal(expectedTables, tables.Select(row => ObjectKey(row[0], row[1])), "catalog tables");
@@ -291,7 +293,7 @@ public static class RlsSecurityManifestVerifier
             where n.nspname=any(@schemas) and c.relkind in ('r','p')
               and a.attnum>0 and not a.attisdropped and a.attname='OrganisationId'
             order by n.nspname,c.relname
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         var classified = manifest.ProtectedTables.Concat(manifest.ExcludedTables).ToHashSet();
         if (organisationColumns.Any(row => !classified.Contains(new ManagedObjectIdentity(row[0], row[1]))))
             throw new InvalidOperationException("An OrganisationId table lacks a reviewed classification.");
@@ -309,7 +311,7 @@ public static class RlsSecurityManifestVerifier
             from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid=c.relnamespace
             join pg_catalog.pg_roles owner on owner.oid=c.relowner
             where n.nspname=@schema and c.relname=@table and c.relkind='r'
-            """, cancellationToken, ("schema", historyIdentity.Schema), ("table", historyIdentity.Name));
+            """, cancellationToken, [ ("schema", historyIdentity.Schema), ("table", historyIdentity.Name)]);
         if (history.Count != 1 || history[0][0] != manifest.OwnerRole
             || history[0][1] != "false" || history[0][2] != "false"
             || history[0][3] != manifest.MigrationId)
@@ -321,7 +323,7 @@ public static class RlsSecurityManifestVerifier
             from pg_catalog.pg_policy p join pg_catalog.pg_class c on c.oid=p.polrelid
             join pg_catalog.pg_namespace n on n.oid=c.relnamespace
             where n.nspname=any(@schemas) order by n.nspname,c.relname,p.polname
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         Equal(manifest.ProtectedTables.Select(ObjectKey),
             policies.Select(row => ObjectKey(row[0], row[1])), "RLS policy targets");
         // PostgreSQL 17's non-pretty deparser removes parser-level presentation differences while retaining
@@ -348,7 +350,7 @@ public static class RlsSecurityManifestVerifier
             select n.nspname,owner.rolname from pg_catalog.pg_namespace n
             join pg_catalog.pg_roles owner on owner.oid=n.nspowner
             where n.nspname=any(@schemas) order by n.nspname
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         Equal(manifest.ManagedSchemas, owners.Select(row => row[0]), "schema inventory");
         if (owners.Any(row => row[1] != manifest.OwnerRole)) throw new InvalidOperationException("Schema owner drifted.");
         var ownerSchemas = await RowsAsync(connection, """
@@ -356,7 +358,7 @@ public static class RlsSecurityManifestVerifier
             join pg_catalog.pg_roles owner on owner.oid=n.nspowner
             where owner.rolname=@owner and n.nspname!~'^pg_' and n.nspname<>'information_schema'
             order by n.nspname
-            """, cancellationToken, ("owner", manifest.OwnerRole));
+            """, cancellationToken, [ ("owner", manifest.OwnerRole)]);
         Equal(manifest.ManagedSchemas, ownerSchemas.Select(row => row[0]), "managed owner schema inventory");
         var databaseAcls = await RowsAsync(connection, """
             select coalesce(grantee.rolname,'PUBLIC'),x.privilege_type,x.is_grantable::text
@@ -381,7 +383,7 @@ public static class RlsSecurityManifestVerifier
             left join pg_catalog.pg_roles grantee on grantee.oid=x.grantee
             -- Owners have inherent privileges and their identity is verified separately.
             where n.nspname=any(@schemas) and x.grantee<>n.nspowner order by 1,2,3
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         var migrationSchema = manifest.MigrationHistoryTable.Schema;
         var expected = manifest.ManagedSchemas
             .Select(schema => $"{schema}|{manifest.RuntimeRole}|USAGE|false")
@@ -401,7 +403,7 @@ public static class RlsSecurityManifestVerifier
             left join pg_catalog.pg_roles grantee on grantee.oid=x.grantee
             where n.nspname=any(@schemas) and c.relkind in ('r','p')
               and x.grantee<>c.relowner order by n.nspname,c.relname,3,4,5
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         var expected = manifest.TablePrivileges
             .SelectMany(state => state.Privileges.Select(privilege =>
                 $"{ObjectKey(state.Object)}|{manifest.RuntimeRole}|{privilege}|false"))
@@ -424,7 +426,7 @@ public static class RlsSecurityManifestVerifier
             where n.nspname=any(@schemas) and c.relkind in ('r','p')
               and a.attnum>0 and not a.attisdropped and a.attacl is not null
               and x.grantee<>c.relowner order by 1,2,3,4,5,6
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         var expected = (manifest.ColumnPrivileges ?? [])
             .SelectMany(state => state.Privileges.Select(privilege =>
                 $"{ObjectKey(state.Object)}|{state.Column}|{manifest.RuntimeRole}|{privilege}|{state.Grantable.ToString().ToLowerInvariant()}"));
@@ -439,7 +441,7 @@ public static class RlsSecurityManifestVerifier
             join pg_catalog.pg_namespace n on n.oid=c.relnamespace
             join pg_catalog.pg_roles owner on owner.oid=c.relowner
             where n.nspname=any(@schemas) and c.relkind='S' order by n.nspname,c.relname
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         Equal(manifest.Sequences.Select(ObjectKey), rows.Select(row => ObjectKey(row[0], row[1])),
             "sequence inventory");
         if (rows.Any(row => row[2] != manifest.OwnerRole)) throw new InvalidOperationException("Sequence owner drifted.");
@@ -450,7 +452,7 @@ public static class RlsSecurityManifestVerifier
             left join pg_catalog.pg_roles grantee on grantee.oid=x.grantee
             where n.nspname=any(@schemas) and c.relkind='S'
               and x.grantee<>c.relowner order by n.nspname,c.relname,3,4,5
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         var expected = manifest.SequencePrivileges.SelectMany(state => state.Privileges.Select(privilege =>
             $"{ObjectKey(state.Object)}|{manifest.RuntimeRole}|{privilege}|false"));
         Equal(expected, acls.Select(row => string.Join('|', row)), "sequence ACLs");
@@ -466,7 +468,7 @@ public static class RlsSecurityManifestVerifier
             from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace
             join pg_catalog.pg_roles owner on owner.oid=p.proowner
             join pg_catalog.pg_language l on l.oid=p.prolang where n.nspname=any(@schemas) order by 1
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         Equal(manifest.RuntimeFunctions, rows.Select(row => row[0]), "function inventory");
         var securityDefiners = (manifest.SecurityDefinerFunctions ?? [])
             .Select(x => x.FunctionIdentity).ToHashSet(StringComparer.Ordinal);
@@ -495,7 +497,7 @@ public static class RlsSecurityManifestVerifier
             cross join lateral pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) x
             left join pg_catalog.pg_roles grantee on grantee.oid=x.grantee
             where n.nspname=any(@schemas) and x.grantee<>p.proowner order by 1,2,3,4
-            """, cancellationToken, ("schemas", manifest.ManagedSchemas));
+            """, cancellationToken, [ ("schemas", manifest.ManagedSchemas)]);
         var recoveryFunctions = (manifest.RecoveryFunctions ?? []).ToHashSet(StringComparer.Ordinal);
         Equal(manifest.RuntimeFunctions.Select(function =>
                 $"{function}|{(recoveryFunctions.Contains(function) ? manifest.RecoveryRole : manifest.RuntimeRole)}|EXECUTE|false"),
@@ -511,7 +513,7 @@ public static class RlsSecurityManifestVerifier
             join pg_catalog.pg_namespace n on n.oid=d.defaclnamespace
             where owner.rolname=@owner and d.defaclnamespace<>0
             order by n.nspname
-            """, cancellationToken, ("owner", manifest.OwnerRole));
+            """, cancellationToken, [ ("owner", manifest.OwnerRole)]);
         var undeclaredScopes = schemaScopes.Select(row => row[0])
             .Except(manifest.ManagedSchemas, StringComparer.Ordinal).ToArray();
         if (undeclaredScopes.Length != 0)
@@ -550,7 +552,7 @@ public static class RlsSecurityManifestVerifier
             )
             select * from effective_global union all select * from schema_additions
             order by 1,2,3,4,5,6
-            """, cancellationToken, ("owner", manifest.OwnerRole));
+            """, cancellationToken, [ ("owner", manifest.OwnerRole)]);
         var expected = manifest.DefaultPrivileges.SelectMany(state => state.Grants.Select(grant =>
             $"{state.Owner}|{DefaultPrivilegeScope(state)}|{state.ObjectType}|{grant.Grantee}|{grant.Privilege}|{grant.Grantable.ToString().ToLowerInvariant()}"));
         Equal(expected, rows.Select(row => string.Join('|', row)), "default privileges");
@@ -921,7 +923,7 @@ public static class RlsSecurityManifestVerifier
             join pg_catalog.pg_class target on target.oid=f.confrelid
             join pg_catalog.pg_namespace target_schema on target_schema.oid=target.relnamespace
             where f.contype='f' and source_schema.nspname='public' and source.relname=any(@tables)
-            """, cancellationToken, ("tables", tables));
+            """, cancellationToken, [ ("tables", tables)]);
         var expected = new List<string>
         {
             "LifecycleParticipantRegistryActivation|RevisionId|public|LifecycleParticipantRegistryRevisions|Id|r|a|true|false",
@@ -989,7 +991,7 @@ public static class RlsSecurityManifestVerifier
             join pg_catalog.pg_namespace n on n.oid=c.relnamespace
             where n.nspname='public' and c.relname=any(@tables)
               and a.attnum>0 and not a.attisdropped and a.attname='OrganisationId'
-            """, cancellationToken, ("tables", manifest.GlobalControlPlaneTables!.Select(x => x.Name).ToArray()));
+            """, cancellationToken, [ ("tables", manifest.GlobalControlPlaneTables!.Select(x => x.Name).ToArray())]);
         Equal([], globalOrganisationColumns.Select(row => row[0]), "global control-plane organisation columns");
     }
 
@@ -1043,16 +1045,17 @@ public static class RlsSecurityManifestVerifier
     }
 
     private static async Task<List<string[]>> RowsAsync(DbConnection connection, string sql,
-        CancellationToken cancellationToken, params (string Name, object Value)[] parameters)
+        CancellationToken cancellationToken, (string Name, object Value)[]? parameters = null,
+        [CallerFilePath] string producerFile = "", [CallerLineNumber] int producerLine = 0)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
-        foreach (var (name, value) in parameters)
+        foreach (var (name, value) in parameters ?? [])
         {
             var parameter = command.CreateParameter(); parameter.ParameterName = name; parameter.Value = value;
             command.Parameters.Add(parameter);
         }
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await OwnerSqlExecution.ExecuteReaderAsync(command, cancellationToken, producerFile, producerLine);
         var rows = new List<string[]>();
         while (await reader.ReadAsync(cancellationToken))
         {
@@ -1060,6 +1063,7 @@ public static class RlsSecurityManifestVerifier
             for (var index = 0; index < row.Length; index++) row[index] = reader.GetValue(index).ToString() ?? string.Empty;
             rows.Add(row);
         }
+        await OwnerSqlExecution.CompleteReaderAsync(reader, cancellationToken);
         return rows;
     }
 }

@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using Zeka.OwnerSqlEvidence;
+using Zeka.ToolingDiagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -11,6 +14,7 @@ using ClientContext = ClientManagement.Infrastructure.Persistence.DeploymentDbCo
 using Zeka.LocalStack.DatabaseSetup;
 
 var stage = "input";
+var postgres = new SafePostgresDiagnosticCapture();
 try
 {
     if (args is ["--guard-checks"]) { using var checks = new CancellationTokenSource(TimeSpan.FromMinutes(3)); return await GuardChecks.RunAsync(checks.Token); }
@@ -24,10 +28,11 @@ try
     var migratorPassword = ReadPassword("/run/secrets/migrator-password");
     var runtimePassword = ReadPassword("/run/secrets/runtime-password");
     var adminPassword = ReadPassword("/run/secrets/admin-password");
+    postgres.RegisterSecret(migratorPassword); postgres.RegisterSecret(runtimePassword); postgres.RegisterSecret(adminPassword);
     var adminCs = Connection("postgres", "postgres", adminPassword);
     var migrationCs = Connection(service.Database, service.Migrator, migratorPassword);
     var runtimeDocument = JsonDocument.Parse(File.ReadAllText("/run/secrets/runtime-config.json"));
-    var runtimeCs = runtimeDocument.RootElement.GetProperty("ConnectionStrings").GetProperty(service.ConnectionKey).GetString()!;
+    var runtimeCs = SafePostgresDiagnostic.WithoutErrorDetail(runtimeDocument.RootElement.GetProperty("ConnectionStrings").GetProperty(service.ConnectionKey).GetString()!);
     var runtimeBuilder = new NpgsqlConnectionStringBuilder(runtimeCs);
     if (runtimeBuilder.Host != "postgres" || runtimeBuilder.Port != 5432 || runtimeBuilder.Database != service.Database
         || runtimeBuilder.Username != service.Runtime || runtimeBuilder.Password != runtimePassword || runtimeBuilder.Pooling)
@@ -47,14 +52,16 @@ try
     await using (var lookup = new NpgsqlCommand("select pg_get_userbyid(datdba),coalesce(shobj_description(oid,'pg_database'),'') from pg_database where datname=@name", admin))
     {
         lookup.Parameters.AddWithValue("name", service.Database);
-        await using var reader = await lookup.ExecuteReaderAsync(ct);
+        await using var reader = await OwnerSqlExecution.ExecuteReaderAsync(lookup, ct);
         if (await reader.ReadAsync(ct))
         {
             if (reader.GetString(0) != "postgres" || reader.GetString(1) != databaseComment)
                 throw new InvalidOperationException("DATABASE_ESTABLISHED_OR_FOREIGN");
+            await OwnerSqlExecution.CompleteReaderAsync(reader, ct);
         }
         else
         {
+            await OwnerSqlExecution.CompleteReaderAsync(reader, ct);
             await reader.DisposeAsync();
             if (request.Completed) throw new InvalidOperationException("ESTABLISHED_DATABASE_MISSING");
             await Execute(admin, $"CREATE DATABASE {Quote(service.Database)} OWNER postgres TEMPLATE template0", ct);
@@ -74,32 +81,32 @@ try
     await FreshRuntime(runtimeCs, service, ct);
     if (request.Completed)
     {
-        await VerifyManifest(databaseAdmin, service, ct);
+        await VerifyManifest(databaseAdmin, service, postgres, ct);
         await FreshLogin(migrationCs, service.Migrator, false, ct);
         await FreshRuntime(runtimeCs, service, ct);
     }
     else
     {
         stage = "pre-bootstrap";
-        await Execute(databaseAdmin, File.ReadAllText($"/run/source/bootstrap-{service.Key}-roles.sql"), ct);
+        await Execute(databaseAdmin, File.ReadAllText($"/run/source/bootstrap-{service.Key}-roles.sql"), ct, bootstrapService: service.Key);
     }
     stage = "restricted-migrator-plan";
     var plan = await ManagedMigrationAdapter.RunAsync("plan", service.Key, request.SourceCommit, migrationCs, "/run/results", ct);
-    if (plan.Exit != 0) throw new SetupFailure("MIGRATOR_PLAN_REJECTED", plan.Exit, plan.OperationId, plan.ReceiptFile);
+    if (plan.Exit != 0) throw new SetupFailure("MIGRATOR_PLAN_REJECTED", plan.Exit, plan.OperationId, plan.ReceiptFile) { PostgresDiagnostic = plan.PostgresDiagnostic };
     if (request.Completed && plan.Classification != "ALREADY_CURRENT")
         throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
     stage = "restricted-migrator-apply";
     var apply = await ManagedMigrationAdapter.RunAsync("apply", service.Key, request.SourceCommit, migrationCs, "/run/results", ct);
-    if (apply.Exit != 0) throw new SetupFailure("MIGRATOR_APPLY_REJECTED", apply.Exit, apply.OperationId, apply.ReceiptFile);
+    if (apply.Exit != 0) throw new SetupFailure("MIGRATOR_APPLY_REJECTED", apply.Exit, apply.OperationId, apply.ReceiptFile) { PostgresDiagnostic = apply.PostgresDiagnostic };
     if (request.Completed && apply.Classification != "ALREADY_CURRENT")
         throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
     if (!request.Completed)
     {
         stage = "post-bootstrap";
-        await Execute(databaseAdmin, File.ReadAllText($"/run/source/bootstrap-{service.Key}-roles.sql"), ct);
+        await Execute(databaseAdmin, File.ReadAllText($"/run/source/bootstrap-{service.Key}-roles.sql"), ct, bootstrapService: service.Key);
     }
     stage = "security-manifest";
-    await VerifyManifest(databaseAdmin, service, ct);
+    await VerifyManifest(databaseAdmin, service, postgres, ct);
     stage = "runtime-password-authentication";
     await FreshRuntime(runtimeCs, service, ct);
     stage = "migrator-password-authentication";
@@ -158,11 +165,12 @@ try
 }
 catch (Exception error)
 {
+    postgres.Capture(error);
     var root = error is TargetInvocationException { InnerException: not null } invocation ? invocation.InnerException! : error;
     var safeCode = root is SetupFailure failure ? failure.Code :
         root is InvalidOperationException && KnownGuard(root.Message) ? root.Message :
         "DATABASE_SETUP_REJECTED";
-    var safe = new { status="BLOCKED", stage, code=safeCode, sqlState=(root as PostgresException)?.SqlState,
+    var safe = new { status="BLOCKED", stage, code=safeCode, sqlState=postgres.Diagnostic?.SqlState, postgresDiagnostic=postgres.Diagnostic,
         nativeExit=(root as SetupFailure)?.NativeExit, operationId=(root as SetupFailure)?.OperationId,
         receiptFile=(root as SetupFailure)?.ReceiptFile, exceptionType=root.GetType().Name };
     File.WriteAllText("/run/results/result.json", JsonSerializer.Serialize(safe));
@@ -192,7 +200,7 @@ static async Task VerifyMemberships(NpgsqlConnection admin,Service service,bool 
         where parent.rolname=any(@roles) or member.rolname=any(@roles)
         """,admin);
     command.Parameters.AddWithValue("roles",roles);
-    await using var reader=await command.ExecuteReaderAsync(ct);
+    await using var reader=await OwnerSqlExecution.ExecuteReaderAsync(command, ct);
     var count=0;
     while(await reader.ReadAsync(ct))
     {
@@ -202,6 +210,7 @@ static async Task VerifyMemberships(NpgsqlConnection admin,Service service,bool 
             throw new InvalidOperationException("ROLE_MEMBERSHIP_DRIFT");
     }
     if(count>1||(completed&&count!=1))throw new InvalidOperationException("ROLE_MEMBERSHIP_DRIFT");
+    await OwnerSqlExecution.CompleteReaderAsync(reader, ct);
 }
 static string ReadPassword(string path)
 {
@@ -215,24 +224,30 @@ static string Connection(string database,string user,string password) => new Npg
 }.ConnectionString;
 static string Quote(string value)=>new NpgsqlCommandBuilder().QuoteIdentifier(value);
 static string Literal(string value)=>"'"+value.Replace("'","''")+"'";
-static async Task Execute(NpgsqlConnection c,string sql,CancellationToken ct) {await using var command=new NpgsqlCommand(sql,c){CommandTimeout=60};await command.ExecuteNonQueryAsync(ct);}
-static async Task<object?> Scalar(NpgsqlConnection c,string sql,CancellationToken ct) {await using var command=new NpgsqlCommand(sql,c);return await command.ExecuteScalarAsync(ct);}
-static async Task<List<string[]>> Rows(NpgsqlConnection c,string sql,CancellationToken ct)
+static async Task Execute(NpgsqlConnection c,string sql,CancellationToken ct, string? bootstrapService=null, [CallerFilePath] string producerFile="", [CallerLineNumber] int producerLine=0)
 {
-    await using var command=new NpgsqlCommand(sql,c);await using var reader=await command.ExecuteReaderAsync(ct);
+    await using var command=new NpgsqlCommand(sql,c){CommandTimeout=60};
+    if (bootstrapService is null) await OwnerSqlExecution.ExecuteNonQueryAsync(command, ct, producerFile, producerLine);
+    else await OwnerSqlExecution.ExecuteBootstrapNonQueryAsync(command, ct, bootstrapService, producerFile, producerLine);
+}
+static async Task<object?> Scalar(NpgsqlConnection c,string sql,CancellationToken ct, [CallerFilePath] string producerFile="", [CallerLineNumber] int producerLine=0) {await using var command=new NpgsqlCommand(sql,c);return await OwnerSqlExecution.ExecuteScalarAsync(command, ct, producerFile, producerLine);}
+static async Task<List<string[]>> Rows(NpgsqlConnection c,string sql,CancellationToken ct, [CallerFilePath] string producerFile="", [CallerLineNumber] int producerLine=0)
+{
+    await using var command=new NpgsqlCommand(sql,c);await using var reader=await OwnerSqlExecution.ExecuteReaderAsync(command, ct, producerFile, producerLine);
     var rows=new List<string[]>();
     while(await reader.ReadAsync(ct)){var row=new string[reader.FieldCount];for(var i=0;i<row.Length;i++)row[i]=reader.IsDBNull(i)?"":Convert.ToString(reader.GetValue(i),CultureInfo.InvariantCulture)!;rows.Add(row);}
+    await OwnerSqlExecution.CompleteReaderAsync(reader, ct);
     return rows;
 }
 static string Digest(List<string[]> values)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(values)))).ToLowerInvariant();
-static DbContext Context(Service s,NpgsqlConnection c)=>s.Key switch {
-    "auth"=>new AuthContext(new DbContextOptionsBuilder<AuthContext>().UseNpgsql(c).Options),
-    "adminarea"=>new AdminContext(new DbContextOptionsBuilder<AdminContext>().UseNpgsql(c).Options),
-    _=>new ClientContext(new DbContextOptionsBuilder<ClientContext>().UseNpgsql(c).Options)
+static DbContext Context(Service s,NpgsqlConnection c,SafePostgresDiagnosticCapture? capture=null)=>s.Key switch {
+    "auth"=>new AuthContext(new DbContextOptionsBuilder<AuthContext>().UseNpgsql(c).AddInterceptors(capture is null ? [] : new[] { new SafePostgresCommandInterceptor(capture) }).Options),
+    "adminarea"=>new AdminContext(new DbContextOptionsBuilder<AdminContext>().UseNpgsql(c).AddInterceptors(capture is null ? [] : new[] { new SafePostgresCommandInterceptor(capture) }).Options),
+    _=>new ClientContext(new DbContextOptionsBuilder<ClientContext>().UseNpgsql(c).AddInterceptors(capture is null ? [] : new[] { new SafePostgresCommandInterceptor(capture) }).Options)
 };
-static async Task VerifyManifest(NpgsqlConnection c,Service s,CancellationToken ct)
+static async Task VerifyManifest(NpgsqlConnection c,Service s,SafePostgresDiagnosticCapture capture,CancellationToken ct)
 {
-    await using var context=Context(s,c);var assembly=context.GetType().Assembly;
+    await using var context=Context(s,c,capture);var assembly=context.GetType().Assembly;
     var type=assembly.GetType("Zeka.PersistenceSecurity.RlsSecurityManifestVerifier",true)!;
     var method=type.GetMethods().Single(m=>m.Name=="VerifyAsync"&&m.GetParameters().Length==3&&m.GetParameters()[1].ParameterType==typeof(Assembly));
     await (Task)method.Invoke(null,[context,assembly,ct])!;
@@ -241,8 +256,9 @@ static async Task FreshLogin(string cs,string role,bool runtime,CancellationToke
 {
     await using var c=new NpgsqlConnection(cs);await c.OpenAsync(ct);
     await using var command=new NpgsqlCommand("select session_user,current_user from pg_roles where rolname=current_user",c);
-    await using var reader=await command.ExecuteReaderAsync(ct);
+    await using var reader=await OwnerSqlExecution.ExecuteReaderAsync(command, ct);
     if(!await reader.ReadAsync(ct)||reader.GetString(0)!=role||reader.GetString(1)!=role)throw new InvalidOperationException("FRESH_LOGIN_IDENTITY_REJECTED");
+    await OwnerSqlExecution.CompleteReaderAsync(reader, ct);
 }
 static async Task FreshRuntime(string cs,Service s,CancellationToken ct)
 {

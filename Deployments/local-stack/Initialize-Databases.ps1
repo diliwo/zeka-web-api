@@ -308,6 +308,7 @@ try {
             Fail 'RUNNER_RESULT_MISSING_REQUIRES_INSPECTION'
         }
         $result = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json -AsHashtable
+        if($result.postgresDiagnostic){$result.postgresDiagnostic=ConvertFrom-SafePostgresDiagnostic ($result.postgresDiagnostic|ConvertTo-Json -Compress);foreach($field in @('message','hint')){if($null-ne$result.postgresDiagnostic[$field]){$result.postgresDiagnostic[$field]=ConvertTo-W3SafeText $result.postgresDiagnostic[$field] -StructuredPostgresField}}}
         $results += $result
         if ($native.Exit -ne 0 -or $result.status -eq 'BLOCKED') {
             $progress.requiresInspection = $true

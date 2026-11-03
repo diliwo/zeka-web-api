@@ -1,4 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><AssemblyName>zeka-local-db-setup</AssemblyName></PropertyGroup>
   <ItemGroup><ProjectReference Include="../Zeka.DbMigrate/Zeka.DbMigrate.csproj" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../Shared/SafePostgresDiagnostics.cs" Link="Diagnostics/SafePostgresDiagnostics.cs" />
+    <Compile Include="../Shared/SafePostgresCommandInterceptor.cs" Link="Diagnostics/SafePostgresCommandInterceptor.cs" />
+  </ItemGroup>
+  <ItemGroup><Compile Include="../Shared/OwnerSqlExecution.cs" Link="Evidence/OwnerSqlExecution.cs" /></ItemGroup>
 </Project>

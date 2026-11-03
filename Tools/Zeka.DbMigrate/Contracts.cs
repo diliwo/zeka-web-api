@@ -1,3 +1,4 @@
+using Zeka.ToolingDiagnostics;
 using System.Reflection;
 using System.Text.Json.Serialization;
 using AdminDeploymentDbContext = AdminAreaManagement.Infrastructure.Persistence.DeploymentDbContext;
@@ -66,7 +67,11 @@ internal sealed record MigrationEvidence(
     [property: JsonPropertyName("phases")] PhaseResults Phases,
     [property: JsonPropertyName("startedAt")] DateTimeOffset StartedAt,
     [property: JsonPropertyName("endedAt")] DateTimeOffset EndedAt,
-    [property: JsonPropertyName("caveats")] string[] Caveats);
+    [property: JsonPropertyName("caveats")] string[] Caveats)
+{
+    [JsonPropertyName("postgresDiagnostic"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SafePostgresDiagnostic? PostgresDiagnostic { get; init; }
+}
 
 internal static class ResultCodes
 {

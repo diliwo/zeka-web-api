@@ -1,3 +1,4 @@
+using Zeka.ToolingDiagnostics;
 using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -186,6 +187,8 @@ internal sealed record OwnerReceipt(
     string AuthorityKind = "OwnerAttestedLocalSynthetic",
     string AuditMarker = "operator-provisioned, no agreements")
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SafePostgresDiagnostic? PostgresDiagnostic { get; init; }
     internal static string Serialize(OwnerReceipt receipt) =>
         JsonSerializer.Serialize(receipt, OwnerProtocol.JsonOptions);
 }

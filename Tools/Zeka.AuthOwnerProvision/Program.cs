@@ -1,3 +1,4 @@
+using Zeka.ToolingDiagnostics;
 using AuthManager.Application.Provisioning;
 using AuthManager.Infrastructure;
 using AuthManager.Infrastructure.Persistence;
@@ -22,6 +23,7 @@ internal static class Program
     {
         string stage = "admission";
         var businessCompleted = false;
+        var postgres = new SafePostgresDiagnosticCapture();
         AssemblyBinding? binding = null;
         AdmittedOwnerInput? admitted = null;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -44,6 +46,10 @@ internal static class Program
             var request = OwnerProtocol.Parse(buffer.ToArray());
             binding = AssemblyBinding.Read();
             admitted = OwnerProtocol.Admit(request, binding);
+            postgres.RegisterConnection(request.AuthRuntimeConnectionString);
+            postgres.RegisterSecret(request.OwnerPassword);
+            foreach (var personal in new[] { request.OwnerAccount, request.NormalizedEmail, request.ExpectedOwnerSid,
+                request.ActualOwnerSid, request.ExpectedOwnerProfile, request.ActualOwnerProfile }) postgres.RegisterSecret(personal);
             stage = "database-identity";
             await RuntimeAdmission.ValidateAsync(admitted, deadline.Token);
 
@@ -54,8 +60,8 @@ internal static class Program
             });
             builder.Logging.ClearProviders();
             builder.Services.AddDbContext<AuthDbContext>(options =>
-                options.UseNpgsql(request.AuthRuntimeConnectionString,
-                    provider => provider.CommandTimeout(30)));
+                options.UseNpgsql(SafePostgresDiagnostic.WithoutErrorDetail(request.AuthRuntimeConnectionString),
+                    provider => provider.CommandTimeout(30)).AddInterceptors(new SafePostgresCommandInterceptor(postgres)));
             builder.Services.AddOnboardingPersistenceFoundations(builder.Configuration);
             builder.ConfigureMicrosoftIdentity();
             builder.Services.AddSingleton(admitted);
@@ -93,6 +99,7 @@ internal static class Program
         }
         catch (Exception error)
         {
+            postgres.Capture(error);
             var (code, exit) = error switch
             {
                 OwnerToolException safe => (safe.Code, 2),
@@ -103,11 +110,11 @@ internal static class Program
                 OrganisationProvisioningException => ("OWNER_PROVISIONING_REJECTED", 4),
                 _ => (stage == "database-identity" ? "RUNTIME_IDENTITY_REJECTED" : "OWNER_PROVISIONING_FAILED", 3)
             };
-            // Never serialize a request, exception, provider diagnostic, connection,
+            // Serialize only the four-field PostgreSQL projection; never a request, exception, connection,
             // password, environment, argument, or inner exception.
             var receipt = new OwnerReceipt("zeka-m1-owner-provision-result/v1", "BLOCKED",
                 code, stage, exit, admitted is null ? null : binding?.SourceCommit,
-                admitted is null ? null : binding?.BinarySha256);
+                admitted is null ? null : binding?.BinarySha256) { PostgresDiagnostic = postgres.Diagnostic };
             return await EmitAsync(output, receipt) ? exit : 6;
         }
     }

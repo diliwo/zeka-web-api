@@ -1,3 +1,5 @@
+using Zeka.OwnerSqlEvidence;
+using Zeka.ToolingDiagnostics;
 using System.Data;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -28,6 +30,8 @@ internal static class RoleRegistry
             || !ValidPassword(migratorPassword) || !ValidPassword(runtimePassword))
             throw Reject("ROLE_REGISTRY_INPUT_REJECTED");
 
+        var diagnostic = new SafePostgresDiagnosticCapture();
+        foreach (var value in savedPasswords.Values) diagnostic.RegisterSecret(value);
         var specs = Kinds.Select(kind => new RoleSpec(
             $"zeka_{service}_{kind}", kind, kind is "migrator" or "runtime",
             JsonSerializer.Serialize(new
@@ -46,7 +50,7 @@ internal static class RoleRegistry
                 "SELECT pg_catalog.pg_try_advisory_xact_lock(@lock)"))
             {
                 command.Parameters.AddWithValue("lock", RegistryLock);
-                if (await command.ExecuteScalarAsync(ct).ConfigureAwait(false) is not true)
+                if (await OwnerSqlExecution.ExecuteScalarAsync(command, ct).ConfigureAwait(false) is not true)
                     throw Reject("ROLE_REGISTRY_LOCK_UNAVAILABLE");
             }
 
@@ -65,10 +69,10 @@ internal static class RoleRegistry
                     "NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION " +
                     "CONNECTION LIMIT -1" + credential + ";";
                 await using (var command = Command(admin, transaction, sql))
-                    await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    await OwnerSqlExecution.ExecuteNonQueryAsync(command, ct).ConfigureAwait(false);
                 await using (var command = Command(admin, transaction,
                     $"COMMENT ON ROLE {Identifier(spec.Name)} IS {Literal(spec.Comment)};"))
-                    await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    await OwnerSqlExecution.ExecuteNonQueryAsync(command, ct).ConfigureAwait(false);
             }
 
             if ((await InspectAsync(admin, transaction, specs, ct).ConfigureAwait(false)).Count != 0)
@@ -78,11 +82,12 @@ internal static class RoleRegistry
         }
         catch (RoleRegistryFailure) { throw; }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch
+        catch (Exception error)
         {
+            diagnostic.Capture(error);
             // SQL used during creation contains a saved credential. Do not preserve
             // provider messages, command text or inner exceptions in a public error.
-            throw Reject("ROLE_REGISTRY_OPERATION_REJECTED");
+            throw new RoleRegistryFailure("ROLE_REGISTRY_OPERATION_REJECTED") { PostgresDiagnostic = diagnostic.Diagnostic };
         }
     }
 
@@ -104,7 +109,7 @@ internal static class RoleRegistry
         var observed = new HashSet<string>(StringComparer.Ordinal);
         await using var command = Command(admin, transaction, sql);
         command.Parameters.AddWithValue("roles", specs.Select(spec => spec.Name).ToArray());
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await using var reader = await OwnerSqlExecution.ExecuteReaderAsync(command, ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var name = reader.GetString(0);
@@ -118,6 +123,7 @@ internal static class RoleRegistry
                 || !reader.GetBoolean(12))
                 throw Reject("ROLE_REGISTRY_FOREIGN_OR_DRIFTED_ROLE");
         }
+        await OwnerSqlExecution.CompleteReaderAsync(reader, ct).ConfigureAwait(false);
         return specs.Where(spec => !observed.Contains(spec.Name)).ToList();
     }
 
@@ -136,6 +142,9 @@ internal static class RoleRegistry
 
     private static RoleRegistryFailure Reject(string code) => new(code);
 
-    private sealed class RoleRegistryFailure(string code) : InvalidOperationException(code);
+    private sealed class RoleRegistryFailure(string code) : InvalidOperationException(code), ISafePostgresDiagnosticFailure
+{
+    public SafePostgresDiagnostic? PostgresDiagnostic { get; init; }
+}
     private sealed record RoleSpec(string Name, string Kind, bool Login, string Comment);
 }

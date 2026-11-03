@@ -1,3 +1,5 @@
+using Zeka.OwnerSqlEvidence;
+using Zeka.ToolingDiagnostics;
 using System.Text.Json;
 using Npgsql;
 using Zeka.PersistenceSecurity;
@@ -12,8 +14,8 @@ internal static class RuntimeAdmission
         using var individual = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         individual.CancelAfter(TimeSpan.FromSeconds(30));
         await new RuntimeDatabaseIdentityValidator(
-            input.AuthRuntimeConnectionString, "zeka_auth_runtime").StartAsync(individual.Token);
-        await using var connection = new NpgsqlConnection(input.AuthRuntimeConnectionString);
+            SafePostgresDiagnostic.WithoutErrorDetail(input.AuthRuntimeConnectionString), "zeka_auth_runtime").StartAsync(individual.Token);
+        await using var connection = new NpgsqlConnection(SafePostgresDiagnostic.WithoutErrorDetail(input.AuthRuntimeConnectionString));
         await connection.OpenAsync(individual.Token);
         await using var command = connection.CreateCommand();
         command.CommandTimeout = 30;
@@ -24,7 +26,7 @@ internal static class RuntimeAdmission
             from pg_catalog.pg_roles r cross join pg_catalog.pg_database d
             where r.rolname=current_user and d.datname=current_database()
             """;
-        await using var reader = await command.ExecuteReaderAsync(individual.Token);
+        await using var reader = await OwnerSqlExecution.ExecuteReaderAsync(command, individual.Token);
         if (!await reader.ReadAsync(individual.Token) || reader.GetString(0) != input.DatabaseName
             || reader.GetString(1) != "zeka_auth_runtime" || reader.GetString(2) != "zeka_auth_runtime"
             || reader.IsDBNull(3) || reader.IsDBNull(4))
@@ -32,6 +34,7 @@ internal static class RuntimeAdmission
         ValidateMarkers(input, reader.GetString(3), reader.GetString(4));
         if (await reader.ReadAsync(individual.Token))
             throw new OwnerToolException("RUNTIME_INITIALIZATION_REJECTED");
+        await OwnerSqlExecution.CompleteReaderAsync(reader, individual.Token);
     }
 
     internal static void ValidateMarkers(OwnerInput input, string roleComment, string databaseComment)

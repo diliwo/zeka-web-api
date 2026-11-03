@@ -1,3 +1,4 @@
+. (Join-Path $PSScriptRoot 'SafePostgresDiagnostics.ps1')
 # Narrow native diagnostics for the owner-local M1 database launchers.
 # Secret values stay in memory; no command line or environment value inventory is persisted.
 $script:W3Secrets = [Collections.Generic.List[string]]::new()
@@ -40,9 +41,9 @@ function Register-W3Secret {
 }
 
 function ConvertTo-W3SafeText {
-    param([AllowNull()][AllowEmptyString()][string]$Text)
+    param([AllowNull()][AllowEmptyString()][string]$Text,[switch]$StructuredPostgresField)
     if ($null -eq $Text) { return '' }
-    $safe = $Text
+    $safe = if(!$StructuredPostgresField-and(Test-PostgresDiagnosticText $Text)){(ConvertFrom-LegacyPsqlDiagnostic $Text|ConvertTo-Json -Depth 6 -Compress)}else{$Text}
     foreach ($secret in $script:W3Secrets) {
         $safe = $safe.Replace($secret,'[REDACTED]',[StringComparison]::Ordinal)
     }
@@ -54,6 +55,11 @@ function ConvertTo-W3SafeText {
     return $safe
 }
 
+function ConvertTo-W3SafeNativeError([string]$Text,[string]$Exe,[string[]]$ArgumentList) {
+    $postgres=([IO.Path]::GetFileNameWithoutExtension($Exe)-ceq'psql')-or@($ArgumentList|Where-Object {$_-cmatch'(?:^|/)psql$'}).Count-gt0
+    if($postgres-and$Text){return ConvertTo-W3SafeText (ConvertFrom-LegacyPsqlDiagnostic $Text|ConvertTo-Json -Depth 6 -Compress)}
+    return ConvertTo-W3SafeText $Text
+}
 function Write-W3DiagnosticRecord {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Record)
     if (!$script:W3DiagnosticContext) {
@@ -65,7 +71,7 @@ function Write-W3DiagnosticRecord {
         fixtureId=$script:W3DiagnosticContext.FixtureId
         engineId=$script:W3DiagnosticContext.EngineId
     }
-    foreach ($key in $Record.Keys) { $base[$key] = $Record[$key] }
+    foreach ($key in $Record.Keys) { $base[$key] = if($key-cin@('stdout','stderr')-and$Record[$key]-is[string]){ConvertTo-W3SafeText $Record[$key]}else{$Record[$key]} }
     $json = $base | ConvertTo-Json -Depth 12 -Compress
     [IO.File]::AppendAllText($script:W3DiagnosticContext.Journal,$json+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
 }
@@ -195,7 +201,7 @@ function Invoke-W3Native {
             $closed=$process.WaitForExit(5000)
             $record.decision='native_timeout'
             if ($out.IsCompletedSuccessfully) { $record.stdout=ConvertTo-W3SafeText $out.GetAwaiter().GetResult() }
-            if ($err.IsCompletedSuccessfully) { $record.stderr=ConvertTo-W3SafeText $err.GetAwaiter().GetResult() }
+            if ($err.IsCompletedSuccessfully) { $record.stderr=ConvertTo-W3SafeNativeError $err.GetAwaiter().GetResult() $Exe $ArgumentList }
             $record.stdoutComplete=$out.IsCompletedSuccessfully; $record.stderrComplete=$err.IsCompletedSuccessfully
             if ($closed) { $record.nativeExit=$process.ExitCode }
             Write-W3DiagnosticRecord $record
@@ -205,13 +211,13 @@ function Invoke-W3Native {
         $exit=$process.ExitCode
         $record.nativeExit=$exit
         $record.stdout=ConvertTo-W3SafeText $rawOut
-        $record.stderr=ConvertTo-W3SafeText $rawError
+        $record.stderr=ConvertTo-W3SafeNativeError $rawError $Exe $ArgumentList
         $record.decision=if($exit -eq 0){'native_completed'}else{'native_nonzero_exit'}
         Write-W3DiagnosticRecord $record
         if ($exit -ne 0 -and !$AllowFailure) {
             throw [InvalidOperationException]::new('NATIVE_OPERATION_REJECTED')
         }
-        return @{Exit=$exit;Out=$rawOut;Error=$rawError}
+        return @{Exit=$exit;Out=$rawOut;Error=(ConvertTo-W3SafeNativeError $rawError $Exe $ArgumentList)}
     } finally { $process.Dispose() }
 }
 

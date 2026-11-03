@@ -1,3 +1,5 @@
+using Zeka.OwnerSqlEvidence;
+using Zeka.ToolingDiagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -29,6 +31,7 @@ internal static class GuardChecks
         string? failureStage = null;
         string? exceptionType = null;
         string? sqlState = null;
+        SafePostgresDiagnostic? postgresDiagnostic = null;
         var admitted = false;
         NpgsqlConnection? admin = null;
         string? fixture = null;
@@ -39,7 +42,8 @@ internal static class GuardChecks
             failedCase = activeCase;
             failureStage = activeStage;
             exceptionType = error.GetType().Name;
-            sqlState = (error as PostgresException)?.SqlState;
+            postgresDiagnostic = SafePostgresDiagnostic.From(error);
+            sqlState = postgresDiagnostic?.SqlState;
         }
         try
         {
@@ -201,7 +205,7 @@ internal static class GuardChecks
             failedCase,
             stage = failureStage,
             exceptionType,
-            sqlState,
+            sqlState, postgresDiagnostic,
             cases,
             scope = "Dedicated marked PostgreSQL fixture; fixed auth roles only; no application databases.",
             limit = "Successful committed role/comment creation and rejection atomicity were checked; " +
@@ -237,7 +241,7 @@ internal static class GuardChecks
         await using var command = Command(admin, sql);
         command.Parameters.AddWithValue("marker", marker);
         command.Parameters.AddWithValue("fresh", requireFresh);
-        Require(await command.ExecuteScalarAsync(ct) is true, "GUARD_FIXTURE_IDENTITY_REJECTED");
+        Require(await OwnerSqlExecution.ExecuteScalarAsync(command, ct) is true, "GUARD_FIXTURE_IDENTITY_REJECTED");
     }
 
     private static async Task AssertCommentsAsync(NpgsqlConnection admin, string initializationId,
@@ -247,7 +251,7 @@ internal static class GuardChecks
             "SELECT rolname,pg_catalog.shobj_description(oid,'pg_authid') FROM pg_catalog.pg_roles " +
             "WHERE rolname=ANY(@roles)");
         command.Parameters.AddWithValue("roles", Roles);
-        await using var reader = await command.ExecuteReaderAsync(ct);
+        await using var reader = await OwnerSqlExecution.ExecuteReaderAsync(command, ct);
         var count = 0;
         while (await reader.ReadAsync(ct))
         {
@@ -258,6 +262,7 @@ internal static class GuardChecks
             count++;
         }
         Require(count == 4, "GUARD_COMMENT_COUNT_REJECTED");
+        await OwnerSqlExecution.CompleteReaderAsync(reader, ct);
     }
 
     internal static async Task<List<RoleSnapshot>> SnapshotAsync(NpgsqlConnection admin, CancellationToken ct)
@@ -285,13 +290,14 @@ internal static class GuardChecks
             """;
         await using var command = Command(admin, sql);
         command.Parameters.AddWithValue("roles", Roles);
-        await using var reader = await command.ExecuteReaderAsync(ct);
+        await using var reader = await OwnerSqlExecution.ExecuteReaderAsync(command, ct);
         var snapshot = new List<RoleSnapshot>();
         while (await reader.ReadAsync(ct))
         {
             Require(reader.GetBoolean(3) && reader.GetBoolean(4), "GUARD_ROLE_SETTINGS_REJECTED");
             snapshot.Add(new RoleSnapshot(reader.GetString(0), reader.GetString(1), reader.GetBoolean(2)));
         }
+        await OwnerSqlExecution.CompleteReaderAsync(reader, ct);
         return snapshot;
     }
 
@@ -352,7 +358,7 @@ internal static class GuardChecks
             await connection.OpenAsync(ct);
             await using var command = Command(connection, "SELECT session_user=current_user AND current_user=@role");
             command.Parameters.AddWithValue("role", "zeka_auth_" + kind);
-            Require(await command.ExecuteScalarAsync(ct) is true && shouldPass, "GUARD_PASSWORD_AUTH_REJECTED");
+            Require(await OwnerSqlExecution.ExecuteScalarAsync(command, ct) is true && shouldPass, "GUARD_PASSWORD_AUTH_REJECTED");
         }
         catch (PostgresException error) when (error.SqlState == "28P01" && !shouldPass) { }
     }
@@ -363,10 +369,11 @@ internal static class GuardChecks
             await ExecuteAsync(admin, "DROP ROLE IF EXISTS " + new NpgsqlCommandBuilder().QuoteIdentifier(role), ct);
     }
 
-    private static async Task ExecuteAsync(NpgsqlConnection admin, string sql, CancellationToken ct)
+    private static async Task ExecuteAsync(NpgsqlConnection admin, string sql, CancellationToken ct,
+        [CallerFilePath] string producerFile = "", [CallerLineNumber] int producerLine = 0)
     {
         await using var command = Command(admin, sql);
-        await command.ExecuteNonQueryAsync(ct);
+        await OwnerSqlExecution.ExecuteNonQueryAsync(command, ct, producerFile, producerLine);
     }
 
     private static string Connection(string user, string password) => new NpgsqlConnectionStringBuilder
