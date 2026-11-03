@@ -14,7 +14,7 @@
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.14.0" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../Zeka.DbMigrate/Zeka.DbMigrate.csproj" />
+    <ProjectReference Include="../Zeka.DbMigrate/Zeka.DbMigrate.csproj" Aliases="global,DbMigrator" />
     <ProjectReference Include="../Zeka.LocalStack.DatabaseSetup/Zeka.LocalStack.DatabaseSetup.csproj" />
   </ItemGroup>
   <ItemGroup>

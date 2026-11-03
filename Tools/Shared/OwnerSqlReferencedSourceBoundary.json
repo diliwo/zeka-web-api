@@ -1,0 +1,118 @@
+{
+  "schema": "zeka-owner-sql-referenced-source-boundary/v1",
+  "reviewPolicy": "Every referenced compiled source/project file-set or byte change requires explicit source review and manifest acceptance; no automatic enrollment.",
+  "baseRevision": "b0c5b91959bd144e58be14fb3fc728e21d1d6069",
+  "sourceGraphSha256": "21e0872b733571ba5c4afaf4d8da57c6202989aeb258618559443ef0ad834e41",
+  "runtimeOnlySources": {
+    "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/Closures/AdminAreaClosureGate.cs": {
+      "sha256": "31feff4756e455cd900c14201868fd55d18850849f71a9dc872a6039acc85c9d",
+      "classification": "service-runtime-only",
+      "reason": "Existing AdminArea runtime context, tenant-attempt, lifecycle, export, recovery or hosted-health SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    },
+    "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/Closures/AdminAreaClosureRecoveryCapability.cs": {
+      "sha256": "fc129c03a3d7a4e21cff271d233473bfd69de5e7e57e3313d56b451fd75aa45e",
+      "classification": "service-runtime-only",
+      "reason": "Existing AdminArea runtime context, tenant-attempt, lifecycle, export, recovery or hosted-health SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    },
+    "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/Exports/AdminAreaExportParticipant.cs": {
+      "sha256": "bd48b6aa5dc1ac846e1da79fd79c08b5d6663d4c390f7a4395ffecb259350dab",
+      "classification": "service-runtime-only",
+      "reason": "Existing AdminArea runtime context, tenant-attempt, lifecycle, export, recovery or hosted-health SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    },
+    "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/Persistence/DatabaseConnectivityHealthCheck.cs": {
+      "sha256": "a8c50b14a9cd1966d06bd5b34f99ace606fa5eb1333525db04f3237d2ece9cdf",
+      "classification": "service-runtime-only",
+      "reason": "Existing AdminArea runtime context, tenant-attempt, lifecycle, export, recovery or hosted-health SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    },
+    "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/Persistence/TenantTransactionAttempt.cs": {
+      "sha256": "48f3960192c5a155674dc0bad34aced65ebe18d81aa8e98c2a7344f54040a836",
+      "classification": "service-runtime-only",
+      "reason": "Existing AdminArea runtime context, tenant-attempt, lifecycle, export, recovery or hosted-health SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Identity/BrowserSessions.cs": {
+      "sha256": "718bcf06a6c1d829253b28ec745b74f4f6cc3d907b50891a2d15d2747d18f5dd",
+      "classification": "service-runtime-only",
+      "reason": "Browser sign-in, refresh and session SQL is outside the current owner provisioning flow; owner command does not register or resolve browser sessions."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Lifecycle/AuthClosureParticipant.cs": {
+      "sha256": "28149dc80673ab24d1bb19786f577d16307fa9aa0219e2889e021c8cbc8cba9b",
+      "classification": "service-runtime-only",
+      "reason": "Existing explicitly invoked Auth lifecycle participant or lifecycle store SQL is outside the current owner provisioning flow; these services are not resolved by its admitted provisioning dependency graph."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Lifecycle/AuthClosureRecoveryCapability.cs": {
+      "sha256": "771733b623fc14123f921bb3c0590250adef057321e2da15fe8b44b89b88b69d",
+      "classification": "service-runtime-only",
+      "reason": "Existing explicitly invoked Auth lifecycle participant or lifecycle store SQL is outside the current owner provisioning flow; these services are not resolved by its admitted provisioning dependency graph."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Lifecycle/AuthExportParticipant.cs": {
+      "sha256": "49b7ea54696124d08ea58d926b64a635900e0e170b6157408cc117e59dfdbd75",
+      "classification": "service-runtime-only",
+      "reason": "Existing explicitly invoked Auth lifecycle participant or lifecycle store SQL is outside the current owner provisioning flow; these services are not resolved by its admitted provisioning dependency graph."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Outbox/OutboxDispatcher.cs": {
+      "sha256": "f19ee847d2ab34d38336430d771cdaf1f3c1c9828da0ef10537f69cd69906030",
+      "classification": "service-runtime-only",
+      "reason": "Dispatcher is registered but never resolved or started by the owner command; provisioning uses IOutboxWriter.EnqueueAsync only, not dispatch/publication SQL."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Persistence/Lifecycle/LifecycleClosureStore.cs": {
+      "sha256": "dd01dcb7046d4f02ea4d1bfcfa6e47f4cee2a7a8cfc04fd54ea865a02b88c609",
+      "classification": "service-runtime-only",
+      "reason": "Existing explicitly invoked Auth lifecycle participant or lifecycle store SQL is outside the current owner provisioning flow; these services are not resolved by its admitted provisioning dependency graph."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Persistence/Lifecycle/LifecycleDispositionStore.cs": {
+      "sha256": "f70464d6220b71e9fff8cfc00574238f9e8f097e01a4773c819aa0a8d2c2f8b7",
+      "classification": "service-runtime-only",
+      "reason": "Existing explicitly invoked Auth lifecycle participant or lifecycle store SQL is outside the current owner provisioning flow; these services are not resolved by its admitted provisioning dependency graph."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Persistence/Lifecycle/LifecycleExportStore.cs": {
+      "sha256": "313b914669482d6739e86af63c726f1dc34e2f172f93945d21ba1fda17c70b46",
+      "classification": "service-runtime-only",
+      "reason": "Existing explicitly invoked Auth lifecycle participant or lifecycle store SQL is outside the current owner provisioning flow; these services are not resolved by its admitted provisioning dependency graph."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Persistence/Lifecycle/LifecyclePersistence.cs": {
+      "sha256": "0149f26f11985c44b237a6f772e43b3110714827d4febec6cac5e68d07b927cb",
+      "classification": "service-runtime-only",
+      "reason": "Mixed source: LifecycleCommandGuard is installed for owner context but executes no SQL; only the separate LifecycleAdmissionStore initializer contains runtime SQL, outside the current owner command flow."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Persistence/Lifecycle/LifecyclePurgeStore.cs": {
+      "sha256": "711df501f2bfcb8fe84fd7750187345e8cbb3dbd8a1a2c3d34849ac0fd64d45d",
+      "classification": "service-runtime-only",
+      "reason": "Existing explicitly invoked Auth lifecycle participant or lifecycle store SQL is outside the current owner provisioning flow; these services are not resolved by its admitted provisioning dependency graph."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/Persistence/Lifecycle/LifecycleVerificationStore.cs": {
+      "sha256": "7c8ca16d9c9f1729b496e729e3313b4280f4ccc835f9cdc7cf274425f9775237",
+      "classification": "service-runtime-only",
+      "reason": "Existing explicitly invoked Auth lifecycle participant or lifecycle store SQL is outside the current owner provisioning flow; these services are not resolved by its admitted provisioning dependency graph."
+    },
+    "Services/AuthManager/AuthManager.Infrastructure/TimeZones/ConfigureTimeZoneCore.cs": {
+      "sha256": "07b2f437eed6cba5df98693b9ae448df520b06330ba766a696535294eccc5ee3",
+      "classification": "service-runtime-only",
+      "reason": "Disabled, unregistered privileged time-zone command SQL is outside the current owner provisioning flow."
+    },
+    "Services/ClientManagement/Client.Infrastructure/Persistence/ClientParentLock.cs": {
+      "sha256": "1d4cba466af30cb9c1eb3a572c6fa2f50ab1d6c70b23c4efcb3a5a29ed1c995d",
+      "classification": "service-runtime-only",
+      "reason": "Existing Client runtime context, parent-lock, tenant-attempt or explicit lifecycle participant SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    },
+    "Services/ClientManagement/Client.Infrastructure/Persistence/Lifecycle/ClientClosureRecoveryCapability.cs": {
+      "sha256": "21937e4ee608b97fc53a410d2631a15f41d476a173659d4b130e0e77470ff29f",
+      "classification": "service-runtime-only",
+      "reason": "Existing Client runtime context, parent-lock, tenant-attempt or explicit lifecycle participant SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    },
+    "Services/ClientManagement/Client.Infrastructure/Persistence/Lifecycle/ClientOrganisationClosureParticipant.cs": {
+      "sha256": "fae7f5bf73ba3ac6b7d154db5f8ed150135cf57be0fb53b906cefc7f3b154797",
+      "classification": "service-runtime-only",
+      "reason": "Existing Client runtime context, parent-lock, tenant-attempt or explicit lifecycle participant SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    },
+    "Services/ClientManagement/Client.Infrastructure/Persistence/Lifecycle/ClientOrganisationExportParticipant.cs": {
+      "sha256": "b494301e576ec1b6b3bafb6953d66db39c4b27e09d91f361f29afbe78b30b480",
+      "classification": "service-runtime-only",
+      "reason": "Existing Client runtime context, parent-lock, tenant-attempt or explicit lifecycle participant SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    },
+    "Services/ClientManagement/Client.Infrastructure/Persistence/TenantTransactionAttempt.cs": {
+      "sha256": "cbae1165d005c3ab19ee844fcf74d0389034baa8499774dd72610ceb9ab7e2fc",
+      "classification": "service-runtime-only",
+      "reason": "Existing Client runtime context, parent-lock, tenant-attempt or explicit lifecycle participant SQL outside the current owner tooling flow; migrator uses its separate deployment context."
+    }
+  }
+}

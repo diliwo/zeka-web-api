@@ -131,7 +131,7 @@ internal static class MigrationEngine
                 }
                 else try
                     {
-                        await VerifyManifestAsync(context, options.Service.MigrationAssembly, cancellationToken);
+                        await CapturePostgresFailureAsync(() => VerifyManifestAsync(context, options.Service.MigrationAssembly, cancellationToken), postgres);
                         manifest = "passed";
                         resultCode = "SUCCESS";
                         exitCode = ResultCodes.Success;
@@ -158,11 +158,14 @@ internal static class MigrationEngine
             try
             {
                 migration = "started";
-                await context.GetService<IMigrator>().MigrateAsync(target, cancellationToken);
-                var observed = (await context.Database.GetAppliedMigrationsAsync(cancellationToken)).ToArray();
-                final = observed.LastOrDefault();
-                if (final != target)
-                    throw new InvalidOperationException("Migration target was not observed after EF returned.");
+                await CapturePostgresFailureAsync(async () =>
+                {
+                    await context.GetService<IMigrator>().MigrateAsync(target, cancellationToken);
+                    var observed = (await context.Database.GetAppliedMigrationsAsync(cancellationToken)).ToArray();
+                    final = observed.LastOrDefault();
+                    if (final != target)
+                        throw new InvalidOperationException("Migration target was not observed after EF returned.");
+                }, postgres);
                 migration = "passed";
             }
             catch
@@ -180,7 +183,7 @@ internal static class MigrationEngine
             {
                 try
                 {
-                    await VerifyManifestAsync(context, options.Service.MigrationAssembly, cancellationToken);
+                    await CapturePostgresFailureAsync(() => VerifyManifestAsync(context, options.Service.MigrationAssembly, cancellationToken), postgres);
                     manifest = "passed";
                 }
                 catch
@@ -240,6 +243,18 @@ internal static class MigrationEngine
                 currentUser, restricted, membership, ownerAssumed),
             new PhaseResults(new PhaseResult(migration), new PhaseResult("not_started"), new PhaseResult(manifest),
                 new PhaseResult("untested")), startedAt, DateTimeOffset.UtcNow, caveats.ToArray()) { PostgresDiagnostic = postgres.Diagnostic }, exitCode);
+    }
+
+    // Direct manifest commands do not pass through EF's interceptor. Capture the
+    // original failure here, before an outer handler returns or starts recovery.
+    internal static async Task CapturePostgresFailureAsync(Func<Task> operation, SafePostgresDiagnosticCapture postgres)
+    {
+        try { await operation(); }
+        catch (Exception error)
+        {
+            postgres.Capture(error);
+            throw;
+        }
     }
 
     private static DbContext CreateContext(ServiceDescriptor descriptor, NpgsqlConnection connection, SafePostgresDiagnosticCapture? capture = null) => descriptor.Key switch

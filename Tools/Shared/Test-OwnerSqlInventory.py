@@ -196,4 +196,315 @@ private static async Task RowsAsync(DbConnection c,string sql,CancellationToken 
         for extra in (None,{}, {"producerId":"unknown"}):
             with self.subTest(extra=extra): self.assertEqual(module.compare(inv,[receipt,extra])["status"],"FAIL")
 
+class DiscoveryClosureTests(unittest.TestCase):
+    def source(self, relative="Tools/Owner/Owner.csproj", content='<Project Sdk="Microsoft.NET.Sdk" />'):
+        fixture = tempfile.TemporaryDirectory()
+        self.addCleanup(fixture.cleanup)
+        root = Path(fixture.name)
+        self.write(root, relative, content)
+        return root, root/relative
+
+    def write(self, root, relative, content):
+        path = root/relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def closure(self, root, projects):
+        # Fixture-only scanner stub: all source bodies are synthetic test inputs.
+        # The production entry point still performs its real scan before every read.
+        with mock.patch.object(module, "public_bytes", side_effect=lambda p:p.read_bytes()):
+            return module.discover_project_sources(root, projects)
+
+    def test_chief_unqualified_static_and_generic_query_bypasses_fail_closed(self):
+        for call in ('await ExecuteSqlRawAsync(context.Database, "SELECT 1");',
+                     'await context.Database.SqlQueryRaw<int>("SELECT 1").ToListAsync(ct);'):
+            with self.subTest(call=call), self.assertRaisesRegex(module.InventoryError, "Unsupported runtime EF SQL"):
+                module.csharp_producers("Tools/Owner/Program.cs", call)
+
+    def test_ef_query_and_execute_forms_are_never_empty_or_registered(self):
+        for call in ('context.Database.ExecuteSqlRaw("SELECT 1")',
+                     'RelationalDatabaseFacadeExtensions.ExecuteSqlRawAsync(context.Database, "SELECT 1")',
+                     'context.Database.SqlQuery<int>($"SELECT {value}")',
+                     'context.Entities.FromSqlRaw("SELECT 1")',
+                     'context.Entities.FromSqlInterpolated($"SELECT {value}")',
+                     'context.Entities.ExecuteUpdateAsync()',
+                     'context.Entities.ExecuteDelete()',
+                     'var query = context.Database.SqlQueryRaw<int>;',
+                     'using static Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions; ExecuteSql($"SELECT {value}")'):
+            with self.subTest(call=call), self.assertRaises(module.InventoryError):
+                module.csharp_producers("Tools/Owner/Program.cs", call)
+
+    def test_native_method_group_and_unqualified_references_fail_closed(self):
+        for call in ('var execute = command.ExecuteNonQueryAsync;',
+                     'Func<CancellationToken,Task<DbDataReader>> run = command.ExecuteReaderAsync;',
+                     'var execute = ExecuteScalarAsync;', 'nameof(command.ExecuteNonQueryAsync)',
+                     'var execute = command.ExecuteDbDataReaderAsync;'):
+            with self.subTest(call=call), self.assertRaises(module.InventoryError):
+                module.csharp_producers("Tools/Owner/Program.cs", call)
+
+    def test_escaped_identifier_cannot_hide_executable_api(self):
+        for call in (r'ExecuteSql\u0052awAsync(context.Database, "SELECT 1")',
+                     r'command.ExecuteNon\U00000051ueryAsync(ct)'):
+            with self.subTest(call=call), self.assertRaises(module.InventoryError):
+                module.csharp_producers("Tools/Owner/Program.cs", call)
+
+    def test_unicode_format_character_cannot_hide_ef_identifier(self):
+        call = 'context.Database.Exec' + chr(0x200c) + 'uteSqlRawAsync("SELECT 1")'
+        with self.assertRaises(module.InventoryError):
+            module.csharp_producers("Tools/Owner/Program.cs", call)
+
+    def test_transitive_default_compiled_helper_cannot_escape_discovery(self):
+        root, project = self.source(content='<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../Libraries/First/First.csproj" /></ItemGroup></Project>')
+        self.write(root, "Libraries/First/First.csproj", '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Second/Second.csproj" /></ItemGroup></Project>')
+        self.write(root, "Libraries/Second/Second.csproj", '<Project Sdk="Microsoft.NET.Sdk" />')
+        helper = self.write(root, "Libraries/Second/Hidden.cs", 'await ExecuteSqlRawAsync(context.Database,"SELECT 1");')
+        projects, files = self.closure(root, [project])
+        self.assertEqual(len(projects), 3)
+        self.assertIn(helper, files)
+        with self.assertRaises(module.InventoryError):
+            module.csharp_producers(helper.relative_to(root).as_posix(), helper.read_text(encoding="utf-8"))
+
+    def test_new_transitive_instrumented_helper_registers_its_own_producer(self):
+        root, project = self.source(content='<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../Libraries/Helper/Helper.csproj" /></ItemGroup></Project>')
+        self.write(root, "Libraries/Helper/Helper.csproj", '<Project Sdk="Microsoft.NET.Sdk" />')
+        helper = self.write(root, "Libraries/Helper/Default.cs", 'await OwnerSqlExecution.ExecuteScalarAsync(command,ct);')
+        _, files = self.closure(root, [project])
+        producers = [item for path in files for item in module.csharp_producers(path.relative_to(root).as_posix(), path.read_text(encoding="utf-8"))]
+        self.assertEqual([x["producerId"] for x in producers], ["Libraries/Helper/Default.cs:L1"])
+        # A later default-compiled helper is included without a hand-maintained EXTRA entry.
+        added = self.write(root, "Libraries/Helper/Added.cs", 'command.ExecuteNonQueryAsync(ct);')
+        _, files = self.closure(root, [project])
+        self.assertIn(added, files)
+        with self.assertRaises(module.InventoryError):
+            module.csharp_producers(added.relative_to(root).as_posix(), added.read_text(encoding="utf-8"))
+
+    def test_literal_linked_file_and_project_cycle_are_closed(self):
+        root, project = self.source(content='<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><Compile Include="../../Libraries/Shared.cs" /><ProjectReference Include="../../Libraries/Helper.csproj" /></ItemGroup></Project>')
+        shared = self.write(root, "Libraries/Shared.cs", "class Shared {}")
+        self.write(root, "Libraries/Helper.csproj", '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Tools/Owner/Owner.csproj" /></ItemGroup></Project>')
+        projects, files = self.closure(root, [project])
+        self.assertEqual(len(projects), 2)
+        self.assertIn(shared, files)
+
+    def test_source_scope_changes_fail_closed_instead_of_guessing(self):
+        bodies = ('<Import Project="extra.targets" />',
+                  '<Target Name="Inject"><ItemGroup><Compile Include="Hidden.cs" /></ItemGroup></Target>',
+                  '<ItemGroup Condition="true"><ProjectReference Include="Helper.csproj" /></ItemGroup>',
+                  '<ItemGroup><Compile Include="$(Hidden)" /></ItemGroup>',
+                  '<ItemGroup><Compile Include="../**/*.cs" /></ItemGroup>',
+                  '<ItemGroup><Compile Include="Hidden.cs" Condition="true" /></ItemGroup>',
+                  '<PropertyGroup><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>',
+                  '<ItemGroup><Compile Remove="$(Hidden)" /></ItemGroup>',
+                  '<ItemGroup><Compile Update="Hidden.cs" /></ItemGroup>',
+                  '<ItemGroup><Reference Include="Hidden"><HintPath>Hidden.dll</HintPath></Reference></ItemGroup>')
+        for body in bodies:
+            with self.subTest(body=body):
+                root, project = self.source(content='<Project Sdk="Microsoft.NET.Sdk">'+body+'</Project>')
+                with self.assertRaises(module.InventoryError): self.closure(root, [project])
+
+    def test_build_injection_properties_fail_closed(self):
+        for prop in ("CustomBeforeMicrosoftCommonTargets", "CustomAfterMicrosoftCommonTargets",
+                     "DirectoryBuildPropsPath", "DirectoryBuildTargetsPath", "MSBuildProjectExtensionsPath", "CoreCompileDependsOn"):
+            with self.subTest(prop=prop):
+                root, project = self.source(content='<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><'+prop+'>Hidden.targets</'+prop+'></PropertyGroup></Project>')
+                with self.assertRaises(module.InventoryError): self.closure(root, [project])
+
+    def test_directory_build_composition_fails_closed(self):
+        for name in ("Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props"):
+            with self.subTest(name=name):
+                root, project = self.source()
+                self.write(root, name, '<Project />')
+                with self.assertRaises(module.InventoryError): self.closure(root, [project])
+
+    def test_missing_or_outside_project_source_fails_closed(self):
+        for include in ("Missing.csproj", "../../../Outside.csproj"):
+            with self.subTest(include=include):
+                root, project = self.source(content='<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="'+include+'" /></ItemGroup></Project>')
+                with self.assertRaises(module.InventoryError): self.closure(root, [project])
+
+    def test_current_literal_removed_subtree_is_not_default_compiled(self):
+        root, project = self.source(content='<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><Compile Remove="Legacy/**" /></ItemGroup></Project>')
+        active = self.write(root, "Tools/Owner/Active.cs", "class Active {}")
+        self.write(root, "Tools/Owner/Legacy/Removed.cs", "class Legacy {}")
+        self.write(root, "Tools/Owner/obj/Generated.cs", "class Generated {}")
+        self.write(root, "Tools/Owner/bin/Output.cs", "class Output {}")
+        _, files = self.closure(root, [project])
+        self.assertEqual(files, [active])
+
+    def test_s5855_quote_masks_preserve_prefixes_delimiters_and_following_call(self):
+        literals = ('""', r'"ordinary \" quote"', '@"verbatim "" quote"',
+                    '$"ordinary {value}"', '$@"verbatim {value} "" quote"',
+                    '@$"verbatim {value} "" quote"', "'x'", "'\\''",
+                    '"""raw " inside"""', '$"""raw {value}"""',
+                    '$$"""raw {{value}}"""', '""""raw triple """ inside""""')
+        for literal in literals:
+            with self.subTest(literal=literal):
+                source = 'var value = ' + literal + ';\nawait OwnerSqlExecution.ExecuteScalarAsync(command,ct);'
+                masked = module.code_mask(source)
+                self.assertEqual(len(masked), len(source))
+                self.assertEqual(masked.count('\n'), source.count('\n'))
+                self.assertEqual([x["producerId"] for x in module.csharp_producers("a.cs", source)], ["a.cs:L2"])
+
+    def test_ef_execution_in_interpolation_fails_closed(self):
+        for source in ('$"{context.Database.SqlQueryRaw<int>(\"SELECT 1\")}"',
+                       '$"{ExecuteSqlRawAsync(context.Database,\"SELECT 1\")}"'):
+            with self.subTest(source=source), self.assertRaises(module.InventoryError): module.code_mask(source)
+
+class FinalSourceSetTests(unittest.TestCase):
+    def fixture(self):
+        fixture = tempfile.TemporaryDirectory()
+        self.addCleanup(fixture.cleanup)
+        root = Path(fixture.name)
+        files = {"Tools/Owner/Owner.csproj": '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../Libraries/Helper/Helper.csproj" /></ItemGroup></Project>',
+                 "Tools/Owner/Program.cs": "class Program {}",
+                 "Libraries/Helper/Helper.csproj": '<Project Sdk="Microsoft.NET.Sdk" />',
+                 "Libraries/Helper/Default.cs": "class Helper {}",
+                 "Tools/Shared/OwnerSqlExecution.cs": "class OwnerSqlExecution {}",
+                 "Deployments/local-stack/Original.ps1": "# synthetic reviewed source"}
+        for relative, contents in files.items():
+            path = root/relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents, encoding="utf-8")
+        (root/"Deployments/database").mkdir(parents=True)
+        return root
+
+    def sets(self, root):
+        projects, files = module.discover_tools(root)
+        projects, closure = module.discover_project_sources(root, projects)
+        paths = {p.relative_to(root).as_posix() for p in set(projects)|set(files)|set(closure)}
+        return paths, set(module.discover_closed_scripts(root))
+
+    def check(self, root, expected_graph, expected_scripts):
+        # Fixture-only source read stub. Production cache checks remain unchanged.
+        with mock.patch.object(module, "public_bytes", side_effect=lambda p:p.read_bytes()), mock.patch.object(module, "INFRA_PROJECTS", ()), mock.patch.object(module, "EXTRA", ()):
+            module.recheck_source_sets(root, expected_graph, expected_scripts)
+
+    def test_unchanged_final_source_sets_pass(self):
+        root = self.fixture()
+        with mock.patch.object(module, "public_bytes", side_effect=lambda p:p.read_bytes()):
+            graph, scripts = self.sets(root)
+        self.check(root, graph, scripts)
+
+    def test_late_default_helper_project_or_script_change_fails_closed(self):
+        for change in ("default-helper", "transitive-helper", "new-project", "script", "removed-helper"):
+            with self.subTest(change=change):
+                root = self.fixture()
+                with mock.patch.object(module, "public_bytes", side_effect=lambda p:p.read_bytes()):
+                    graph, scripts = self.sets(root)
+                if change == "removed-helper":
+                    (root/"Libraries/Helper/Default.cs").unlink()
+                else:
+                    relative, contents = {
+                        "default-helper": ("Tools/Owner/Late.cs", "class Late {}"),
+                        "transitive-helper": ("Libraries/Helper/Late.cs", "class Late {}"),
+                        "new-project": ("Tools/Late/Late.csproj", '<Project Sdk="Microsoft.NET.Sdk" />'),
+                        "script": ("Deployments/local-stack/Late.ps1", "# synthetic new source")}[change]
+                    path = root/relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(contents, encoding="utf-8")
+                with self.assertRaises(module.InventoryError): self.check(root, graph, scripts)
+
+
+class ReferencedSourceBoundaryTests(unittest.TestCase):
+    def fixture(self):
+        fixture = tempfile.TemporaryDirectory()
+        self.addCleanup(fixture.cleanup)
+        root = Path(fixture.name)
+        contents = {
+            "Tools/Owner/Program.cs": "await ProvisionAsync();",
+            "Tools/Owner/Owner.csproj": '<Project Sdk="Microsoft.NET.Sdk" />',
+            "Libraries/Helper/Default.cs": "class Helper {}",
+            "Tools/Shared/OwnerSqlExecution.cs": "class OwnerSqlExecution {}",
+            "Services/Example/RuntimeClosure.cs": "await command.ExecuteNonQueryAsync(ct);",
+        }
+        for relative, content in contents.items():
+            path = root/relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        bindings = self.bindings(root, contents)
+        manifest = {"schema": "zeka-owner-sql-referenced-source-boundary/v1",
+                    "reviewPolicy": module.SOURCE_BOUNDARY_POLICY, "baseRevision": "b"*40,
+                    "sourceGraphSha256": module.source_graph_sha256(bindings),
+                    "runtimeOnlySources": {"Services/Example/RuntimeClosure.cs": {
+                        "sha256": bindings["Services/Example/RuntimeClosure.cs"],
+                        "classification": "service-runtime-only",
+                        "reason": "Reviewed runtime closure implementation; not admitted owner invocation."}}}
+        self.write_manifest(root, manifest)
+        return root, list(contents), manifest
+
+    def bindings(self, root, files):
+        # Synthetic fixture-only source bytes, never a production scanner shortcut.
+        return {relative: hashlib.sha256((root/relative).read_bytes()).hexdigest() for relative in files}
+
+    def write_manifest(self, root, manifest):
+        path = root/module.SOURCE_BOUNDARY
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def validate(self, root, bindings):
+        with mock.patch.object(module, "public_bytes", side_effect=lambda p:p.read_bytes()):
+            return module.validate_referenced_source_boundary(root, bindings)
+
+    def test_exact_reviewed_source_graph_allows_only_declared_runtime_classification(self):
+        root, files, _ = self.fixture()
+        self.assertEqual(self.validate(root, self.bindings(root, files)), {"Services/Example/RuntimeClosure.cs"})
+
+    def test_changed_owner_caller_cannot_invoke_unchanged_excluded_runtime_sql(self):
+        root, files, _ = self.fixture()
+        unchanged = (root/"Services/Example/RuntimeClosure.cs").read_bytes()
+        (root/"Tools/Owner/Program.cs").write_text("await RuntimeClosure.RunAsync();", encoding="utf-8")
+        self.assertEqual((root/"Services/Example/RuntimeClosure.cs").read_bytes(), unchanged)
+        with self.assertRaisesRegex(module.InventoryError, "explicit review required"):
+            self.validate(root, self.bindings(root, files))
+
+    def test_new_removed_or_changed_transitive_helper_fails_closed(self):
+        for change in ("new", "removed", "changed"):
+            with self.subTest(change=change):
+                root, files, _ = self.fixture()
+                relative = "Libraries/Helper/Default.cs"
+                if change == "new":
+                    relative = "Libraries/Helper/Added.cs"
+                    files.append(relative)
+                    (root/relative).write_text("await command.ExecuteScalarAsync(ct);", encoding="utf-8")
+                elif change == "removed":
+                    (root/relative).unlink()
+                    files.remove(relative)
+                else:
+                    (root/relative).write_text("await RuntimeClosure.RunAsync();", encoding="utf-8")
+                with self.assertRaises(module.InventoryError): self.validate(root, self.bindings(root, files))
+
+    def test_project_core_or_runtime_bytes_cannot_change_under_existing_manifest(self):
+        for relative in ("Tools/Owner/Owner.csproj", "Tools/Shared/OwnerSqlExecution.cs",
+                         "Services/Example/RuntimeClosure.cs"):
+            with self.subTest(relative=relative):
+                root, files, _ = self.fixture()
+                (root/relative).write_text("changed source fixture", encoding="utf-8")
+                with self.assertRaises(module.InventoryError): self.validate(root, self.bindings(root, files))
+
+    def test_runtime_classification_schema_and_hash_fail_closed(self):
+        for change in ("hash", "kind", "reason", "outside", "unknown-member"):
+            with self.subTest(change=change):
+                root, files, manifest = self.fixture()
+                item = manifest["runtimeOnlySources"]["Services/Example/RuntimeClosure.cs"]
+                if change == "hash": item["sha256"] = "0"*64
+                elif change == "kind": item["classification"] = "automatic-exemption"
+                elif change == "reason": item["reason"] = ""
+                elif change == "outside": manifest["runtimeOnlySources"] = {"Tools/Owner/Program.cs": item}
+                else: item["automaticEnrollment"] = True
+                self.write_manifest(root, manifest)
+                with self.assertRaises(module.InventoryError): self.validate(root, self.bindings(root, files))
+
+    def test_graph_hash_is_canonical_and_path_set_sensitive(self):
+        first = {"b.cs": "b"*64, "a.cs": "a"*64}
+        self.assertEqual(module.source_graph_sha256(first), module.source_graph_sha256(dict(reversed(list(first.items())))))
+        self.assertNotEqual(module.source_graph_sha256(first), module.source_graph_sha256({"renamed.cs": "b"*64, "a.cs": "a"*64}))
+
+    def test_missing_or_ambiguous_manifest_never_enables_exclusion(self):
+        for body in ('{}', '{"schema":"a","schema":"b"}', '["unsupported"]'):
+            with self.subTest(body=body):
+                root, files, _ = self.fixture()
+                (root/module.SOURCE_BOUNDARY).write_text(body, encoding="utf-8")
+                with self.assertRaises(module.InventoryError): self.validate(root, self.bindings(root, files))
+
 if __name__ == "__main__": unittest.main()
