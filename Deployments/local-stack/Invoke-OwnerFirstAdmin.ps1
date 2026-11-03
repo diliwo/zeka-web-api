@@ -489,7 +489,7 @@ function Invoke-OwnerFirstAdmin {
     $actualBinary=(Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-OwnerSourceFacts @{branch=$branch.out.Trim();clean=$true;actualSource=$head.out.Trim();expectedSource=$SourceCommit;actualBinary=$actualBinary;expectedBinary=$BinarySha256}
     Set-OwnerProvisionStage 'helper-image-admission'
-    $imageFormat='{"Id":{{json .Id}},"Config":{"User":{{json .Config.User}},"WorkingDir":{{json .Config.WorkingDir}},"Entrypoint":{{json .Config.Entrypoint}},"Cmd":{{json .Config.Cmd}},"Labels":{{json .Config.Labels}}}}'
+    $imageFormat='{"Id":{{json .Id}},"Config":{"User":{{json .Config.User}},"WorkingDir":{{json .Config.WorkingDir}},"Entrypoint":{{json .Config.Entrypoint}},"Cmd":{{json (index .Config "Cmd")}},"Labels":{{json .Config.Labels}}}}'
     $image=(Invoke-OwnerDocker @('image','inspect','--format',$imageFormat,$ToolImage)).Out|ConvertFrom-Json
     Assert-OwnerImageFacts $image $SourceCommit $BinarySha256 $ToolImage
     Set-OwnerProvisionStage 'credential-input-admission'
