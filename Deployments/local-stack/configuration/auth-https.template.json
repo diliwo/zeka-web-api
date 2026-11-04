@@ -8,6 +8,9 @@
   "internalDnsAlias": "auth.zeka-m1.test",
   "hostPublication": "127.0.0.1:19443:19443",
   "httpHealthPort": 8080,
+  "signingKeyRelativePath": "auth/signing-key.pem",
+  "trustMode": "CustomRootTrust",
+  "verificationBypassAllowed": false,
   "materials": [
     {
       "relativePath": "auth/tls-certificate.pem",
@@ -52,7 +55,6 @@
     "Windows trust installation",
     "hosts changes",
     "Docker/WSL execution",
-    "certificate contents/SAN/key-match validation",
     "TLS handshake or application startup"
   ],
   "applicationReady": false
