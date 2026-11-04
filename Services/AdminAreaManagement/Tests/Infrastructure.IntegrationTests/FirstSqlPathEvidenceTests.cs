@@ -30,6 +30,7 @@ using Xunit;
 using Zeka.Contracts.Staff.V1;
 using Zeka.Extensions.EventBus;
 using Zeka.Extensions.EventBus.Abstractions;
+using Zeka.Extensions.EventBus.RabbitMq;
 using Zeka.Extensions.MultiTenancy.Abstractions;
 using Zeka.Extensions.MultiTenancy.AspNetCore;
 using Zeka.PersistenceSecurity;
@@ -631,8 +632,11 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
             });
     }
 
-    private sealed class Publisher : IEventBus
+    private sealed class Publisher : IOwnedEventBus
     {
+        private readonly PublicationLifecycle lifecycle = new(new PublisherFailStopOptions());
+        public bool ProcessFailStopEnabled => true; // Model: no main-runner fail-stop.
+        public IPublicationAttempt BeginPublication(Event message) => lifecycle.Begin(_ => PublishAsync(message));
         public List<StaffProjectionChangedV1> Messages { get; } = [];
         public Task PublishAsync(Event message)
         {

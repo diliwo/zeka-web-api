@@ -11,7 +11,7 @@
   </ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Zeka.Extensions.EventBus" Version="1.2.0" />
+		<PackageReference Include="Zeka.Extensions.EventBus" Version="[1.3.0-rc.1]" Condition="'$(ZekaEventBusSourceProject)' == ''" />
 		<PackageReference Include="AutoMapper" Version="13.0.1" />
 		<PackageReference Include="DinkToPdf" Version="1.0.8" />
 		<PackageReference Include="DinkToPdfIncludesDependencies" Version="1.0.8" />
@@ -26,6 +26,7 @@
 	</ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="$(ZekaEventBusSourceProject)" Condition="'$(ZekaEventBusSourceProject)' != ''" />
     <ProjectReference Include="..\AdminAreaManagement.Core\AdminAreaManagement.Core.csproj" />
     <ProjectReference Include="..\..\..\Shared\Zeka.Lifecycle.Contracts\Zeka.Lifecycle.Contracts.csproj" />
   </ItemGroup>

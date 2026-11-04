@@ -17,6 +17,7 @@ using Xunit;
 using Zeka.Contracts.Staff.V1;
 using Zeka.Extensions.EventBus;
 using Zeka.Extensions.EventBus.Abstractions;
+using Zeka.Extensions.EventBus.RabbitMq;
 
 namespace Infrastructure.IntegrationTests;
 
@@ -230,8 +231,11 @@ public sealed class StaffRetryWorkerTests(TenantDatabase fixture) : IClassFixtur
         public Task DemandOrdinaryAccessAsync(CancellationToken cancellationToken) =>
             Task.FromException(new InvalidOperationException("Synthetic durable closure boundary."));
     }
-    private sealed class Publisher : IEventBus
+    private sealed class Publisher : IOwnedEventBus
     {
+        private readonly PublicationLifecycle lifecycle = new(new PublisherFailStopOptions());
+        public bool ProcessFailStopEnabled => true; // Fake runtime, no process termination.
+        public IPublicationAttempt BeginPublication(Event message) => lifecycle.Begin(_ => PublishAsync(message));
         public volatile bool Fail = true;
         public ConcurrentBag<StaffProjectionChangedV1> Messages { get; } = new();
         public TaskCompletionSource Failed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
