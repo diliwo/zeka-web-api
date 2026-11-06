@@ -15,4 +15,9 @@
     <ProjectReference Include="../../Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj" />
     <ProjectReference Include="../../Services/ClientManagement/Client.Infrastructure/ClientManagement.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../Shared/SafePostgresDiagnostics.cs" Link="Diagnostics/SafePostgresDiagnostics.cs" />
+    <Compile Include="../Shared/SafePostgresCommandInterceptor.cs" Link="Diagnostics/SafePostgresCommandInterceptor.cs" />
+  </ItemGroup>
+  <ItemGroup><Compile Include="../Shared/OwnerSqlExecution.cs" Link="Evidence/OwnerSqlExecution.cs" /></ItemGroup>
 </Project>

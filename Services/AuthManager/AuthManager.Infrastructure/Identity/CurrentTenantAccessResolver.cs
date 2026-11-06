@@ -42,11 +42,11 @@ public sealed class CurrentTenantAccessResolver(AuthDbContext database, TimeProv
                     && user.EmailConfirmed
                     && (!user.LockoutEnabled || user.LockoutEnd == null || user.LockoutEnd <= now)
                     && role.IsSystem
-                select new { membership.Id, Role = role.Code,
+                select new { membership.Id, RoleId = role.Id, Role = role.Code,
                     MembershipVersion = membership.ConcurrencyVersion, OrganisationVersion = organisation.ConcurrencyVersion })
                 .Take(2).ToListAsync(attemptCancellation);
 
-            if (matches.Count != 1 || TenantPermissions.Resolve(matches[0].Role) is not { } permissions)
+            if (matches.Count != 1 || TenantPermissions.Resolve(matches[0].RoleId, matches[0].Role) is not { } permissions)
                 return CurrentTenantAccess.Denied(now);
 
             var match = matches[0];

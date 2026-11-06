@@ -25,4 +25,5 @@
     <Compile Include="../../../Shared/RlsSecurityManifestVerifier.cs" Link="Security/RlsSecurityManifestVerifier.cs" />
     <Compile Include="../../../Shared/RuntimeDatabaseIdentityValidator.cs" Link="Security/RuntimeDatabaseIdentityValidator.cs" />
   </ItemGroup>
+  <ItemGroup><Compile Include="../../../Tools/Shared/OwnerSqlExecution.cs" Link="Evidence/OwnerSqlExecution.cs" /></ItemGroup>
 </Project>

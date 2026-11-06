@@ -32,11 +32,27 @@ public static class TenantPermissions
                 ["Clients.Create", "Clients.EditAssigned", "Clients.EditAll", "Clients.ImportExport"]),
             ["Owner"] = Permissions(View, AdministrationView, Contribution, Administration,
                 ["Clients.Create", "Clients.EditAssigned", "Clients.EditAll", "Clients.ImportExport",
-                 OrganisationExport, "Organisations.Close"])
+                 OrganisationExport, "Organisations.Close"]),
+            // Workers receive only projection authority, without the human-role
+            // helper's automatic ReferenceData.View grant.
+            [PermissionSet.StaffProjectionWorkerCode] = new[] { "TeamConfiguration.ManageStaffProfiles" }
+                .ToFrozenSet(StringComparer.Ordinal)
         }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public static IReadOnlySet<string>? Resolve(string roleCode) =>
         Grants.GetValueOrDefault(roleCode);
+
+    // Persisted worker observations must match the exact approved identity.
+    // Preserve the existing human-role catalogue resolution behavior.
+    public static IReadOnlySet<string>? Resolve(Guid permissionSetId, string roleCode)
+    {
+        if (permissionSetId == PermissionSet.StaffProjectionWorkerId
+            || StringComparer.Ordinal.Equals(roleCode, PermissionSet.StaffProjectionWorkerCode))
+            return permissionSetId == PermissionSet.StaffProjectionWorkerId
+                && StringComparer.Ordinal.Equals(roleCode, PermissionSet.StaffProjectionWorkerCode)
+                    ? Resolve(roleCode) : null;
+        return Resolve(roleCode);
+    }
 
     public static bool IsKnown(string permission) =>
         Grants.Values.Any(permissions => permissions.Contains(permission));

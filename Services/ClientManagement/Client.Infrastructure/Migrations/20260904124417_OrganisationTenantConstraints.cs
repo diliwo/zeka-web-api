@@ -88,7 +88,12 @@ namespace ClientManagement.Infrastructure.Migrations
 
             migrationBuilder.Sql("""
                 DO $$ BEGIN
-                    IF to_regclass('public."__OrganisationTenantMap"') IS NULL THEN
+                    IF to_regclass('public."__OrganisationTenantMap"') IS NULL AND (
+                        EXISTS (SELECT 1 FROM "SocialWorkers") OR EXISTS (SELECT 1 FROM "SocialCases")
+                        OR EXISTS (SELECT 1 FROM "SchoolRegistrations") OR EXISTS (SELECT 1 FROM "ProfessionnalExperience")
+                        OR EXISTS (SELECT 1 FROM "ProfessionalAssessments") OR EXISTS (SELECT 1 FROM "MonitoringReports")
+                        OR EXISTS (SELECT 1 FROM "Clients") OR EXISTS (SELECT 1 FROM "Assessments")
+                    ) THEN
                         RAISE EXCEPTION 'Create and validate __OrganisationTenantMap(TenantName text, OrganisationId uuid) before applying this migration.';
                     END IF;
                 END $$;
@@ -102,14 +107,18 @@ namespace ClientManagement.Infrastructure.Migrations
                 ALTER TABLE "Clients" ADD COLUMN "OrganisationId" uuid;
                 ALTER TABLE "Assessments" ADD COLUMN "OrganisationId" uuid;
 
-                UPDATE "SocialWorkers" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "SocialCases" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "SchoolRegistrations" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "ProfessionnalExperience" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "ProfessionalAssessments" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "MonitoringReports" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "Clients" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
-                UPDATE "Assessments" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                DO $tenant_backfill$ BEGIN
+                    IF to_regclass('public."__OrganisationTenantMap"') IS NOT NULL THEN
+                        UPDATE "SocialWorkers" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "SocialCases" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "SchoolRegistrations" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "ProfessionnalExperience" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "ProfessionalAssessments" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "MonitoringReports" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "Clients" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                        UPDATE "Assessments" t SET "OrganisationId" = m."OrganisationId" FROM "__OrganisationTenantMap" m WHERE t."TenantName" = m."TenantName";
+                    END IF;
+                END $tenant_backfill$;
 
                 DO $$ BEGIN
                     IF EXISTS (

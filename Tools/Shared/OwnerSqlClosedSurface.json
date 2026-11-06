@@ -1,0 +1,86 @@
+{
+  "schema": "zeka-owner-sql-closed-surface/v1",
+  "reviewPolicy": "Every file-set or byte change requires explicit source review and manifest acceptance; no automatic enrollment.",
+  "files": {
+    "Deployments/database/bootstrap-adminarea-roles.sql": {
+      "sha256": "a2d3449fa0b304617b3fa14516fa443124cf13d0d2ec88f02230ff3ae2217ff1",
+      "classification": "bootstrap-batch"
+    },
+    "Deployments/database/bootstrap-auth-roles.sql": {
+      "sha256": "c1456429e42675bcabcfe06c725f00e96994b46a7f5e3f8e3556f348f359df0b",
+      "classification": "bootstrap-batch"
+    },
+    "Deployments/database/bootstrap-client-roles.sql": {
+      "sha256": "fd5b92016bd4b866971cb2d75a1f34c09a81717f824d60e7f26c9031e367d55f",
+      "classification": "bootstrap-batch"
+    },
+    "Deployments/database/bootstrap-life05a-verifier-fixture.sql": {
+      "sha256": "d925c82d13dcccef3556227b72298e3f688e5238bcf811446323b1ad7a737cc9",
+      "classification": "separate-lifecycle-fixture-sql"
+    },
+    "Deployments/database/life05a-verifier-assertions.sql": {
+      "sha256": "fd29ee4fba2ec31fc68e8309f4585c5b14b603f1a6441a903426f43a6e0aadcc",
+      "classification": "separate-lifecycle-fixture-sql"
+    },
+    "Deployments/database/life05a-verifier-ci-fixture.sql": {
+      "sha256": "eacffd6b1ef5a35380410bc90abd68e2b7546b06762b03331815de45b6b083c0",
+      "classification": "separate-lifecycle-fixture-sql"
+    },
+    "Deployments/local-stack/Initialize-AuthHttpsConfiguration.ps1": {
+      "sha256": "26d5f6c09b92e0007ba4e7d890b0acf6a3bf21f6df897d5ee2a27f21beae048e",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Deployments/local-stack/Initialize-Databases.ps1": {
+      "sha256": "35197d52c03ec133e9bdb4f8d7c4cb1bbd0d0c9c3ddf2918f9518a6426a76d4f",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Deployments/local-stack/Invoke-OwnerFirstAdmin.ps1": {
+      "sha256": "0356126a12dd63797cf6afbe59fe13aa966e5cb52653ec2e63fe8eaa1511763a",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Deployments/local-stack/OwnerFirstAdminPreflightPrivileges.ps1": {
+      "sha256": "bafa3e6c890481ec457c4d66322d2fc8ed1c2bf7e98aaf41d7cbd6a99421f82e",
+      "classification": "delegated-query-factory"
+    },
+    "Deployments/local-stack/OwnerFirstAdminPreflightQueries.ps1": {
+      "sha256": "8bc76af48e891389bde5ec5ab5edb5db8663d1de58ed14ede4709b28868b578a",
+      "classification": "query-factory"
+    },
+    "Deployments/local-stack/OwnerFirstAdminRlsMetadata.ps1": {
+      "sha256": "37542023983117734bcce2562eceb0fd374fa32242ac4e538108bccc299c511b",
+      "classification": "delegated-query-factory"
+    },
+    "Deployments/local-stack/SafePostgresDiagnostics.ps1": {
+      "sha256": "bf3f6aba15996950775a04564c3b712eeea0bd03a48351493491824ddd985eea",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Deployments/local-stack/Test-Configuration.ps1": {
+      "sha256": "98adb76b1f4a11fdaedadfb06e9fbeaa741e29897197c60d31b49d2724c5a30c",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Deployments/local-stack/Test-DatabaseBootstrap.ps1": {
+      "sha256": "788d422fcf73ced1cf6b1064adc246ca2617ea6c7e7cf930b4858b5aecf6f636",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Deployments/local-stack/Test-OwnerSqlPostgreSql.ps1": {
+      "sha256": "d7e40a235d5717dee7678415e21114928e600fdd7d6af52bc1b9243aeeb72550",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Deployments/local-stack/Test-W3AtomicWrite.ps1": {
+      "sha256": "5133d3315bb89cee6abbb1769e4d3a85f9def8c1c244567886ecef86c6f650a5",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Deployments/local-stack/Test-W3NativeDiagnostics.ps1": {
+      "sha256": "8ff3c7b3b3148a1771cd76e37a647ab49394a590570294742585a9ae04c1e19b",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Deployments/local-stack/W3-NativeDiagnostics.ps1": {
+      "sha256": "16ca48434d8f481696da659710f8202a36f1a044debd544a12d5b133dc49965c",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Tools/Zeka.AuthOwnerProvision/Prepare-OwnerHelperBuildContext.ps1": {
+      "sha256": "9fbb15ad83f951a0d446a0e650af5ad4dfa64e9b8f400fc6badd28b4b5d97155",
+      "classification": "reviewed-orchestration-support"
+    }
+  }
+}
