@@ -6,6 +6,7 @@ using AdminAreaManagement.Infrastructure;
 using AdminAreaManagement.Infrastructure.Persistence;
 using Zeka.Extensions.EventBus.RabbitMq;
 using Zeka.Extensions.Observability;
+using Zeka.Messaging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,7 +24,7 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddWebServices();
 
-builder.Services.AddRabbitMqEventBus(builder.Configuration)
+builder.Services.AddStaffProjectionTransport(builder.Configuration)
     .AddRabbitMqEventPublisher();
 
 //builder.Services.AddOpenTelemetryTracing("Adminapi", (traceBuiler) => traceBuiler.WithSqlInstrumentation());

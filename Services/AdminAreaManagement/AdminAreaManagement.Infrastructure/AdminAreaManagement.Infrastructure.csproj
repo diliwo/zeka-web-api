@@ -33,6 +33,7 @@
     <Compile Include="../../../Shared/RlsSecurityManifestVerifier.cs" Link="Security/RlsSecurityManifestVerifier.cs" />
     <Compile Include="../../../Shared/RuntimeDatabaseIdentityValidator.cs" Link="Security/RuntimeDatabaseIdentityValidator.cs" />
     <Compile Include="../../../Shared/TenantAttemptOrderObserver.cs" Link="Security/TenantAttemptOrderObserver.cs" />
+    <Compile Include="../../../Shared/StaffProjectionTransport.cs" Link="Messaging/StaffProjectionTransport.cs" />
   </ItemGroup>
 
   <ItemGroup>

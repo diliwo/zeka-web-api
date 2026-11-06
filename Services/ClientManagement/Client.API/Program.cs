@@ -8,6 +8,7 @@ using ClientManagement.Infrastructure;
 using FluentAssertions.Common;
 using Zeka.Extensions.EventBus;
 using Zeka.Extensions.EventBus.RabbitMq;
+using Zeka.Messaging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,8 +25,8 @@ builder.Services.AddScoped<ClientManagement.Infrastructure.Authorization.ITenant
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddWebServices(builder.Configuration);
-builder.Services.AddRabbitMqEventBus(builder.Configuration)
-    .AddRabbitMqSubscriberService(builder.Configuration)
+builder.Services.AddStaffProjectionTransport(builder.Configuration)
+    .AddStaffProjectionConsumer(builder.Configuration)
     .AddEventHandler<SocialWorkerCreatedEvent, SocialWorkerCreatedEventHandler>()
     .AddEventHandler<Zeka.Contracts.Staff.V1.StaffProjectionChangedV1, ClientManagement.Infrastructure.Messaging.StaffProjectionConsumer>();
 
