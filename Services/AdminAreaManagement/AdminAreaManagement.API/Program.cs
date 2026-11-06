@@ -30,7 +30,9 @@ builder.Services.AddRabbitMqEventBus(builder.Configuration)
 builder.Services.AddControllers();
 
 
+LocalStackHealth.Add(builder);
 var app = builder.Build();
+app.UseLocalStackHealth();
 
 //app.UseMigrationsAndSeed();
 

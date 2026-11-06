@@ -1,0 +1,118 @@
+{
+  "Routes": [
+    {
+      "Key": "GatewayBrowserTransport:0",
+      "FileCacheOptions": {
+        "TtlSeconds": 0
+      },
+      "UpstreamPathTemplate": "/api/v1/browser-session/csrf",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamPathTemplate": "/api/v1/browser-session/csrf",
+      "RouteIsCaseSensitive": true,
+      "HttpHandlerOptions": {
+        "AllowAutoRedirect": false,
+        "UseCookieContainer": false,
+        "UseTracing": false,
+        "UseProxy": false
+      },
+      "DangerousAcceptAnyServerCertificateValidator": false
+    },
+    {
+      "Key": "GatewayBrowserTransport:1",
+      "FileCacheOptions": {
+        "TtlSeconds": 0
+      },
+      "UpstreamPathTemplate": "/api/v1/browser-session/sign-in",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "DownstreamPathTemplate": "/api/v1/browser-session/sign-in",
+      "RouteIsCaseSensitive": true,
+      "HttpHandlerOptions": {
+        "AllowAutoRedirect": false,
+        "UseCookieContainer": false,
+        "UseTracing": false,
+        "UseProxy": false
+      },
+      "DangerousAcceptAnyServerCertificateValidator": false
+    },
+    {
+      "Key": "GatewayBrowserTransport:2",
+      "FileCacheOptions": {
+        "TtlSeconds": 0
+      },
+      "UpstreamPathTemplate": "/api/v1/browser-session/restore",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "DownstreamPathTemplate": "/api/v1/browser-session/restore",
+      "RouteIsCaseSensitive": true,
+      "HttpHandlerOptions": {
+        "AllowAutoRedirect": false,
+        "UseCookieContainer": false,
+        "UseTracing": false,
+        "UseProxy": false
+      },
+      "DangerousAcceptAnyServerCertificateValidator": false
+    },
+    {
+      "Key": "GatewayBrowserTransport:3",
+      "FileCacheOptions": {
+        "TtlSeconds": 0
+      },
+      "UpstreamPathTemplate": "/api/v1/browser-session/logout",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "DownstreamPathTemplate": "/api/v1/browser-session/logout",
+      "RouteIsCaseSensitive": true,
+      "HttpHandlerOptions": {
+        "AllowAutoRedirect": false,
+        "UseCookieContainer": false,
+        "UseTracing": false,
+        "UseProxy": false
+      },
+      "DangerousAcceptAnyServerCertificateValidator": false
+    },
+    {
+      "Key": "GatewayBrowserTransport:4",
+      "FileCacheOptions": {
+        "TtlSeconds": 0
+      },
+      "UpstreamPathTemplate": "/api/v1/browser-organisations/eligible",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamPathTemplate": "/api/v1/browser-organisations/eligible",
+      "RouteIsCaseSensitive": true,
+      "HttpHandlerOptions": {
+        "AllowAutoRedirect": false,
+        "UseCookieContainer": false,
+        "UseTracing": false,
+        "UseProxy": false
+      },
+      "DangerousAcceptAnyServerCertificateValidator": false
+    },
+    {
+      "Key": "GatewayBrowserTransport:5",
+      "FileCacheOptions": {
+        "TtlSeconds": 0
+      },
+      "UpstreamPathTemplate": "/api/v1/tenant-access/{organisationId}",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamPathTemplate": "/api/v1/tenant-access/{organisationId}",
+      "RouteIsCaseSensitive": true,
+      "HttpHandlerOptions": {
+        "AllowAutoRedirect": false,
+        "UseCookieContainer": false,
+        "UseTracing": false,
+        "UseProxy": false
+      },
+      "DangerousAcceptAnyServerCertificateValidator": false
+    }
+  ]
+}

@@ -947,13 +947,42 @@ jobs:
             /d:sonar.pullrequest.base="${SONAR_PR_BASE}" \
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
-            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py" \
+            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
 
       - name: Build for analysis
         run: dotnet build zeka-web-api.sln --configuration Release --no-restore --no-incremental
+
+      - name: Verify configuration assertions are classified as test source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          namespace = {"s": "http://www.sonarsource.com/msbuild/integration/2015/1"}
+          script = (Path.cwd() / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve()
+          project = (Path.cwd() / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj").resolve()
+          if not script.is_relative_to(project.parent):
+              raise SystemExit("Configuration assertions must physically belong to the test project.")
+          owners = set()
+          for info in Path(".sonarqube/out").rglob("ProjectInfo.xml"):
+              root = ET.parse(info).getroot()
+              for result in root.findall("s:AnalysisResultFiles/s:AnalysisResultFile", namespace):
+                  if result.get("Id") != "FilesToAnalyze":
+                      continue
+                  paths = Path(result.attrib["Location"]).read_text(encoding="utf-8-sig").splitlines()
+                  if script not in {Path(value).resolve() for value in paths if value}:
+                      continue
+                  owner = Path(root.findtext("s:FullPath", namespaces=namespace)).resolve()
+                  category = root.findtext("s:ProjectType", namespaces=namespace)
+                  excluded = root.findtext("s:IsExcluded", namespaces=namespace)
+                  owners.add((owner, category, excluded))
+          if owners != {(project, "Test", "false")}:
+              raise SystemExit("Configuration assertion script must be included by its exact non-excluded test project.")
+          print("Configuration assertion script is included as TEST source; production coverage is unchanged.")
+          PY
 
       - name: Run Python accounting regressions and collect coverage for analysis
         shell: bash
@@ -1009,6 +1038,33 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+      - name: Verify the final scanner input keeps assertions in TEST scope
+        if: ${{ always() }}
+        run: |
+          python - <<'PY'
+          import csv
+          import re
+          from pathlib import Path
+
+          base = Path.cwd()
+          script = (base / "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1").resolve()
+          wrapper = (base / "Deployments/local-stack/Test-Configuration.ps1").resolve()
+          text = (base / ".sonarqube/out/sonar-project.properties").read_text(encoding="utf-8-sig")
+          text = re.sub(r"\\\r?\n[ \t]*", "", text)
+          scopes = {"sonar.tests": set(), "sonar.sources": set()}
+          for line in text.splitlines():
+              key, separator, value = line.partition("=")
+              scope = next((name for name in scopes if key.strip().endswith(name)), None)
+              if not separator or scope is None:
+                  continue
+              value = re.sub(r"\\([\\:= ,#!])", r"\1", value)
+              scopes[scope].update(Path(path).resolve() for path in next(csv.reader([value], skipinitialspace=True)) if path)
+          if script not in scopes["sonar.tests"] or script in scopes["sonar.sources"]:
+              raise SystemExit("Configuration assertion script must be TEST source in the final scanner input.")
+          if wrapper not in scopes["sonar.sources"] or wrapper in scopes["sonar.tests"]:
+              raise SystemExit("Configuration test forwarding entry must remain MAIN source.")
+          print("Final scanner input: assertion suite is TEST; forwarding entry remains MAIN.")
+          PY
 
   mvp_validation:
     name: MVP Validation

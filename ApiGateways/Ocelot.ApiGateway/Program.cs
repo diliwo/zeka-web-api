@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Ocelot.DependencyInjection;
 using Ocelot.Middleware;
 using Zeka.Extensions.Authentication;
@@ -24,6 +26,7 @@ Zeka.Gateway.BrowserTransport.Add(builder);
 builder.Services.AddJwtAuthentication(builder.Configuration);
 
 var app = builder.Build();
+app.UseLocalStackHealthChecks();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -69,6 +72,11 @@ namespace Zeka.Gateway
         {
             var policy = new Policy(builder.Configuration);
             builder.Services.AddSingleton(policy);
+            if (builder.Environment.IsEnvironment("LocalStack"))
+                builder.Services.AddHealthChecks().Add(new HealthCheckRegistration(
+                    "gateway-browser-transport",
+                    services => new LocalStackReadiness(services.GetRequiredService<Policy>()),
+                    HealthStatus.Unhealthy, ["ready"], TimeSpan.FromSeconds(2)));
             builder.Services.AddCors(options => options.AddPolicy(Prefix, cors =>
             {
                 if (policy.Valid) cors.WithOrigins(policy.Origin!).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
@@ -100,6 +108,30 @@ namespace Zeka.Gateway
                     route.DownstreamHostAndPorts = [new() { Host = policy.Target.Host, Port = policy.Target.Port }];
                 }
             });
+        }
+
+        public static void UseLocalStackHealthChecks(this WebApplication app)
+        {
+            if (!app.Environment.IsEnvironment("LocalStack")) return;
+            app.UseHealthChecks("/health/live", new HealthCheckOptions
+            {
+                Predicate = _ => false,
+                ResponseWriter = (_, _) => Task.CompletedTask
+            });
+            app.UseHealthChecks("/health/ready", new HealthCheckOptions
+            {
+                Predicate = registration => registration.Tags.Contains("ready"),
+                ResultStatusCodes = { [HealthStatus.Degraded] = StatusCodes.Status503ServiceUnavailable },
+                ResponseWriter = (_, _) => Task.CompletedTask
+            });
+        }
+
+        private sealed class LocalStackReadiness(Policy policy) : IHealthCheck
+        {
+            public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context,
+                CancellationToken cancellationToken = default) => Task.FromResult(policy.Valid
+                    ? HealthCheckResult.Healthy()
+                    : HealthCheckResult.Unhealthy("Gateway transport unavailable."));
         }
 
         public static void UseBrowserTransport(this WebApplication app)
