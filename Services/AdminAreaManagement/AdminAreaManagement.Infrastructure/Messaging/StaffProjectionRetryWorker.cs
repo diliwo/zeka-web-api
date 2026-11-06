@@ -77,7 +77,9 @@ public sealed class StaffProjectionRetryWorker(IServiceScopeFactory scopes, ICon
                     throw new InvalidOperationException("An HTTPS AuthManagement URL is required.");
                 http.BaseAddress = uri;
                 var tenant = scope.ServiceProvider.GetRequiredService<TenantContextScope>();
-                var operation = new TenantOperation(new CurrentTenantAccessClient(http, identity), identity, tenant, tenant);
+                var operation = new TenantOperation(new CurrentTenantAccessClient(http, identity,
+                    scope.ServiceProvider.GetRequiredService<ILogger<CurrentTenantAccessClient>>()), identity, tenant, tenant,
+                    scope.ServiceProvider.GetRequiredService<ILogger<TenantOperation>>());
                 await operation.AuthorizeAsync(new RequiresTenantPermissionAttribute("TeamConfiguration.ManageStaffProfiles"), budget.Token);
                 var database = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var outbox = new StaffProjectionOutbox(database, tenant,

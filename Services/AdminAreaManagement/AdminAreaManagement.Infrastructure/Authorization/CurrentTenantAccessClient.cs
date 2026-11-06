@@ -4,13 +4,15 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 using AdminAreaManagement.Application.Common.Authorization;
 
 namespace AdminAreaManagement.Infrastructure.Authorization;
 
 public interface ITenantAccessCredential { string? BearerToken { get; } }
 
-public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCredential credential) : ICurrentTenantAccess
+public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCredential credential,
+    ILogger<CurrentTenantAccessClient>? logger = null) : ICurrentTenantAccess
 {
     public const string DiagnosticsName = "AdminAreaManagement.TenantAccess";
     private static readonly JsonSerializerOptions WireOptions = new(JsonSerializerDefaults.Web)
@@ -44,7 +46,7 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
         }
         TenantAccessDecision Integrity(string mismatchClass)
         {
-            TenantAccessDiagnostics.Integrity(mismatchClass);
+            TenantAccessDiagnostics.Integrity(mismatchClass, logger);
             return Unavailable(TenantAccessDiagnostics.IntegrityMismatch);
         }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -81,30 +83,41 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
                     }
                     else
                     {
-                        using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
-                        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: deadline.Token);
-                        if (document.RootElement.ValueKind != JsonValueKind.Object)
-                            return Unavailable(TenantAccessDiagnostics.ResponseMalformed);
-                        var fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        foreach (var property in document.RootElement.EnumerateObject())
-                            if (!fields.Add(property.Name)) return Unavailable(TenantAccessDiagnostics.ResponseMalformed);
-                        if (new[] { "ContractVersion", "SubjectId", "OrganisationId", "OrganisationMembershipId",
-                            "EffectivePermissionCodes", "DecisionVersion", "ObservedAtUtc" }.Any(field => !fields.Contains(field)))
-                            return Unavailable(TenantAccessDiagnostics.ResponseMalformed);
-                        var wire = document.RootElement.Deserialize<AccessResponse>(WireOptions);
-                        if (wire is null || wire.ContractVersion != 1 || string.IsNullOrWhiteSpace(wire.SubjectId)
-                            || string.IsNullOrWhiteSpace(wire.DecisionVersion) || wire.ObservedAtUtc == default
-                            || wire.ObservedAtUtc.Offset != TimeSpan.Zero
-                            || !TenantAccessDiagnostics.ValidPermissions(wire.EffectivePermissionCodes))
-                            return Unavailable(TenantAccessDiagnostics.ResponseMalformed);
-                        if (!StringComparer.Ordinal.Equals(wire.SubjectId, authenticatedSubjectId))
-                            return Integrity("subject_mismatch");
-                        if (wire.OrganisationId != selectedOrganisationId)
-                            return Integrity("organisation_mismatch");
-                        if (wire.OrganisationMembershipId == Guid.Empty)
-                            return Integrity("contradictory_response");
-                        return Finish(TenantAccessOutcome.Authorized, new(wire.OrganisationId, wire.OrganisationMembershipId,
-                            TenantAccessDiagnostics.RecognizedPermissions(wire.EffectivePermissionCodes), wire.DecisionVersion, wire.ObservedAtUtc));
+                        JsonDocument document;
+                        try
+                        {
+                            using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+                            document = await JsonDocument.ParseAsync(stream, cancellationToken: deadline.Token);
+                        }
+                        catch (IOException)
+                        {
+                            return Unavailable(TenantAccessDiagnostics.DependencyUnavailable);
+                        }
+                        using (document)
+                        {
+                            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                                return Unavailable(TenantAccessDiagnostics.ResponseMalformed);
+                            var fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var property in document.RootElement.EnumerateObject())
+                                if (!fields.Add(property.Name)) return Unavailable(TenantAccessDiagnostics.ResponseMalformed);
+                            if (new[] { "ContractVersion", "SubjectId", "OrganisationId", "OrganisationMembershipId",
+                                "EffectivePermissionCodes", "DecisionVersion", "ObservedAtUtc" }.Any(field => !fields.Contains(field)))
+                                return Unavailable(TenantAccessDiagnostics.ResponseMalformed);
+                            var wire = document.RootElement.Deserialize<AccessResponse>(WireOptions);
+                            if (wire is null || wire.ContractVersion != 1 || string.IsNullOrWhiteSpace(wire.SubjectId)
+                                || string.IsNullOrWhiteSpace(wire.DecisionVersion) || wire.ObservedAtUtc == default
+                                || wire.ObservedAtUtc.Offset != TimeSpan.Zero
+                                || !TenantAccessDiagnostics.ValidPermissions(wire.EffectivePermissionCodes))
+                                return Unavailable(TenantAccessDiagnostics.ResponseMalformed);
+                            if (!StringComparer.Ordinal.Equals(wire.SubjectId, authenticatedSubjectId))
+                                return Integrity("subject_mismatch");
+                            if (wire.OrganisationId != selectedOrganisationId)
+                                return Integrity("organisation_mismatch");
+                            if (wire.OrganisationMembershipId == Guid.Empty)
+                                return Integrity("contradictory_response");
+                            return Finish(TenantAccessOutcome.Authorized, new(wire.OrganisationId, wire.OrganisationMembershipId,
+                                TenantAccessDiagnostics.RecognizedPermissions(wire.EffectivePermissionCodes), wire.DecisionVersion, wire.ObservedAtUtc));
+                        }
                     }
                 }
                 catch (HttpRequestException)

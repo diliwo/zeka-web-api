@@ -5,6 +5,7 @@ using ClientManagement.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Zeka.Contracts.Staff.V1;
 using Zeka.Extensions.EventBus.Abstractions;
 using Zeka.Extensions.MultiTenancy.Abstractions;
@@ -29,9 +30,9 @@ public sealed class StaffProjectionConsumer(IServiceScopeFactory scopes, IConfig
         if (!Uri.TryCreate(baseAddress, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
             throw new TenantAccessException(AccessFailure.Unavailable);
         http.BaseAddress = uri;
-        var access = new CurrentTenantAccessClient(http, identity);
+        var access = new CurrentTenantAccessClient(http, identity, scope.ServiceProvider.GetRequiredService<ILogger<CurrentTenantAccessClient>>());
         var context = scope.ServiceProvider.GetRequiredService<TenantContextScope>();
-        var operation = new TenantOperation(access, identity, context, context);
+        var operation = new TenantOperation(access, identity, context, context, logger: scope.ServiceProvider.GetRequiredService<ILogger<TenantOperation>>());
         await operation.AuthorizeAsync(new RequiresTenantPermissionAttribute("TeamConfiguration.ManageStaffProfiles"),
             CancellationToken.None);
         var database = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();

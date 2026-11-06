@@ -4,13 +4,15 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using ClientManagement.Application.Common.Authorization;
 
 namespace ClientManagement.Infrastructure.Authorization;
 
 public interface ITenantAccessCredential { string? BearerToken { get; } }
 
-public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCredential credential) : ICurrentTenantAccess
+public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCredential credential,
+    ILogger<CurrentTenantAccessClient>? logger = null) : ICurrentTenantAccess
 {
     public const string DiagnosticsName = "ClientManagement.TenantAccess";
     private static readonly ActivitySource Traces = new(DiagnosticsName);
@@ -77,8 +79,18 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
                     }
                     else
                     {
-                        using var content = await response.Content.ReadAsStreamAsync(deadline.Token);
-                        using var document = await JsonDocument.ParseAsync(content, cancellationToken: deadline.Token);
+                        JsonDocument document;
+                        try
+                        {
+                            using var content = await response.Content.ReadAsStreamAsync(deadline.Token);
+                            document = await JsonDocument.ParseAsync(content, cancellationToken: deadline.Token);
+                        }
+                        catch (IOException)
+                        {
+                            return Unavailable(TenantAccessDiagnostics.DependencyUnavailable);
+                        }
+                        using (document)
+                        {
                         if (document.RootElement.ValueKind != JsonValueKind.Object)
                             return Unavailable(TenantAccessDiagnostics.ResponseMalformed);
                         var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
@@ -96,12 +108,13 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
                             ? "contradictory_response" : null;
                         if (mismatch is not null)
                         {
-                            TenantAccessDiagnostics.Integrity(mismatch);
+                            TenantAccessDiagnostics.Integrity(mismatch, logger);
                             return Unavailable(TenantAccessDiagnostics.IntegrityMismatch);
                         }
                         return Finish(TenantAccessOutcome.Authorized, new(wire.OrganisationId, wire.OrganisationMembershipId,
                             TenantAccessDiagnostics.RecognizedPermissions(wire.EffectivePermissionCodes),
                             wire.DecisionVersion, wire.ObservedAtUtc));
+                        }
                     }
                 }
                 catch (HttpRequestException)

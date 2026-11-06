@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Microsoft.Extensions.Logging;
 using ClientManagement.Application.ActionWrites;
 using Zeka.Extensions.MultiTenancy.Abstractions;
 
@@ -39,7 +40,8 @@ public sealed class RequiresTenantPermissionAttribute(string permission, string?
 }
 
 public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdentity identity,
-    ITenantContextInitializer initializer, ITenantContextAccessor context, ActionWriteAuthorityScope? actionScope = null)
+    ITenantContextInitializer initializer, ITenantContextAccessor context, ActionWriteAuthorityScope? actionScope = null,
+    ILogger<TenantOperation>? logger = null)
 {
     private bool established;
     public Guid MembershipId { get; private set; }
@@ -82,7 +84,7 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
         var decision = await access.ResolveAsync(identity.SubjectId, identity.SelectedOrganisationId, cancellationToken);
         if (decision.Outcome != TenantAccessOutcome.Authorized && decision.Membership is not null)
         {
-            TenantAccessDiagnostics.Integrity("contradictory_response");
+            TenantAccessDiagnostics.Integrity("contradictory_response", logger);
             throw new TenantAccessException(AccessFailure.Unavailable, TenantAccessDiagnostics.IntegrityMismatch);
         }
         var reason = TenantAccessDiagnostics.KnownReason(decision.Reason);
@@ -97,7 +99,7 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
             || grant.OrganisationId != identity.SelectedOrganisationId || grant.OrganisationMembershipId == Guid.Empty)
         {
             TenantAccessDiagnostics.Integrity(grant is not null && grant.OrganisationId != identity.SelectedOrganisationId
-                ? "organisation_mismatch" : "contradictory_response");
+                ? "organisation_mismatch" : "contradictory_response", logger);
             throw new TenantAccessException(AccessFailure.Unavailable, TenantAccessDiagnostics.IntegrityMismatch);
         }
         if (!TenantAccessDiagnostics.ValidPermissions(grant.EffectivePermissionCodes)
@@ -116,7 +118,7 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
             if (context.Current.OrganisationId.Value != grant.OrganisationId || context.Current.SubjectId != identity.SubjectId
                 || MembershipId != grant.OrganisationMembershipId || Permission != allPermission || AssignedOnly != !all)
             {
-                TenantAccessDiagnostics.Integrity("contradictory_response");
+                TenantAccessDiagnostics.Integrity("contradictory_response", logger);
                 throw new TenantAccessException(AccessFailure.Unavailable, TenantAccessDiagnostics.IntegrityMismatch);
             }
         }

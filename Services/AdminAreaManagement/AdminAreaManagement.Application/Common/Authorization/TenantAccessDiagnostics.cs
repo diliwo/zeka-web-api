@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace AdminAreaManagement.Application.Common.Authorization;
 
@@ -50,12 +51,16 @@ public static class TenantAccessDiagnostics
     public static string[] RecognizedPermissions(IReadOnlyCollection<string> codes) =>
         codes.Where(PermissionCatalogue.IsKnown).ToArray();
 
-    public static void Integrity(string mismatchClass) => Signal(IntegrityMismatch, mismatchClass switch
+    public static void Integrity(string mismatchClass, ILogger? logger = null)
     {
-        "subject_mismatch" => "subject_mismatch",
-        "organisation_mismatch" => "organisation_mismatch",
-        _ => "contradictory_response"
-    });
+        var boundedClass = mismatchClass is "subject_mismatch" or "organisation_mismatch"
+            ? mismatchClass : "contradictory_response";
+        Observe(() => logger?.LogWarning(new EventId(1701, IntegrityMismatch),
+            "AUTH_RESPONSE_INTEGRITY_MISMATCH event_code={event_code} service={service} mismatch_class={mismatch_class} contract_version={contract_version} observed_at_utc={observed_at_utc}",
+            IntegrityMismatch, "AdminAreaManagement", boundedClass, 1, DateTimeOffset.UtcNow));
+        // Independent channels: a logging failure cannot suppress the optional Activity event.
+        Signal(IntegrityMismatch, boundedClass);
+    }
 
     public static void UnknownCheckedPermission() => Signal(PermissionCheckUnknown, null);
 
