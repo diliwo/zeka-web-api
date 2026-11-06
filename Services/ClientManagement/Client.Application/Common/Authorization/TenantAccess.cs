@@ -9,7 +9,7 @@ public enum TenantAccessOutcome { Authorized, Unauthenticated, Denied, Unavailab
 public sealed record AuthorizedTenantMembership(Guid OrganisationId, Guid OrganisationMembershipId,
     IReadOnlyCollection<string> EffectivePermissionCodes, string DecisionVersion, DateTimeOffset ObservedAtUtc);
 
-public sealed record TenantAccessDecision(TenantAccessOutcome Outcome, AuthorizedTenantMembership? Membership = null);
+public sealed record TenantAccessDecision(TenantAccessOutcome Outcome, AuthorizedTenantMembership? Membership = null, string? Reason = null);
 
 public interface ICurrentTenantAccess
 {
@@ -25,9 +25,10 @@ public interface IOperationIdentity
 }
 
 public enum AccessFailure { Unauthenticated, Denied, Unavailable }
-public sealed class TenantAccessException(AccessFailure failure) : Exception("Tenant access rejected.")
+public sealed class TenantAccessException(AccessFailure failure, string? reason = null) : Exception("Tenant access rejected.")
 {
     public AccessFailure Failure { get; } = failure;
+    public string? Reason { get; } = reason;
 }
 
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
@@ -62,26 +63,47 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
     private async Task AuthorizeCoreAsync(string allPermission, string? assignedPermission,
         string? secondAllPermission, string? secondAssignedPermission, CancellationToken cancellationToken)
     {
+        // A refused re-entry must not expose capabilities from an earlier decision.
+        CanEditAll = false;
+        CanEditAssigned = false;
         if (string.IsNullOrWhiteSpace(identity.SubjectId))
             throw new TenantAccessException(AccessFailure.Unauthenticated);
-        if (identity.SelectedOrganisationId == Guid.Empty || !PermissionCatalogue.IsKnown(allPermission)
+        if (identity.SelectedOrganisationId == Guid.Empty)
+            throw new TenantAccessException(AccessFailure.Denied);
+        if (!PermissionCatalogue.IsKnown(allPermission)
             || (assignedPermission is not null && !PermissionCatalogue.IsKnown(assignedPermission))
             || (secondAllPermission is not null && !PermissionCatalogue.IsKnown(secondAllPermission))
             || (secondAssignedPermission is not null && !PermissionCatalogue.IsKnown(secondAssignedPermission)))
-            throw new TenantAccessException(AccessFailure.Denied);
+        {
+            TenantAccessDiagnostics.UnknownCheckedPermission();
+            throw new TenantAccessException(AccessFailure.Denied, TenantAccessDiagnostics.PermissionCheckUnknown);
+        }
 
         var decision = await access.ResolveAsync(identity.SubjectId, identity.SelectedOrganisationId, cancellationToken);
+        if (decision.Outcome != TenantAccessOutcome.Authorized && decision.Membership is not null)
+        {
+            TenantAccessDiagnostics.Integrity("contradictory_response");
+            throw new TenantAccessException(AccessFailure.Unavailable, TenantAccessDiagnostics.IntegrityMismatch);
+        }
+        var reason = TenantAccessDiagnostics.KnownReason(decision.Reason);
         if (decision.Outcome == TenantAccessOutcome.Unauthenticated)
-            throw new TenantAccessException(AccessFailure.Unauthenticated);
+            throw new TenantAccessException(AccessFailure.Unauthenticated, reason);
         if (decision.Outcome == TenantAccessOutcome.Unavailable)
-            throw new TenantAccessException(AccessFailure.Unavailable);
+            throw new TenantAccessException(AccessFailure.Unavailable, reason ?? TenantAccessDiagnostics.DependencyUnavailable);
+        if (decision.Outcome == TenantAccessOutcome.Denied && decision.Membership is null)
+            throw new TenantAccessException(AccessFailure.Denied, reason);
         var grant = decision.Membership;
         if (decision.Outcome != TenantAccessOutcome.Authorized || grant is null
-            || grant.OrganisationId != identity.SelectedOrganisationId || grant.OrganisationMembershipId == Guid.Empty
-            || grant.EffectivePermissionCodes is null || string.IsNullOrWhiteSpace(grant.DecisionVersion)
-            || grant.EffectivePermissionCodes.Any(permission => !PermissionCatalogue.IsKnown(permission)))
-            throw new TenantAccessException(AccessFailure.Denied);
-        var permissions = grant.EffectivePermissionCodes.ToFrozenSet(StringComparer.Ordinal);
+            || grant.OrganisationId != identity.SelectedOrganisationId || grant.OrganisationMembershipId == Guid.Empty)
+        {
+            TenantAccessDiagnostics.Integrity(grant is not null && grant.OrganisationId != identity.SelectedOrganisationId
+                ? "organisation_mismatch" : "contradictory_response");
+            throw new TenantAccessException(AccessFailure.Unavailable, TenantAccessDiagnostics.IntegrityMismatch);
+        }
+        if (!TenantAccessDiagnostics.ValidPermissions(grant.EffectivePermissionCodes)
+            || string.IsNullOrWhiteSpace(grant.DecisionVersion) || grant.ObservedAtUtc == default || grant.ObservedAtUtc.Offset != TimeSpan.Zero)
+            throw new TenantAccessException(AccessFailure.Unavailable, TenantAccessDiagnostics.ResponseMalformed);
+        var permissions = TenantAccessDiagnostics.RecognizedPermissions(grant.EffectivePermissionCodes).ToFrozenSet(StringComparer.Ordinal);
         var all = permissions.Contains(allPermission)
             || secondAllPermission is not null && permissions.Contains(secondAllPermission);
         if (!all && (assignedPermission is null || !permissions.Contains(assignedPermission))
@@ -93,7 +115,10 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
             // A scope is one operation. Re-entry must not change either identity or resource permissions.
             if (context.Current.OrganisationId.Value != grant.OrganisationId || context.Current.SubjectId != identity.SubjectId
                 || MembershipId != grant.OrganisationMembershipId || Permission != allPermission || AssignedOnly != !all)
-                throw new TenantAccessException(AccessFailure.Denied);
+            {
+                TenantAccessDiagnostics.Integrity("contradictory_response");
+                throw new TenantAccessException(AccessFailure.Unavailable, TenantAccessDiagnostics.IntegrityMismatch);
+            }
         }
         else
         {
@@ -101,10 +126,12 @@ public sealed class TenantOperation(ICurrentTenantAccess access, IOperationIdent
             MembershipId = grant.OrganisationMembershipId;
             Permission = allPermission;
             AssignedOnly = !all;
-            CanEditAll = permissions.Contains("Clients.EditAll");
-            CanEditAssigned = permissions.Contains("Clients.EditAssigned");
+
+
             established = true;
         }
+        CanEditAll = permissions.Contains("Clients.EditAll");
+        CanEditAssigned = permissions.Contains("Clients.EditAssigned");
     }
 }
 

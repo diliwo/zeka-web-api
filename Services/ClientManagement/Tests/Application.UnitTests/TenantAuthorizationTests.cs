@@ -48,8 +48,7 @@ public sealed class TenantAuthorizationTests
         {
             new AuthorizedTenantMembership(selected, Guid.NewGuid(), [], "v1", DateTimeOffset.UtcNow),
             new AuthorizedTenantMembership(Guid.NewGuid(), Guid.NewGuid(), ["Clients.ViewAll"], "v1", DateTimeOffset.UtcNow),
-            new AuthorizedTenantMembership(selected, Guid.Empty, ["Clients.ViewAll"], "v1", DateTimeOffset.UtcNow),
-            new AuthorizedTenantMembership(selected, Guid.NewGuid(), ["Clients.ViewAll", "Unknown"], "v1", DateTimeOffset.UtcNow)
+            new AuthorizedTenantMembership(selected, Guid.Empty, ["Clients.ViewAll"], "v1", DateTimeOffset.UtcNow)
         })
         {
             var scope = new TenantContextScope();

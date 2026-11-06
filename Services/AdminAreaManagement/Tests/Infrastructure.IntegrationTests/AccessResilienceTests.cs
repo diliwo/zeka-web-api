@@ -161,7 +161,7 @@ public sealed class AccessResilienceTests
             ContractVersion = invalid == "version" ? 2 : 1, SubjectId = "subject", OrganisationId = organisation,
             OrganisationMembershipId = invalid == "membership" ? Guid.Empty : Guid.NewGuid(),
             EffectivePermissionCodes = invalid == "duplicate" ? new[] { "ReferenceData.View", "ReferenceData.View" }
-                : new[] { invalid == "permission" ? "unknown" : "ReferenceData.View" },
+                : new[] { invalid == "permission" ? "invalid permission" : "ReferenceData.View" },
             DecisionVersion = invalid == "decision" ? "" : "1",
             ObservedAtUtc = invalid == "observation" ? default : DateTimeOffset.UtcNow
         })
