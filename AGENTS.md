@@ -1,5 +1,24 @@
 # Zeka — Agent Engineering Contract
 
+## Linear issue admission and execution
+
+Chief coordinates from Linux, but never runs or controls owner-Windows tasks.
+On an owner-approved `Todo` issue, the owner adds the `Ready for Codex`
+label. The **authenticated physical-Windows Codex session must pull** the
+issue from Linear, ACK there, move it to `In Progress` and remove the
+label. Codex returns evidence in `In Review`; accepted work moves to
+`Done` only at the issue's actual Definition of Done.
+
+This is a **pull contract**, not an assumption of background polling or
+direct Chief-to-Windows delivery. Linear owns scope/authorization/status,
+GitHub owns source/PR/CI evidence, and Ubongo owns accepted architecture
+and governance. For M1, Codex owns application/CI-workflow implementation;
+GitHub Actions runs protected CI, and Chief independently reviews.
+Hephaestus is reserved for separately admitted Linux platform tasks.
+Owner approves consequential merges/deployments/security changes.
+
+---
+
 This file defines how AI coding agents must operate when working in the
 Zeka source repositories.
 
@@ -44,10 +63,8 @@ Accepted ADRs in Ubongo define Zeka's architectural constraints.
 
 ### Work authorization
 
-GitHub issues define authorized implementation work.
-
-Only work explicitly requested by the user through a specific GitHub
-issue may be implemented.
+An owner-approved Linear issue authorizes implementation; a duplicate
+GitHub Issue is not required. GitHub Issues may provide linked detail.
 
 ### Implementation
 
@@ -64,14 +81,14 @@ ADR.
 Tests provide implementation evidence.
 
 Passing tests do not override an accepted ADR or expand the scope of a
-GitHub issue.
+Linear issue.
 
 The authority model is therefore:
 
     Accepted Ubongo ADRs
         define architectural constraints
 
-    GitHub Issue
+    Owner-approved Linear issue
         defines authorized implementation scope
 
     Repository
@@ -84,15 +101,14 @@ None of these may silently override another.
 
 ---
 
-## 3. GitHub issue is the unit of work
+## 3. Approved Linear issue is the unit of work
 
-Do not modify production code unless the user has explicitly identified
-the GitHub issue to implement.
+Do not modify production code without an owner-approved Linear issue.
 
 Before implementation:
 
-1. Identify the exact GitHub issue requested by the user.
-2. Read the complete issue.
+1. Identify the exact owner-approved Linear issue.
+2. Read its complete issue scope and controlling decisions.
 3. Read its acceptance criteria.
 4. Read relevant issue discussion or clarification available to you.
 5. Inspect the affected implementation and tests.
@@ -109,11 +125,11 @@ Ask for clarification.
 
 ## 4. Scope discipline
 
-Implement only what is required to satisfy the requested GitHub issue.
+Implement only what is required to satisfy the approved Linear issue.
 
 Do not:
 
-- select another GitHub issue to work on;
+- select another Linear issue to work on;
 - implement nearby backlog items;
 - implement TODOs merely because they were discovered;
 - fix unrelated defects;
@@ -133,7 +149,7 @@ If unrelated problems are discovered:
 2. record them in the final report;
 3. explain their potential impact when relevant.
 
-Do not create a new GitHub issue unless explicitly requested.
+Do not create a duplicate GitHub Issue to authorize a Linear task.
 
 If completing the requested issue genuinely requires work outside its
 apparent scope, explain the dependency and request approval before
@@ -153,7 +169,7 @@ Before consequential architectural or cross-cutting implementation work:
 1. locate the local Ubongo repository;
 2. pull its latest branch;
 3. search the Zeka documentation for material relevant to the requested
-   GitHub issue;
+   Linear issue;
 4. read the relevant accepted ADRs;
 5. inspect supporting design documentation when needed.
 
@@ -195,7 +211,7 @@ Stay within the requested issue.
 
 ## 7. Architecture conflicts
 
-If the requested GitHub issue conflicts with an accepted ADR:
+If the approved Linear issue conflicts with an accepted ADR:
 
 1. identify the conflicting requirement;
 2. identify the relevant ADR;
@@ -389,7 +405,7 @@ easier.
 
 Before changing code:
 
-1. read the requested GitHub issue;
+1. read the approved Linear issue;
 2. inspect relevant existing code;
 3. inspect relevant tests;
 4. inspect relevant accepted ADRs;
@@ -504,7 +520,7 @@ Automated repair must not independently change:
 
 If a repair requires one of these changes, escalate instead.
 
-Automated repair must also remain within the GitHub issue that authorized
+Automated repair must also remain within the Linear issue that authorized
 the work.
 
 A failing unrelated test is not authorization to repair an unrelated
@@ -538,7 +554,7 @@ against PostgreSQL before claiming conformance.
 
 ## 17. Cross-service changes
 
-A GitHub issue may legitimately require changes across multiple Zeka
+A Linear issue may legitimately require changes across multiple Zeka
 repositories or services.
 
 Do not assume permission to modify another repository merely because the
@@ -556,29 +572,28 @@ Do not create hidden coupling to avoid coordinating the change properly.
 
 ---
 
-## 18. Git behavior
+## 18. Git behavior and standing Draft PR permission
 
-Unless explicitly requested, do not:
+For an owner-approved Linear task, Codex may commit, push to its own
+non-protected task branch, and create or update a linked **Draft PR**
+with source revision, issue reference and truthful test status.
+Every pushed agent branch must have a Draft PR. Ordinary PR-triggered
+CI may execute without a separate authorization.
 
-- commit;
-- push;
-- merge;
-- rebase;
-- force-push;
-- rewrite history;
-- delete branches;
-- create tags;
-- modify another repository.
+Without specific further owner approval, do not merge, deploy, push to
+protected branches, force-push, rewrite published history, delete
+branches, create release tags, publish packages, bypass checks, modify
+protected infrastructure, operate privileged credentials, or modify
+another repository beyond the approved scope.
 
-Inspecting Git history, branches, status, and diffs is allowed when
-needed to understand the requested work.
+Inspect existing working tree and worktrees before changes. Preserve
+unrelated local work and source/evidence references.
 
-Before implementation, inspect the working tree.
-
-Do not overwrite unrelated uncommitted user changes.
-
-If unrelated local modifications could interfere with the requested
-work, report them before proceeding.
+**After a branch is merged or explicitly abandoned**, safely remove its
+no-longer-needed checkout/worktree and task-created temporary clones
+only after checking for dirty, unpushed, active or evidence-dependent
+state. Include `zeka-v2-test-*` and `zeka-v2-delivery-git-*`
+Windows Temp clones. **No bulk cleanup of existing files now.**
 
 ---
 
@@ -640,7 +655,7 @@ Report them separately using a concise format such as:
     Impact:
     <why it matters>
 
-    Relation to current GitHub issue:
+    Relation to current Linear issue:
     Unrelated / Related but outside scope / Blocking
 
     Recommended next step:
@@ -654,7 +669,7 @@ A non-blocking discovery must not silently expand scope.
 
 ## 22. Completion criteria
 
-Do not declare a GitHub issue complete solely because the code compiles.
+Do not declare an approved Linear issue complete solely because the code compiles.
 
 Before reporting completion, verify as applicable:
 
@@ -679,7 +694,7 @@ After completing work, provide a concise implementation report containing:
 
 ### Issue
 
-GitHub issue implemented.
+Linear issue implemented.
 
 ### Summary
 
@@ -715,6 +730,10 @@ Any remaining uncertainty, required manual validation, or follow-up work.
 ---
 
 ## 24. Core operating principle
+
+Apply industry-standard, within-scope solutions by default; report them and escalate only genuine architecture, security or product trade-offs.
+
+Prioritize the [M1 Stage 1 API-first and browser journey](https://linear.app/zeka-saas/issue/ZEK-27).
 
 When uncertain, optimize for:
 
