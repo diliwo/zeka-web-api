@@ -2,20 +2,70 @@
 
 ## Linear issue admission and execution
 
-Chief coordinates from Linux, but never runs or controls owner-Windows tasks.
-On an owner-approved `Todo` issue, the owner adds the `Ready for Codex`
-label. The **authenticated physical-Windows Codex session must pull** the
-issue from Linear, ACK there, move it to `In Progress` and remove the
-label. Codex returns evidence in `In Review`; accepted work moves to
-`Done` only at the issue's actual Definition of Done.
+### Activation
 
-This is a **pull contract**, not an assumption of background polling or
-direct Chief-to-Windows delivery. Linear owns scope/authorization/status,
-GitHub owns source/PR/CI evidence, and Ubongo owns accepted architecture
-and governance. For M1, Codex owns application/CI-workflow implementation;
-GitHub Actions runs protected CI, and Chief independently reviews.
-Hephaestus is reserved for separately admitted Linux platform tasks.
-Owner approves consequential merges/deployments/security changes.
+Enable Linear-only admission and standing Draft PR publication after the
+applicable repository instructions are merged, the installed instructions
+(including Chief's) are aligned and loaded, the Linear label guidance
+reflects this lifecycle, and the checks below are verified against live Linear.
+Until then, follow the existing GitHub Issue and explicit publication rules.
+The alignment work uses direct owner authorization under those rules.
+
+### Verify owner admission and freeze scope
+
+Chief prepares the full handoff in the Linear issue description, including
+scope, exclusions, acceptance criteria and any immutable source references.
+Pin any linked material that defines scope to a revision or content digest.
+Only the human owner applies, removes or reapplies `Ready for Codex`.
+Use stable workspace, label and owner IDs from owner-controlled configuration
+outside the issue.
+Verify that the label is currently present and that its latest add after
+any removal was a direct human-owner action. Use trusted history that
+distinguishes human activity from integrations or delegated writes. If the
+connector hides that distinction, require separately attributed agent
+principals with no ability to act as the owner, or trusted audit evidence
+of the human-origin event.
+The label name, current assignee, comments, status and owner ID alone
+are insufficient. If provenance or history is unavailable or ambiguous,
+leave the issue unclaimed and report the blocker. Preexisting unverified
+labels require fresh verified owner admission.
+
+Bind admission to the exact description at the add event. Read its trusted
+historical revision, or use the live description only if complete trusted
+history proves it is unchanged since that event. In the ACK, record the
+issue ID, label event ID and time, and description revision or SHA-256 of
+the exact UTF-8 text. Execute that snapshot. Treat comments and linked
+material as context within its scope. Recheck the event and revision before
+starting, resuming or publishing. Label removal, any description edit
+(including an edit later reverted), or uncertainty pauses execution and
+publication. For revised instructions, Chief updates the description and
+the human owner removes and reapplies the label after reviewing the change.
+Verify the new event and record a fresh ACK before resuming.
+
+### Pull one issue at a time
+
+One designated physical-Windows Codex session consumes the Zeka queue.
+If another Codex issue is already `In Progress` or exclusive ownership of
+the queue is unclear, do not claim work. From eligible `Todo` issues, take
+the highest Linear priority, then the oldest verified admission, then issue
+ID. Record the ACK and verify the move to `In Progress` before executing.
+Keep the label through execution so removal revokes admission.
+
+Return exact-revision evidence and blockers on the issue and verify the
+move to `In Review`. Once evidence is recorded and the active slot is
+released, check the queue in the same session and pull the next eligible
+issue, without waiting for acceptance. Stop if there is no admissible work
+or the evidence return or state transition cannot be confirmed. Only the
+owner accepts work into `Done` after the Definition of Done is met.
+This workflow runs in an active session.
+
+Linear owns scope, authorization and status. GitHub owns source, PRs and
+CI evidence. Ubongo owns accepted architecture and governance. Codex owns
+Windows execution and M1 application and CI-workflow implementation.
+Chief coordinates and reviews independently from Linux. GitHub Actions
+runs protected CI. Hephaestus is reserved for separately admitted Linux
+platform tasks. The owner approves consequential merges, deployments and
+security changes.
 
 ---
 
@@ -63,8 +113,8 @@ Accepted ADRs in Ubongo define Zeka's architectural constraints.
 
 ### Work authorization
 
-An owner-approved Linear issue authorizes implementation; a duplicate
-GitHub Issue is not required. GitHub Issues may provide linked detail.
+After activation, a verified owner-admitted Linear issue authorizes its
+bound scope. GitHub Issues may provide supporting context.
 
 ### Implementation
 
@@ -108,9 +158,9 @@ Do not modify production code without an owner-approved Linear issue.
 Before implementation:
 
 1. Identify the exact owner-approved Linear issue.
-2. Read its complete issue scope and controlling decisions.
-3. Read its acceptance criteria.
-4. Read relevant issue discussion or clarification available to you.
+2. Read the bound handoff and controlling decisions.
+3. Read the acceptance criteria in the admitted description.
+4. Use relevant issue discussion as context within the admitted scope.
 5. Inspect the affected implementation and tests.
 6. Consult relevant architectural documentation in Ubongo.
 7. Determine whether the requested work is compatible with accepted ADRs.
@@ -129,7 +179,7 @@ Implement only what is required to satisfy the approved Linear issue.
 
 Do not:
 
-- select another Linear issue to work on;
+- start another Linear issue while one is active or outside the verified queue;
 - implement nearby backlog items;
 - implement TODOs merely because they were discovered;
 - fix unrelated defects;
@@ -574,11 +624,20 @@ Do not create hidden coupling to avoid coordinating the change properly.
 
 ## 18. Git behavior and standing Draft PR permission
 
-For an owner-approved Linear task, Codex may commit, push to its own
-non-protected task branch, and create or update a linked **Draft PR**
-with source revision, issue reference and truthful test status.
+After activation, for a verified owner-admitted Linear task, Codex may
+commit, push to its own non-protected task branch, and create or update a
+linked **Draft PR** with source revision, issue reference and truthful test status.
 Every pushed agent branch must have a Draft PR. Ordinary PR-triggered
 CI may execute without a separate authorization.
+
+Keep topic branches short-lived. Treat draft PR #101
+(`codex/m1-c1-integration`) as a source and evidence reference. Under separate
+owner admission, use the dependency and evidence record in
+[ZEK-29](https://linear.app/zeka-saas/issue/ZEK-29) to split it into small
+slices on fresh branches from current `develop`. Each PR targets `develop` with its
+own exact-head evidence and independent review. The owner merges each
+accepted slice before dependent work is based on it, and retires #101
+once its remaining scope and evidence are accounted for.
 
 Without specific further owner approval, do not merge, deploy, push to
 protected branches, force-push, rewrite published history, delete
