@@ -1,5 +1,3 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Assessments.Common;
 using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.Common.Models;
@@ -17,18 +15,16 @@ namespace ClientManagement.Application.Assessments.Queries.GetBilansList
         public class GetArchivedBilansListQueryHandler : IRequestHandler<GetArchivedBilansListQuery, PaginatedList<AssessmentDto>>
         {
             private readonly IRepositoryManager _repository;
-            private readonly IMapper _mapper;
 
-            public GetArchivedBilansListQueryHandler(IRepositoryManager repository, IMapper mapper)
+            public GetArchivedBilansListQueryHandler(IRepositoryManager repository)
             {
                 _repository = repository;
-                _mapper = mapper;
             }
 
             public async Task<PaginatedList<AssessmentDto>> Handle(GetArchivedBilansListQuery request, CancellationToken cancellationToken)
             {
                 return await _repository.Assessment.GetArchivedBilans()
-                    .ProjectTo<AssessmentDto>(_mapper.ConfigurationProvider)
+                    .ProjectAssessmentDtos()
                     .OrderByDescending(s => s.BilanId)
                     .PaginatedListAsync(request.PageNumber, request.PageSize);
             }

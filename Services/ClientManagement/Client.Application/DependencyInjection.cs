@@ -26,7 +26,6 @@ namespace ClientManagement.Application
             services.AddTransient<IDocumentGeneratorService, DocumentGeneratorService>();
             services.AddScoped<ClientManagement.Application.Common.Authorization.TenantOperation>();
             services.AddScoped<ClientManagement.Application.Common.Authorization.PostCommitNotifications>();
-            services.AddAutoMapper(Assembly.GetExecutingAssembly());
             services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
             services.AddMediatR(cfg => {
                 cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());

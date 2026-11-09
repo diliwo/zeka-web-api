@@ -1,6 +1,5 @@
-﻿
+
 using Adminarea.Grpc.Protos;
-using AutoMapper.Configuration.Conventions;
 
 namespace ClientManagement.Application.Common.Services
 {

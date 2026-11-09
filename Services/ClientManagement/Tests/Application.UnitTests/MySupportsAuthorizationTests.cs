@@ -21,7 +21,7 @@ public sealed class MySupportsAuthorizationTests
         ((SupportProbe)(object)support).ExpectedMembership = membership;
         var repository = System.Reflection.DispatchProxy.Create<IRepositoryManager, RepositoryProbe>();
         ((RepositoryProbe)(object)repository).Support = support;
-        var handler = new GetSupportsBySocialWorkersQuery.GetClientsByStaffMembersQueryHandler(repository, operation, null!, null!);
+        var handler = new GetSupportsBySocialWorkersQuery.GetClientsByStaffMembersQueryHandler(repository, operation, null!);
         await Assert.ThrowsAsync<ReachedPort>(() => handler.Handle(new() { IsActive = true }, default));
     }
 
@@ -30,7 +30,7 @@ public sealed class MySupportsAuthorizationTests
     {
         var scope = new TenantContextScope();
         var operation = new TenantOperation(null!, new Identity(Guid.NewGuid()), scope, scope);
-        var handler = new GetSupportsBySocialWorkersQuery.GetClientsByStaffMembersQueryHandler(null!, operation, null!, null!);
+        var handler = new GetSupportsBySocialWorkersQuery.GetClientsByStaffMembersQueryHandler(null!, operation, null!);
         var error = await Assert.ThrowsAsync<TenantAccessException>(() => handler.Handle(new(), default));
         Assert.Equal(AccessFailure.Denied, error.Failure);
     }

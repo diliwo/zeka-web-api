@@ -1,11 +1,8 @@
-﻿using AutoMapper;
-using ClientManagement.Application.Common.Mappings;
-using ClientManagement.Core.Entities;
-using ClientManagement.Core.Enums;
+﻿using ClientManagement.Core.Enums;
 
 namespace ClientManagement.Application.Assessments.Common
 {
-    public class AssessmentDto : IMapFrom<Assessment>
+    public class AssessmentDto
     {
         public int BilanId { get; set; }
         public bool IsFinalized { get; set; } = false;
@@ -45,14 +42,5 @@ namespace ClientManagement.Application.Assessments.Common
         public bool ProfessionalExpectationItKnowledgeInternet { get; set; }
         public bool ProfessionalExpectationItKnowledgeWord { get; set; }
         public IEnumerable<ProfessionalAssessmentDto> BilanProfessions { get; set; } = new List<ProfessionalAssessmentDto>();
-
-        public void Mapping(Profile profile)
-        {
-            profile.CreateMap<Assessment, AssessmentDto>()
-                .ForMember(f => f.BilanId,
-                    opt => opt.MapFrom(b => b.Id))
-                .ForMember(b => b.CreationDate,
-                    opt => opt.MapFrom(b => b.Created));
-        }
     }
 }
