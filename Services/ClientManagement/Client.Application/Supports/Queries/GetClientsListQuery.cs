@@ -1,5 +1,4 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
+using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -12,18 +11,17 @@ namespace ClientManagement.Application.Supports.Queries
         public class GetSupportsListQueryHandler : IRequestHandler<GetClientsListQuery, SupportsListVm>
         {
             private readonly IRepositoryManager _repository;
-            private readonly IMapper _mapper;
 
-            public GetSupportsListQueryHandler(IRepositoryManager repository, IMapper mapper)
+
+            public GetSupportsListQueryHandler(IRepositoryManager repository)
             {
                 _repository = repository;
-                _mapper = mapper;
             }
 
             public async Task<SupportsListVm> Handle(GetClientsListQuery request, CancellationToken cancellationToken)
             {
                 var supports = await _repository.Support.GetSupports()
-                    .ProjectTo<SupportDto>(_mapper.ConfigurationProvider)
+                    .ProjectSupports()
                     .OrderBy(s => s.StartDate)
                     .ToListAsync(cancellationToken);
 

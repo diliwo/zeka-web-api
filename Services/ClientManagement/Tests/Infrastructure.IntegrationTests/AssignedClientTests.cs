@@ -47,10 +47,8 @@ public sealed class AssignedClientTests(TenantDatabase fixture) : IClassFixture<
         Assert.Equal(new[] { visibleId }, await database.Visible<Client>().Select(x => x.Id).ToArrayAsync());
         Assert.Null(await database.Visible<Client>().SingleOrDefaultAsync(x => x.Id == hiddenId));
         var allowed = await database.Visible<Client>().SingleAsync();
-        var mapper = new AutoMapper.MapperConfiguration(configuration =>
-            configuration.AddProfile<ClientManagement.Application.Common.Mappings.MappingProfile>()).CreateMapper();
         var detail = await new ClientManagement.Application.Clients.Queries.GetClientDetail.GetClientDetailQuery.GetClientDetailQueryHandler(
-            new RepositoryManager(database), mapper).Handle(
+            new RepositoryManager(database)).Handle(
                 new ClientManagement.Application.Clients.Queries.GetClientDetail.GetClientDetailQuery { ClientId = visibleId }, default);
         Assert.Equal("synthetic@example.invalid", detail.Email);
         Assert.Equal("Test street", detail.Address.Street);

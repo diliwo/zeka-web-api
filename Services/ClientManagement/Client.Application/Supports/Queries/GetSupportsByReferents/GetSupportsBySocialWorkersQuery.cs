@@ -1,4 +1,3 @@
-using AutoMapper;
 using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.Common.Models;
@@ -24,18 +23,16 @@ namespace ClientManagement.Application.Supports.Queries.GetSupportsByReferents
             private readonly IRepositoryManager _repository;
             private ISortHelper<MySupportDto> _sortMyConsultantSupports;
             private readonly TenantOperation _operation;
-            private readonly IMapper _mapper;
+
 
             public GetClientsByStaffMembersQueryHandler(
                 IRepositoryManager repository,
                 TenantOperation operation,
-                ISortHelper<MySupportDto> sortMyConsultantSupports,
-                IMapper mapper)
+                ISortHelper<MySupportDto> sortMyConsultantSupports)
             {
                 _repository = repository;
                 _sortMyConsultantSupports = sortMyConsultantSupports;
                 _operation = operation;
-                _mapper = mapper;
             }
 
             public async Task<PaginatedList<MySupportDto>> Handle(GetSupportsBySocialWorkersQuery request, CancellationToken cancellationToken)

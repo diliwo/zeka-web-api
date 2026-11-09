@@ -1,5 +1,3 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Assessments.Common;
 using ClientManagement.Core.Interfaces;
 using MediatR;
@@ -15,12 +13,10 @@ namespace ClientManagement.Application.Assessments.Queries.GetCurrentBilan
         public class GetClientDetailQueryHandler : IRequestHandler<GetCurrentAssessmentQuery, AssessmentDto>
         {
             private readonly IRepositoryManager _repository;
-            private readonly IMapper _mapper;
 
-            public GetClientDetailQueryHandler(IRepositoryManager repository, IMapper mapper)
+            public GetClientDetailQueryHandler(IRepositoryManager repository)
             {
                 _repository = repository;
-                _mapper = mapper;
             }
 
             public async Task<AssessmentDto> Handle(GetCurrentAssessmentQuery request, CancellationToken cancellationToken)
@@ -28,7 +24,7 @@ namespace ClientManagement.Application.Assessments.Queries.GetCurrentBilan
                 var vm = await _repository.Assessment.GetAssessments(request.ClientId)
                     .Where(b => b.IsFinalized != true)
                     .AsNoTracking()
-                    .ProjectTo<AssessmentDto>(_mapper.ConfigurationProvider)
+                    .ProjectAssessmentDtos()
                     .SingleOrDefaultAsync(cancellationToken);
 
                 return vm;

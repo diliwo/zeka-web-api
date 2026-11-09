@@ -1,11 +1,8 @@
-﻿using AutoMapper;
-using ClientManagement.Application.Common.Mappings;
-using ClientManagement.Core.Entities;
-using ClientManagement.Core.Enums;
+﻿using ClientManagement.Core.Enums;
 
 namespace ClientManagement.Application.SchoolRegistations.Common
 {
-    public class SchoolRegistrationDto : IMapFrom<School>
+    public class SchoolRegistrationDto
     {
         public int SchoolRegistrationId { get; set; }
         public int TrainingId { get; set; }
@@ -21,20 +18,5 @@ namespace ClientManagement.Application.SchoolRegistations.Common
         public Level CourseLevel { get; set; }
         public SchoolResult Result { get; set; }
         public string? Note { get; set; }
-
-        public void Mapping(Profile profile)
-        {
-            profile.CreateMap<SchoolRegistration, SchoolRegistrationDto>()
-                .ForMember(s => s.SchoolRegistrationId,
-                    opt => opt.MapFrom(e => e.Id))
-                .ForMember(s => s.TrainingName,
-                    opt => opt.MapFrom(e => e.Training.Name))
-                .ForMember(s => s.BenficiaryName,
-                    opt => opt.MapFrom(e => e.Client.FullName))
-                .ForMember(s => s.SchoolName,
-                    opt => opt.MapFrom(e => e.School.Name))
-                .ForMember(s => s.TrainingTypeName,
-                    opt => opt.MapFrom(e => e.TrainingType.Name));
-        }
     }
 }

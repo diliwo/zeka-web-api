@@ -1,5 +1,4 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
+using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.QuarterlyMonitorings.Common;
 using ClientManagement.Core.Interfaces;
 using MediatR;
@@ -21,21 +20,17 @@ namespace ClientManagement.Application.QuarterlyMonitorings.Queries.GetById
     public class GetQuarterlyMonitoringsByIdQueryHandler : IRequestHandler<GetQuarterlyMonitoringsByIdQuery, QuarterlyMonitoringDto>
     {
         private readonly IRepositoryManager _repository;
-        private readonly IMapper _mapper;
 
-        public GetQuarterlyMonitoringsByIdQueryHandler(IRepositoryManager repository, IMapper mapper)
+
+        public GetQuarterlyMonitoringsByIdQueryHandler(IRepositoryManager repository)
         {
             _repository = repository;
-            _mapper = mapper;
         }
 
         public async Task<QuarterlyMonitoringDto> Handle(GetQuarterlyMonitoringsByIdQuery query, CancellationToken cancellationToken)
         {
             var qMonitoring =  await _repository.MonitoringReport.GetQuarterlyMonitoringById(query.Id)
-                .Include(q => q.Client)
-                .Include(q => q.SocialWorker)
-                .Include(q => q.MonitoringAction)
-                .ProjectTo<QuarterlyMonitoringDto>(_mapper.ConfigurationProvider)
+                .ProjectQuarterly()
                 .SingleOrDefaultAsync(cancellationToken);
             return qMonitoring;
         }

@@ -1,5 +1,3 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
@@ -13,18 +11,16 @@ namespace ClientManagement.Application.Clients.Queries.GetClients
         public class GetClientsBySearchTextQueryHandler : IRequestHandler<GetClientsBySearchTextQuery, ClientsDto>
         {
             private readonly IRepositoryManager _repository;
-            private readonly IMapper _mapper;
 
-            public GetClientsBySearchTextQueryHandler(IRepositoryManager repository, IMapper mapper)
+            public GetClientsBySearchTextQueryHandler(IRepositoryManager repository)
             {
                 _repository = repository;
-                _mapper = mapper;
             }
 
             public async Task<ClientsDto> Handle(GetClientsBySearchTextQuery query, CancellationToken cancellationToken)
             {
                 var Clients = _repository.Client.GetClientsBySearchText(query.SearchText)
-                    .ProjectTo<ClientLookUpDto>(_mapper.ConfigurationProvider)
+                    .ProjectLookup()
                     .OrderBy(b => b.Name)
                     .ToList();
 
@@ -36,6 +32,5 @@ namespace ClientManagement.Application.Clients.Queries.GetClients
                 return vm;
             }
         }
-
     }
 }
