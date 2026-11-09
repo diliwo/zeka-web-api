@@ -55,4 +55,5 @@
   <PackageReference Include="Grpc.Tools" Version="2.49.0" PrivateAssets="all" />
   <Protobuf Include="..\..\AdminAreaManagement\AdminAreaManagement.Application\Common\Protos\adminarea.proto" GrpcServices="Client" />
 </ItemGroup>
+  <ItemGroup><Compile Include="../../../Tools/Shared/OwnerSqlExecution.cs" Link="Evidence/OwnerSqlExecution.cs" /></ItemGroup>
 </Project>

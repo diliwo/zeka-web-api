@@ -19,6 +19,15 @@ public sealed class User : IdentityUser<Guid>
 
     public DateTimeOffset? UpdatedAtUtc { get; private set; }
 
+
+    // Confirmation authority belongs to the admitted adapter; this only guards the Identity state transition.
+    public void ActivateConfirmedIdentity(DateTimeOffset activatedAtUtc)
+    {
+        if (Status != UserStatus.PendingVerification || !EmailConfirmed || activatedAtUtc < CreatedAtUtc)
+            throw new InvalidOperationException("USER_CONFIRMED_ACTIVATION_REJECTED");
+        Status = UserStatus.Active;
+        UpdatedAtUtc = activatedAtUtc;
+    }
     public static User Create(
         string email,
         string userName,

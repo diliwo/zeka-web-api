@@ -352,16 +352,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                 });
 
             migrationBuilder.InsertData(
-                table: "Teams",
-                columns: new[] { "Id", "Acronym", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
-                values: new object[,]
-                {
-                    { 1, "SES", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "School & Education Service", false, "Zeka" },
-                    { 2, "IS", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Imigration Service", false, "Zeka" },
-                    { 3, "SPI", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Socio-Professional Integration Service", false, "Zeka" }
-                });
-
-            migrationBuilder.InsertData(
                 table: "TrainingFields",
                 columns: new[] { "TrainingFieldId", "Created", "CreatedBy", "LastModified", "LastModifiedBy", "Name", "Softdelete", "TenantName" },
                 values: new object[,]
@@ -379,16 +369,6 @@ namespace AdminAreaManagement.Infrastructure.Migrations
                     { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Bachelor", false, "Zeka" },
                     { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Master", false, "Zeka" },
                     { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", null, "", "Master of Business Administration", false, "Zeka" }
-                });
-
-            migrationBuilder.InsertData(
-                table: "StaffMembers",
-                columns: new[] { "Id", "Created", "CreatedBy", "FirstName", "LastModified", "LastModifiedBy", "LastName", "Softdelete", "TeamId", "TenantName", "UserName" },
-                values: new object[,]
-                {
-                    { 1, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", "John", null, "", "Doe", false, 1, "Zeka", "Cambridge" },
-                    { 2, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", "Helen", null, "", "Ripley", false, 3, "Zeka", "hripley" },
-                    { 3, new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), "", "Adama", null, "", "Rezegova", false, 2, "Zeka", "Cambridge" }
                 });
 
             migrationBuilder.InsertData(

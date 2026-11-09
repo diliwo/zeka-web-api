@@ -40,4 +40,5 @@
   </ItemGroup>
 
 <ItemGroup><PackageReference Include="Zeka.Extensions.MultiTenancy.EntityFrameworkCore" Version="2.0.0-preview.1" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../Tools/Shared/OwnerSqlExecution.cs" Link="Evidence/OwnerSqlExecution.cs" /></ItemGroup>
 </Project>
