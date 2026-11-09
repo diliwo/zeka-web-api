@@ -110,11 +110,33 @@ public abstract class ValidatorContractTests
     [Fact]
     public async Task Discovery_timeout_is_bounded()
     {
+        var trace = new DeadlineTrace();
+        trace.Event("fixture-start");
         using var fixture = new AuthenticationFixture();
-        await using var host = await Host(fixture, new HangingSource());
+        trace.Event("fixture-ready");
+        using var activity = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == JwksTokenHandler.DiagnosticsName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStarted = item => { if (trace.Current.Value == trace.Id) trace.Event("auth-entry"); }
+        };
+        ActivitySource.AddActivityListener(activity);
+        await using var host = await Host(fixture, new HangingSource(trace), trace: trace);
+        trace.Event("host-ready");
         var started = Stopwatch.StartNew();
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await host.Send(fixture.Token())).StatusCode);
-        Assert.InRange(started.Elapsed.TotalSeconds, 1, 4);
+        try
+        {
+            trace.Event("token-start", trace.Id);
+            var token = fixture.Token();
+            trace.Event("token-ready", trace.Id);
+            trace.Event("http-start", trace.Id);
+            using var response = await host.Send(token);
+            trace.Event("http-complete", trace.Id);
+            trace.Status = (int)response.StatusCode;
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.InRange(started.Elapsed.TotalSeconds, 1, 4);
+        }
+        finally { trace.Export(started.Elapsed.TotalMilliseconds, GetType().FullName!); }
     }
 
     [Theory]
@@ -180,7 +202,7 @@ public abstract class ValidatorContractTests
             || value.Contains(fixture.Key.ExportRSAPublicKeyPem()));
     }
 
-    private async Task<RunningHost> Host(AuthenticationFixture fixture, IJwksDocumentSource source, ILoggerProvider? logs = null)
+    private async Task<RunningHost> Host(AuthenticationFixture fixture, IJwksDocumentSource source, ILoggerProvider? logs = null, DeadlineTrace? trace = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
@@ -189,27 +211,95 @@ public abstract class ValidatorContractTests
         Register(builder.Services, fixture.Configuration());
         builder.Services.AddSingleton(source);
         builder.Services.AddSingleton<TimeProvider>(fixture.Clock);
+        if (trace is not null)
+            builder.Services.AddSingleton<IJwksTrust>(provider =>
+                new ObservedTrust(ActivatorUtilities.CreateInstance<JwksTrust>(provider), trace));
         var app = builder.Build();
+        if (trace is not null)
+            app.Use(async (context, next) =>
+            {
+                trace.Current.Value = context.Request.Headers["X-Zeka-Diagnostic"].ToString();
+                trace.Event("server-entry");
+                try { await next(context); }
+                finally { trace.Event("server-exit"); trace.Current.Value = null; }
+            });
         app.UseAuthentication(); app.UseAuthorization();
         app.MapGet("/protected", () => "ok").RequireAuthorization();
         await app.StartAsync();
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
-        return new(app, new HttpClient { BaseAddress = new Uri(address) });
+        return new(app, new HttpClient { BaseAddress = new Uri(address) }, trace);
     }
-    private sealed class RunningHost(WebApplication app, HttpClient client) : IAsyncDisposable
+    private sealed class RunningHost(WebApplication app, HttpClient client, DeadlineTrace? trace) : IAsyncDisposable
     {
         public WebApplication App => app;
         public Task<HttpResponseMessage> Send(string token)
         {
             var request = new HttpRequestMessage(HttpMethod.Get, "/protected");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (trace is not null) request.Headers.Add("X-Zeka-Diagnostic", trace.Id);
             return client.SendAsync(request);
         }
         public async ValueTask DisposeAsync() { client.Dispose(); await app.DisposeAsync(); }
     }
-    private sealed class HangingSource : IJwksDocumentSource
+    private sealed class HangingSource(DeadlineTrace trace) : IJwksDocumentSource
     {
-        public async Task<string> ReadAsync(CancellationToken token) { await Task.Delay(Timeout.Infinite, token); return ""; }
+        public async Task<string> ReadAsync(CancellationToken token)
+        {
+            var call = Interlocked.Increment(ref trace.SourceCalls);
+            var request = trace.Current.Value ?? "non-http";
+            trace.Event("source-entry", request, call);
+            using var registration = token.Register(() => trace.Event("source-cancel", request, call));
+            try { await Task.Delay(Timeout.Infinite, token); return ""; }
+            finally { trace.Event("source-exit", request, call); }
+        }
+    }
+    private sealed class ObservedTrust(IJwksTrust inner, DeadlineTrace trace) : IJwksTrust
+    {
+        public async Task<SecurityKey> ResolveAsync(string kid, CancellationToken cancellationToken = default)
+        {
+            var call = Interlocked.Increment(ref trace.ResolveCalls);
+            var active = Interlocked.Increment(ref trace.Active);
+            if (active > 1) Interlocked.Increment(ref trace.Overlaps);
+            trace.Event("resolve-entry", call: call);
+            try { return await inner.ResolveAsync(kid, cancellationToken); }
+            finally { trace.Event("resolve-exit", call: call); Interlocked.Decrement(ref trace.Active); }
+        }
+        public async Task<bool> IsReadyAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref trace.ReadyCalls);
+            trace.Event("ready-entry");
+            try { return await inner.IsReadyAsync(cancellationToken); }
+            finally { trace.Event("ready-exit"); }
+        }
+    }
+    private sealed class DeadlineTrace
+    {
+        private readonly Stopwatch clock = Stopwatch.StartNew();
+        private readonly System.Collections.Concurrent.ConcurrentQueue<object> events = new();
+        private static readonly object outputGate = new();
+        public string Id { get; } = Guid.NewGuid().ToString("N");
+        public AsyncLocal<string?> Current { get; } = new();
+        public int SourceCalls, ResolveCalls, ReadyCalls, Active, Overlaps;
+        public int Status { get; set; }
+        public void Event(string name, string? request = null, int call = 0) =>
+            events.Enqueue(new { name, ms = clock.Elapsed.TotalMilliseconds, request = request ?? Current.Value ?? "non-http", call });
+        public void Export(double combinedMs, string consumer)
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                trial = Environment.GetEnvironmentVariable("ZEKA_AUTH_DIAGNOSTIC_TRIAL") ?? "ci-context",
+                source = Id, consumer, status = Status, combinedMs,
+                sourceCalls = SourceCalls, resolveCalls = ResolveCalls, readyCalls = ReadyCalls,
+                overlaps = Overlaps, events = events.ToArray()
+            });
+            var path = Environment.GetEnvironmentVariable("ZEKA_AUTH_TIMING_PATH");
+            if (string.IsNullOrEmpty(path)) Console.WriteLine("ZEKA_AUTH_TIMING " + json);
+            else lock (outputGate)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+                File.AppendAllText(path, json + Environment.NewLine);
+            }
+        }
     }
     private sealed class CapturedLogs : ILoggerProvider
     {
