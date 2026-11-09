@@ -78,22 +78,56 @@ public sealed partial class BeneficiaryB1TestController(BeneficiaryB1Service ser
         using (document)
         {
             var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 3
+            JsonElement action = default;
+            var linked = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("action", out action);
+            if (linked && Request.Query.Count != 0)
+                throw new BeneficiaryWireException("INVALID_REQUEST");
+            if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != (linked ? 4 : 3)
                 || !root.TryGetProperty("occurredAtUtc", out var occurred)
                 || !root.TryGetProperty("conciseNote", out var note)
                 || !root.TryGetProperty("idempotencyKey", out var key)
                 || occurred.ValueKind != JsonValueKind.String || note.ValueKind != JsonValueKind.String
                 || key.ValueKind != JsonValueKind.String)
                 throw new BeneficiaryWireException("INVALID_REQUEST");
-            var timestamp = occurred.GetString() ?? string.Empty;
+            var timestamp = linked ? WireString(occurred) : occurred.GetString() ?? string.Empty;
             if (!UtcInstant().IsMatch(timestamp) || !DateTime.TryParseExact(timestamp,
                     ["yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.FFF'Z'"],
                     CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
                     out var utc))
                 throw new BeneficiaryWireException("INVALID_REQUEST");
+            if (linked)
+                return StatusCode(StatusCodes.Status201Created, await service.RecordLinkedAsync(id, utc,
+                    WireString(note), WireString(key), LinkedAction(action), token));
             var result = await service.RecordAsync(id, utc, note.GetString()!, key.GetString()!, token);
             return StatusCode(StatusCodes.Status201Created, result);
         }
+    }
+
+    private static FollowUpActionInput LinkedAction(JsonElement action)
+    {
+        if (action.ValueKind != JsonValueKind.Object || action.EnumerateObject().Count() != 3
+            || !action.TryGetProperty("purpose", out var purpose)
+            || !action.TryGetProperty("dueLocalDate", out var due)
+            || !action.TryGetProperty("assigneeMembershipId", out var assignee)
+            || purpose.ValueKind != JsonValueKind.String || due.ValueKind != JsonValueKind.String
+            || assignee.ValueKind != JsonValueKind.String)
+            throw new BeneficiaryWireException("INVALID_REQUEST");
+        var date = WireString(due);
+        var membership = WireString(assignee);
+        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var day) || day == default
+            || day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) != date
+            || !Guid.TryParseExact(membership, "D", out var member) || member == Guid.Empty
+            || member.ToString("D") != membership)
+            throw new BeneficiaryWireException("INVALID_REQUEST");
+        return new FollowUpActionInput(WireString(purpose), day, member);
+    }
+
+    private static string WireString(JsonElement value)
+    {
+        try { return value.GetString() ?? string.Empty; }
+        catch (InvalidOperationException) { throw new BeneficiaryWireException("INVALID_REQUEST"); }
+        catch (ArgumentException) { throw new BeneficiaryWireException("INVALID_REQUEST"); }
     }
 
     private static int Id(string text) => PositiveDecimal().IsMatch(text)
