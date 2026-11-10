@@ -1,3 +1,4 @@
+using ClientManagement.API.LocalDevelopment;
 using ClientManagement.API.Services;
 using Zeka.Extensions.MultiTenancy.AspNetCore;
 using ClientManagement.API;
@@ -23,6 +24,7 @@ builder.Services.AddScoped<ClientManagement.Application.Common.Authorization.IOp
 builder.Services.AddScoped<ClientManagement.Infrastructure.Authorization.ITenantAccessCredential>(sp => sp.GetRequiredService<TenantRequestIdentity>());
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+var linkedInteractionEnabled = builder.AddLocalLinkedInteraction();
 builder.Services.AddWebServices(builder.Configuration);
 builder.Services.AddRabbitMqEventBus(builder.Configuration)
     .AddRabbitMqSubscriberService(builder.Configuration)
@@ -48,5 +50,6 @@ app.UseMiddleware<TenantAccessMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();
+if (linkedInteractionEnabled) app.MapLocalLinkedInteraction();
 
 app.Run();

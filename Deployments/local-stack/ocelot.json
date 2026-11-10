@@ -113,6 +113,32 @@
         "UseProxy": false
       },
       "DangerousAcceptAnyServerCertificateValidator": false
+    },
+    {
+      "Key": "GatewayBrowserTransport:6",
+      "FileCacheOptions": {
+        "TtlSeconds": 0
+      },
+      "UpstreamPathTemplate": "/api/v1/beneficiaries/{beneficiaryId}/interactions",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "DownstreamPathTemplate": "/api/v1/beneficiaries/{beneficiaryId}/interactions",
+      "RouteIsCaseSensitive": true,
+      "HttpHandlerOptions": {
+        "AllowAutoRedirect": false,
+        "UseCookieContainer": false,
+        "UseTracing": false,
+        "UseProxy": false
+      },
+      "DangerousAcceptAnyServerCertificateValidator": false,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "client",
+          "Port": 8080
+        }
+      ]
     }
   ]
 }

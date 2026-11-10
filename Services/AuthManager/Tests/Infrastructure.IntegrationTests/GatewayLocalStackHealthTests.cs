@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Ocelot.Configuration.File;
@@ -25,6 +26,8 @@ public sealed class GatewayLocalStackHealthTests
 {
     private const string Origin = "https://browser.example.invalid";
     private const string CsrfPath = "/api/v1/browser-session/csrf";
+    private const string B2Path = "/api/v1/beneficiaries/42/interactions";
+    private const string B2Key = "GatewayBrowserTransport:6";
 
     [Fact]
     public async Task LocalStack_registers_the_gateway_check_and_status_only_health_routes()
@@ -37,8 +40,14 @@ public sealed class GatewayLocalStackHealthTests
         await AssertHealthAsync(host.Http, "/health/live", HttpStatusCode.OK);
         await AssertHealthAsync(host.Http, "/health/ready", HttpStatusCode.OK);
         Assert.Empty(host.Received);
-        Assert.Equal(6, host.Routes.Routes.Count(route => route.Key!.StartsWith("GatewayBrowserTransport:")));
-        Assert.All(host.Routes.Routes.Where(route => route.Key!.StartsWith("GatewayBrowserTransport:")), route =>
+        var browserRoutes = host.Routes.Routes.Where(route => route.Key!.StartsWith("GatewayBrowserTransport:")).ToArray();
+        Assert.Equal(7, browserRoutes.Length);
+        var linkedInteraction = Assert.Single(browserRoutes, route => route.Key == B2Key);
+        Assert.Equal("http", linkedInteraction.DownstreamScheme);
+        var client = Assert.Single(linkedInteraction.DownstreamHostAndPorts);
+        Assert.Equal("client", client.Host);
+        Assert.Equal(8080, client.Port);
+        Assert.All(browserRoutes.Where(route => route.Key != B2Key), route =>
         {
             Assert.Equal("https", route.DownstreamScheme);
             var destination = Assert.Single(route.DownstreamHostAndPorts);
@@ -142,6 +151,11 @@ public sealed class GatewayLocalStackHealthTests
     [InlineData("proxy")]
     [InlineData("missing-route")]
     [InlineData("duplicate-route")]
+    [InlineData("missing-b2")]
+    [InlineData("b2-scheme")]
+    [InlineData("b2-host")]
+    [InlineData("b2-port")]
+    [InlineData("b2-second-target")]
     public async Task Invalid_browser_route_options_fail_readiness_and_remove_only_browser_routes(string mutation)
     {
         await using var host = await StartAsync(mutateRoutes: file =>
@@ -162,6 +176,11 @@ public sealed class GatewayLocalStackHealthTests
                 case "proxy": route.HttpHandlerOptions.UseProxy = true; break;
                 case "missing-route": file.Routes.RemoveAt(0); break;
                 case "duplicate-route": file.Routes.Add(route); break;
+                case "missing-b2": file.Routes.RemoveAt(6); break;
+                case "b2-scheme": file.Routes[6].DownstreamScheme = "https"; break;
+                case "b2-host": file.Routes[6].DownstreamHostAndPorts[0].Host = "auth.example.invalid"; break;
+                case "b2-port": file.Routes[6].DownstreamHostAndPorts[0].Port = 8081; break;
+                case "b2-second-target": file.Routes[6].DownstreamHostAndPorts.Add(new() { Host = "client", Port = 8080 }); break;
                 default: throw new ArgumentOutOfRangeException(nameof(mutation));
             }
         });
@@ -232,6 +251,15 @@ public sealed class GatewayLocalStackHealthTests
     [InlineData("GET", "/api/v1/tenant-access/00000000-0000-0000-0000-000000000000")]
     [InlineData("GET", "/api/v1/tenant-access/not-a-guid")]
     [InlineData("GET", "/api/v1/browser-session/csrf%2f")]
+    [InlineData("GET", B2Path)]
+    [InlineData("POST", "/api/v1/Beneficiaries/42/interactions")]
+    [InlineData("POST", "/api/v1/beneficiaries/0/interactions")]
+    [InlineData("POST", "/api/v1/beneficiaries/042/interactions")]
+    [InlineData("POST", "/api/v1/beneficiaries/+42/interactions")]
+    [InlineData("POST", "/api/v1/beneficiaries/2147483648/interactions")]
+    [InlineData("POST", "/api/v1/beneficiaries/42%2f/interactions")]
+    [InlineData("POST", "/api/v1/beneficiaries//42/interactions")]
+    [InlineData("POST", "/api/v1/beneficiaries/42/interactions/")]
     public async Task Only_exact_reviewed_browser_method_paths_are_admitted(string method, string path)
     {
         await using var host = await StartAsync();
@@ -240,6 +268,40 @@ public sealed class GatewayLocalStackHealthTests
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         Assert.Empty(host.Received);
+    }
+
+    [Theory]
+    [InlineData("LocalStack", HttpStatusCode.NoContent)]
+    [InlineData("Development", HttpStatusCode.NotFound)]
+    [InlineData("Production", HttpStatusCode.NotFound)]
+    public async Task Canonical_B2_POST_is_admitted_only_by_the_LocalStack_gateway(string environment, HttpStatusCode expected)
+    {
+        await using var host = await StartAsync(environment);
+        using var request = new HttpRequestMessage(HttpMethod.Post, B2Path);
+        using var response = await host.Https.SendAsync(request);
+        Assert.Equal(expected, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        if (expected == HttpStatusCode.NoContent)
+            Assert.Equal(B2Path, Assert.Single(host.Received).Path);
+        else
+            Assert.Empty(host.Received);
+    }
+
+    [Fact]
+    public async Task B2_query_reaches_the_Client_wire_boundary_without_weakening_Auth_query_rejection()
+    {
+        await using var host = await StartAsync();
+        const string query = "?unexpected=%2F";
+        using var request = new HttpRequestMessage(HttpMethod.Post, B2Path + query);
+        using var response = await host.Https.SendAsync(request);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        var received = Assert.Single(host.Received);
+        Assert.Equal(B2Path, received.Path);
+        Assert.Equal(query, received.Query);
+
+        using var auth = await host.Https.GetAsync(CsrfPath + "?unexpected=value");
+        Assert.Equal(HttpStatusCode.BadRequest, auth.StatusCode);
+        Assert.Single(host.Received);
     }
 
     [Fact]
@@ -281,7 +343,7 @@ public sealed class GatewayLocalStackHealthTests
             options.Listen(IPAddress.Loopback, 0);
             options.Listen(IPAddress.Loopback, 0, endpoint => endpoint.UseHttps(certificates.Server));
         });
-        var values = Configuration();
+        var values = Configuration(builder.Environment.IsEnvironment("LocalStack"));
         configure?.Invoke(values);
         builder.Configuration.AddInMemoryCollection(values);
         BrowserTransport.Add(builder);
@@ -307,7 +369,7 @@ public sealed class GatewayLocalStackHealthTests
             }
             if (throwAtDestination) throw new InvalidOperationException("private destination details");
             received.Add(new Received(context.Request.Path.Value!, context.Request.Headers["X-Forwarded-For"].ToString(),
-                context.Request.Headers.Authorization.ToString()));
+                context.Request.Headers.Authorization.ToString(), context.Request.QueryString.Value));
             context.Response.StatusCode = StatusCodes.Status204NoContent;
             return Task.CompletedTask;
         });
@@ -357,7 +419,7 @@ public sealed class GatewayLocalStackHealthTests
         }
     }
 
-    private static Dictionary<string, string?> Configuration()
+    private static Dictionary<string, string?> Configuration(bool localStack)
     {
         var values = new Dictionary<string, string?>
         {
@@ -385,17 +447,37 @@ public sealed class GatewayLocalStackHealthTests
             values[prefix + "HttpHandlerOptions:UseTracing"] = "false";
             values[prefix + "HttpHandlerOptions:UseProxy"] = "false";
         }
-        values["Routes:6:Key"] = "legacy";
-        values["Routes:6:UpstreamPathTemplate"] = "/legacy";
-        values["Routes:6:DownstreamPathTemplate"] = "/legacy";
-        values["Routes:6:UpstreamHttpMethod:0"] = "GET";
-        values["Routes:6:DownstreamScheme"] = "https";
-        values["Routes:6:DownstreamHostAndPorts:0:Host"] = "legacy.example.invalid";
-        values["Routes:6:DownstreamHostAndPorts:0:Port"] = "443";
+        if (localStack)
+        {
+            const string b2 = "Routes:6:";
+            values[b2 + "Key"] = B2Key;
+            values[b2 + "UpstreamPathTemplate"] = "/api/v1/beneficiaries/{beneficiaryId}/interactions";
+            values[b2 + "DownstreamPathTemplate"] = values[b2 + "UpstreamPathTemplate"];
+            values[b2 + "UpstreamHttpMethod:0"] = "POST";
+            values[b2 + "RouteIsCaseSensitive"] = "true";
+            values[b2 + "FileCacheOptions:TtlSeconds"] = "0";
+            values[b2 + "DangerousAcceptAnyServerCertificateValidator"] = "false";
+            values[b2 + "DownstreamScheme"] = "http";
+            values[b2 + "DownstreamHostAndPorts:0:Host"] = "client";
+            values[b2 + "DownstreamHostAndPorts:0:Port"] = "8080";
+            values[b2 + "HttpHandlerOptions:AllowAutoRedirect"] = "false";
+            values[b2 + "HttpHandlerOptions:UseCookieContainer"] = "false";
+            values[b2 + "HttpHandlerOptions:UseTracing"] = "false";
+            values[b2 + "HttpHandlerOptions:UseProxy"] = "false";
+        }
+
+        var legacy = localStack ? "Routes:7:" : "Routes:6:";
+        values[legacy + "Key"] = "legacy";
+        values[legacy + "UpstreamPathTemplate"] = "/legacy";
+        values[legacy + "DownstreamPathTemplate"] = "/legacy";
+        values[legacy + "UpstreamHttpMethod:0"] = "GET";
+        values[legacy + "DownstreamScheme"] = "https";
+        values[legacy + "DownstreamHostAndPorts:0:Host"] = "legacy.example.invalid";
+        values[legacy + "DownstreamHostAndPorts:0:Port"] = "443";
         return values;
     }
 
-    private sealed record Received(string Path, string ForwardedFor, string Authorization);
+    private sealed record Received(string Path, string ForwardedFor, string Authorization, string? Query);
 
     private sealed record Host(WebApplication App, FileConfiguration Routes, List<Received> Received,
         Certificates Certificates, HttpClient Http, HttpClient Https) : IAsyncDisposable

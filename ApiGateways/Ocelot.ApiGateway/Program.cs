@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Ocelot.DependencyInjection;
@@ -58,19 +59,29 @@ namespace Zeka.Gateway
     {
         public const string DiagnosticCategory = "Zeka.Gateway.Safe";
         private const string Prefix = "GatewayBrowserTransport";
-        private static readonly (string Method, string Path)[] Routes =
+        private const string TenantAccessPrefix = "/api/v1/tenant-access/";
+        private const string TenantAccessPath = TenantAccessPrefix + "{organisationId}";
+        private const string BeneficiaryPrefix = "/api/v1/beneficiaries/";
+        private const string InteractionSuffix = "/interactions";
+        private const string LinkedInteractionPath = BeneficiaryPrefix + "{beneficiaryId}" + InteractionSuffix;
+
+        private enum Destination { Auth, Client }
+        private sealed record Operation(string Method, string Path, Destination Destination);
+
+        private static readonly Operation[] Routes =
         [
-            ("GET", "/api/v1/browser-session/csrf"),
-            ("POST", "/api/v1/browser-session/sign-in"),
-            ("POST", "/api/v1/browser-session/restore"),
-            ("POST", "/api/v1/browser-session/logout"),
-            ("GET", "/api/v1/browser-organisations/eligible"),
-            ("GET", "/api/v1/tenant-access/{organisationId}")
+            new("GET", "/api/v1/browser-session/csrf", Destination.Auth),
+            new("POST", "/api/v1/browser-session/sign-in", Destination.Auth),
+            new("POST", "/api/v1/browser-session/restore", Destination.Auth),
+            new("POST", "/api/v1/browser-session/logout", Destination.Auth),
+            new("GET", "/api/v1/browser-organisations/eligible", Destination.Auth),
+            new("GET", TenantAccessPath, Destination.Auth),
+            new("POST", LinkedInteractionPath, Destination.Client)
         ];
 
         public static void Add(WebApplicationBuilder builder)
         {
-            var policy = new Policy(builder.Configuration);
+            var policy = new Policy(builder.Configuration, builder.Environment.IsEnvironment("LocalStack"));
             builder.Services.AddSingleton(policy);
             if (builder.Environment.IsEnvironment("LocalStack"))
                 builder.Services.AddHealthChecks().Add(new HealthCheckRegistration(
@@ -93,17 +104,25 @@ namespace Zeka.Gateway
             builder.Services.PostConfigure<Ocelot.Configuration.File.FileConfiguration>(file =>
             {
                 var browser = file.Routes.Where(route => route.Key?.StartsWith(Prefix + ":", StringComparison.Ordinal) == true).ToArray();
-                var valid = policy.Valid && browser.Length == Routes.Length && Routes.All(expected => browser.Count(route =>
+                var valid = policy.Valid && browser.Length == policy.Operations.Length
+                    && policy.Operations.All(expected => browser.Count(route =>
                     route.UpstreamPathTemplate == expected.Path && route.DownstreamPathTemplate == expected.Path
                     && route.UpstreamHttpMethod.SequenceEqual(new[] { expected.Method }) && route.RouteIsCaseSensitive
                     && !route.DangerousAcceptAnyServerCertificateValidator && route.FileCacheOptions.TtlSeconds == 0
                     && !route.AuthenticationOptions.AuthenticationProviderKeys.Any()
                     && !route.HttpHandlerOptions.AllowAutoRedirect && !route.HttpHandlerOptions.UseCookieContainer
-                    && !route.HttpHandlerOptions.UseTracing && !route.HttpHandlerOptions.UseProxy) == 1);
+                    && !route.HttpHandlerOptions.UseTracing && !route.HttpHandlerOptions.UseProxy
+                    && (expected.Destination == Destination.Auth
+                        || (route.DownstreamScheme == "http" && route.DownstreamHostAndPorts.Count == 1
+                            && route.DownstreamHostAndPorts[0].Host == "client"
+                            && route.DownstreamHostAndPorts[0].Port == 8080))) == 1);
                 policy.Valid = valid;
                 foreach (var route in browser)
                 {
                     if (!valid) { file.Routes.Remove(route); continue; }
+                    var operation = policy.Operations.Single(expected => expected.Path == route.UpstreamPathTemplate);
+                    if (operation.Destination == Destination.Client) continue;
+
                     route.DownstreamScheme = policy.Target!.Scheme;
                     route.DownstreamHostAndPorts = [new() { Host = policy.Target.Host, Port = policy.Target.Port }];
                 }
@@ -170,11 +189,10 @@ namespace Zeka.Gateway
                             return Task.CompletedTask;
                         });
                         var path = http.Request.Path.Value!;
-                        var selection = path.StartsWith("/api/v1/tenant-access/", StringComparison.Ordinal)
-                            && Guid.TryParseExact(path["/api/v1/tenant-access/".Length..], "D", out var id) && id != Guid.Empty;
-                        var exact = Routes.Any(route => route.Method == http.Request.Method &&
-                            (route.Path == path || (route.Path == Routes[^1].Path && selection)));
-                        if (!exact || http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>()?.RawTarget?.Contains('%') == true)
+                        var rawTarget = http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>()?.RawTarget;
+                        var operation = policy.Operations.SingleOrDefault(candidate => candidate.Method == http.Request.Method
+                            && MatchesPath(candidate.Path, path, rawTarget));
+                        if (operation is null || (operation.Destination == Destination.Auth && rawTarget?.Contains('%') == true))
                         { http.Response.StatusCode = 404; return; }
                         if (!policy.Valid || !http.Request.IsHttps || http.Request.Scheme + "://" + http.Request.Host != policy.Origin)
                         { http.Response.StatusCode = 503; return; }
@@ -185,7 +203,9 @@ namespace Zeka.Gateway
                         var peer = Canonical(http.Connection.RemoteIpAddress);
                         if (forwarding.Length != 0 || peer is null || !policy.Peers.Contains(peer))
                         { http.Response.StatusCode = 503; return; }
-                        if (http.Request.QueryString.HasValue) { http.Response.StatusCode = 400; return; }
+                        // The Client wire contract distinguishes linked and interaction-only requests.
+                        if (operation.Destination == Destination.Auth && http.Request.QueryString.HasValue)
+                        { http.Response.StatusCode = 400; return; }
                         if (http.Request.Headers.Origin.Count > 0 && (http.Request.Headers.Origin.Count != 1
                             || http.Request.Headers.Origin[0] != policy.Origin))
                         { http.Response.StatusCode = 403; return; }
@@ -198,6 +218,25 @@ namespace Zeka.Gateway
                 });
         }
 
+        private static bool MatchesPath(string template, string path, string? rawTarget)
+        {
+            if (template == TenantAccessPath)
+                return path.StartsWith(TenantAccessPrefix, StringComparison.Ordinal)
+                    && Guid.TryParseExact(path.AsSpan(TenantAccessPrefix.Length), "D", out var organisationId)
+                    && organisationId != Guid.Empty;
+            if (template != LinkedInteractionPath) return template == path;
+
+            if (!path.StartsWith(BeneficiaryPrefix, StringComparison.Ordinal)
+                || !path.EndsWith(InteractionSuffix, StringComparison.Ordinal)
+                || path.Length <= BeneficiaryPrefix.Length + InteractionSuffix.Length
+                || rawTarget?.Split('?', 2)[0] != path) return false;
+
+            var id = path.AsSpan(BeneficiaryPrefix.Length, path.Length - BeneficiaryPrefix.Length - InteractionSuffix.Length);
+            return int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out var beneficiaryId)
+                && beneficiaryId > 0
+                && id.SequenceEqual(beneficiaryId.ToString(CultureInfo.InvariantCulture).AsSpan());
+        }
+
         private static string? Canonical(System.Net.IPAddress? address) => address?.AddressFamily is
             System.Net.Sockets.AddressFamily.InterNetwork or System.Net.Sockets.AddressFamily.InterNetworkV6
             ? (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString() : null;
@@ -208,8 +247,12 @@ namespace Zeka.Gateway
             internal string? Origin { get; }
             internal Uri? Target { get; }
             internal HashSet<string> Peers { get; } = new(StringComparer.Ordinal);
-            internal Policy(IConfiguration configuration)
+            internal Operation[] Operations { get; }
+
+            internal Policy(IConfiguration configuration, bool localStack)
             {
+                // The packaged profile keeps the six Auth routes. LocalStack mounts the tracked seventh route.
+                Operations = Routes.Where(operation => localStack || operation.Destination == Destination.Auth).ToArray();
                 Origin = configuration[Prefix + ":Origin"];
                 if (!Uri.TryCreate(Origin, UriKind.Absolute, out var origin) || origin.Scheme != "https"
                     || Origin != origin.GetLeftPart(UriPartial.Authority) || origin.UserInfo.Length != 0

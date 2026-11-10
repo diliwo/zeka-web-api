@@ -65,6 +65,42 @@ internal sealed class BeneficiaryB1Store(ApplicationDbContext database, IClientP
         return row is null ? throw new BeneficiaryWireException("NOT_FOUND") : Project(row);
     }
 
+    public async Task<RecordInteractionCommand?> RecoverLinkedCommandAsync(int beneficiaryId,
+        DateTime occurredAtUtc, string note, string idempotencyKey, FollowUpActionInput action,
+        Guid actorMembershipId, CancellationToken token)
+    {
+        // Visibility comes first. The receipt anchors its original case, not a replacement case.
+        await DemandDossierAsync(beneficiaryId, token);
+        var receipt = await database.Visible<IdempotencyReceipt>().AsNoTracking()
+            .SingleOrDefaultAsync(x => x.ActorMembershipId == actorMembershipId
+                && x.Operation == RecordOperation && x.ClientKey == idempotencyKey, token);
+        if (receipt is null) return null;
+        if (receipt.ClientId != beneficiaryId || receipt.InteractionId is not int id)
+            throw new ActionWriteConflictException("IDEMPOTENCY_CONFLICT");
+        var interaction = await database.Visible<Interaction>().AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == id && x.ClientId == beneficiaryId, token)
+            ?? throw new ActionWriteConflictException("IDEMPOTENCY_CONFLICT");
+        // IActionWriteStore retains sole ownership of the canonical receipt comparator.
+        return new RecordInteractionCommand(beneficiaryId, interaction.SocialCaseId,
+            occurredAtUtc, note, idempotencyKey, action);
+    }
+
+    public async Task<RecordInteractionCommand> ResolveLinkedCommandAsync(int beneficiaryId,
+        DateTime occurredAtUtc, string note, string idempotencyKey, FollowUpActionInput action,
+        DateOnly localDay, CancellationToken token)
+    {
+        await DemandDossierAsync(beneficiaryId, token);
+        var day = localDay.ToDateTime(TimeOnly.MinValue);
+        var cases = await database.SocialCases.AsNoTracking().Where(x => x.ClientId == beneficiaryId)
+            .Where(CurrentAssignment.ActiveOn(day)).Take(2).ToListAsync(token);
+        if (cases.Count == 0) throw new ActionWriteConflictException("CONTEXT_REQUIRED");
+        if (cases.Count != 1 || !await database.SocialWorkers.AnyAsync(w => w.Id == cases[0].SocialWorkerId
+                && !w.Softdelete && w.OrganisationMembershipId != Guid.Empty, token))
+            throw new ActionWriteConflictException("CONTEXT_CONFLICT");
+        return new RecordInteractionCommand(beneficiaryId, cases[0].Id,
+            occurredAtUtc, note, idempotencyKey, action);
+    }
+
     public async Task<RecordInteractionV1> RecordAsync(int beneficiaryId, DateTime occurredAtUtc,
         string note, string idempotencyKey, Guid actorMembershipId, CancellationToken token)
     {

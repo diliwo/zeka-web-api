@@ -11,7 +11,7 @@ public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation 
     ITenantTransactionExecutor transactions, PostCommitNotifications notifications,
     IActionWriteStore actionWrites, IActionAuthorityReads? authority = null,
     IActionWriteActivationGate? activation = null, ActionWriteAuthorityScope? actionScope = null,
-    TimeProvider? clock = null)
+    TimeProvider? clock = null, LinkedInteractionExecutor? linkedInteractions = null)
     : IPipelineBehavior<TRequest, TResponse> where TRequest : notnull
 {
     private static readonly Meter AuthorityMeter = new("ClientManagement.ActionAuthority.v1");
@@ -23,8 +23,20 @@ public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation 
     {
         var policy = typeof(TRequest).GetCustomAttribute<RequiresTenantPermissionAttribute>()
             ?? throw new TenantAccessException(AccessFailure.Denied);
-        var actionSensitive = request is RecordInteractionCommand { Action: not null }
-            or ActionChangeCommand { Kind: ActionChangeKind.Reassign };
+        if (request is RecordInteractionCommand { Action: not null } linked)
+        {
+            var executor = linkedInteractions ?? new LinkedInteractionExecutor(operation, transactions,
+                notifications, actionWrites, authority, activation, actionScope, clock);
+            var linkedResult = await executor.ExecuteAsync(linked, async _ =>
+            {
+                var response = await next();
+                return response is RecordInteractionResult recorded ? recorded
+                    : throw new TenantAccessException(AccessFailure.Unavailable);
+            }, cancellationToken);
+            return linkedResult is TResponse typedLinked ? typedLinked
+                : throw new TenantAccessException(AccessFailure.Unavailable);
+        }
+        var actionSensitive = request is ActionChangeCommand { Kind: ActionChangeKind.Reassign };
         var callerStarted = Stopwatch.GetTimestamp();
         await operation.AuthorizeAsync(policy, cancellationToken);
         var combinedRemote = Stopwatch.GetElapsedTime(callerStarted);
@@ -59,7 +71,6 @@ public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation 
                 return savedAssigned;
             var target = request switch
             {
-                RecordInteractionCommand record => record.Action!.AssigneeMembershipId,
                 ActionChangeCommand change => change.NewAssigneeMembershipId ?? Guid.Empty,
                 _ => Guid.Empty
             };
@@ -69,8 +80,6 @@ public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation 
             {
                 switch (request)
                 {
-                    case RecordInteractionCommand record:
-                        await actionWrites.PreflightAsync(record, token); break;
                     case ActionChangeCommand change:
                         await actionWrites.PreflightAsync(change, token); break;
                 }
@@ -130,8 +139,6 @@ public sealed class AuthorizationBehaviour<TRequest, TResponse>(TenantOperation 
 
         async Task<object?> ReadSavedResultAsync() => request switch
         {
-            RecordInteractionCommand command => await transactions.ExecuteOrdinaryOnceAsync(
-                token => actionWrites.TrySavedResultAsync(command, operation.MembershipId, token), cancellationToken),
             ActionChangeCommand command => await transactions.ExecuteOrdinaryOnceAsync(
                 token => actionWrites.TrySavedResultAsync(command, operation.MembershipId, token), cancellationToken),
             _ => null
