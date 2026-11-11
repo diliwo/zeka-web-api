@@ -1,0 +1,227 @@
+name: ZEK-48 NuGet content hash
+
+on:
+  push:
+    branches: [codex/zek48-feed-content-hash]
+    paths: [.github/workflows/zek48-feed-content-hash.yml]
+
+permissions: {}
+
+jobs:
+  measure:
+    if: >-
+      ${{ github.repository == 'diliwo/zeka-web-api'
+      && github.ref == 'refs/heads/codex/zek48-feed-content-hash'
+      && github.event.created && !github.event.deleted && !github.event.forced
+      && github.event.after == github.sha && github.workflow_sha == github.sha
+      && github.run_attempt == '1' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: read
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 'true'
+    steps:
+      - name: Install the pinned SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - name: Prepare the isolated probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          probe="$(mktemp -d "$RUNNER_TEMP/zek48-nuget.XXXXXXXX")"
+          mkdir "$probe/packages" "$probe/http-cache" "$probe/cli-home"
+          printf 'PROBE_DIR=%s\n' "$probe" >> "$GITHUB_ENV"
+          cat >"$probe/global.json" <<'JSON'
+          {"sdk":{"version":"8.0.129","rollForward":"disable"}}
+          JSON
+          cat >"$probe/FeedProbe.csproj" <<'XML'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net8.0</TargetFramework>
+              <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Zeka.Extensions.MultiTenancy.Abstractions" Version="[2.0.0-preview.1]" />
+              <PackageReference Include="Zeka.Extensions.MultiTenancy.AspNetCore" Version="[2.0.0-preview.1]" />
+              <PackageReference Include="Zeka.Extensions.MultiTenancy.EntityFrameworkCore" Version="[2.0.0-preview.1]" />
+            </ItemGroup>
+          </Project>
+          XML
+          cat >"$probe/NuGet.Config" <<'XML'
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+              <add key="github" value="https://nuget.pkg.github.com/diliwo/index.json" />
+            </packageSources>
+            <fallbackPackageFolders><clear /></fallbackPackageFolders>
+            <packageSourceMapping>
+              <clear />
+              <packageSource key="nuget.org"><package pattern="*" /></packageSource>
+              <packageSource key="github"><package pattern="Zeka.*" /></packageSource>
+            </packageSourceMapping>
+          </configuration>
+          XML
+
+      - name: Restore once from the mapped sources
+        env:
+          NuGetPackageSourceCredentials_github: Username=${{ github.actor }};Password=${{ github.token }};ValidAuthenticationTypes=Basic
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cd "$PROBE_DIR"
+          export NUGET_PACKAGES="$PROBE_DIR/packages"
+          export NUGET_HTTP_CACHE_PATH="$PROBE_DIR/http-cache"
+          export DOTNET_CLI_HOME="$PROBE_DIR/cli-home"
+          unset NUGET_FALLBACK_PACKAGES
+          test -z "$(ls -A "$NUGET_PACKAGES")"
+          test -z "$(ls -A "$NUGET_HTTP_CACHE_PATH")"
+          test "$(dotnet --version)" = 8.0.129
+          # SDK 8.0.129 uses --no-cache for packages and HTTP.
+          status=0
+          dotnet restore FeedProbe.csproj --configfile NuGet.Config \
+            --packages "$NUGET_PACKAGES" --no-cache --verbosity quiet >restore.log 2>&1 || status=$?
+          codes="$(grep -oE '\bNU[0-9]{4}\b' restore.log | LC_ALL=C sort -u | paste -sd, - || :)"
+          printf 'RESTORE_EXIT=%s|NUGET_CODES=%s\n' "$status" "${codes:-none}"
+          exit "$status"
+
+      - name: Verify and emit sanitized package hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import re
+          import stat
+          import xml.etree.ElementTree as xml
+          import zipfile
+          from pathlib import Path
+
+          feed = "https://nuget.pkg.github.com/diliwo/index.json"
+          repo = "https://github.com/diliwo/tenant-dotnet-lib"
+          version = "2.0.0-preview.1"
+          package_ids = (
+              "Zeka.Extensions.MultiTenancy.Abstractions",
+              "Zeka.Extensions.MultiTenancy.AspNetCore",
+              "Zeka.Extensions.MultiTenancy.EntityFrameworkCore",
+          )
+          root = Path(os.environ["PROBE_DIR"])
+          packages = root / "packages"
+
+          def require(condition, reason):
+              if not condition:
+                  raise SystemExit(f"EVIDENCE=BLOCKED|REASON={reason}")
+
+          def read_json(path):
+              return json.loads(path.read_text(encoding="utf-8-sig"))
+
+          def sha256(data):
+              return hashlib.sha256(data).hexdigest()
+
+          def canonical(data):
+              return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+
+          def payload(archive, package):
+              entries, seen = {}, set()
+              spec_name = package + ".nuspec"
+              dll_name = f"lib/net8.0/{package}.dll"
+              spec = None
+              total = 0
+              for member in archive.infolist():
+                  path = member.filename
+                  normalized = path.casefold()
+                  parts = path.rstrip("/").split("/")
+                  total += member.file_size
+                  require("\\" not in path and all(parts) and not any(p in (".", "..") or ":" in p for p in parts)
+                          and not stat.S_ISLNK(member.external_attr >> 16) and normalized not in seen
+                          and member.file_size <= 16 * 1024 * 1024 and total <= 32 * 1024 * 1024,
+                          "UNSAFE_ARCHIVE_MEMBER")
+                  seen.add(normalized)
+                  if member.is_dir():
+                      continue
+                  data = archive.read(member)
+                  if normalized == spec_name:
+                      spec = data
+                  if normalized not in ("[content_types].xml", "_rels/.rels", ".signature.p7s") \
+                          and not normalized.startswith("package/services/metadata/core-properties/"):
+                      entries[normalized] = {"bytes": len(data), "sha256": sha256(data)}
+              require(spec is not None and dll_name in entries and b"<!DOCTYPE" not in spec.upper(), "PACKAGE_IDENTITY_INPUTS_MISSING")
+              metadata = xml.fromstring(spec).find("{*}metadata")
+              require(metadata is not None and (metadata.findtext("{*}id") or "").casefold() == package
+                      and metadata.findtext("{*}version") == version, "PACKAGE_ID_OR_VERSION_DRIFT")
+              source = metadata.find("{*}repository")
+              commit = None
+              if source is not None and source.get("url", "").rstrip("/").removesuffix(".git").casefold() == repo:
+                  candidate = source.get("commit", "")
+                  if re.fullmatch(r"[a-f0-9]{40}", candidate):
+                      commit = candidate
+              return entries[dll_name]["sha256"], sha256(canonical(entries)), commit
+
+          def measure():
+              expected = {name.casefold() for name in package_ids}
+              lock = read_json(root / "packages.lock.json")
+              rows = {name.casefold(): row for name, row in lock["dependencies"]["net8.0"].items()}
+              require({name for name, row in rows.items() if row["type"] == "Direct"} == expected,
+                      "DIRECT_PACKAGE_SCOPE_DRIFT")
+              require({name for name in rows if name.startswith("zeka.")} == expected, "PRIVATE_LOCK_SCOPE_DRIFT")
+              assets = read_json(root / "obj/project.assets.json")
+              require({Path(name).resolve() for name in assets["packageFolders"]} == {packages.resolve()},
+                      "PACKAGE_CACHE_SCOPE_DRIFT")
+              expected_keys = {f"{name}/{version}" for name in expected}
+              require({name.casefold() for name in assets["libraries"] if name.casefold().startswith("zeka.")} == expected_keys,
+                      "PRIVATE_RESTORE_SCOPE_DRIFT")
+              require({item.name.casefold() for item in packages.iterdir() if item.name.casefold().startswith("zeka.")} == expected,
+                      "PRIVATE_CACHE_SCOPE_DRIFT")
+              records = []
+              for name in package_ids:
+                  package = name.casefold()
+                  row = rows[package]
+                  require(row["resolved"] == version, "RESOLVED_VERSION_DRIFT")
+                  content_hash = row["contentHash"]
+                  require(len(base64.b64decode(content_hash, validate=True)) == 64, "INVALID_CANONICAL_HASH")
+                  folder = packages / package / version
+                  metadata = read_json(folder / ".nupkg.metadata")
+                  require(metadata["source"] == feed, "PACKAGE_SOURCE_NOT_GITHUB")
+                  require(metadata["contentHash"] == content_hash, "LOCK_METADATA_HASH_MISMATCH")
+                  path = folder / f"{package}.{version}.nupkg"
+                  require(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= 16 * 1024 * 1024,
+                          "PACKAGE_ARCHIVE_NOT_ADMITTED")
+                  with zipfile.ZipFile(path) as archive:
+                      dll, normalized, commit = payload(archive, package)
+                  records.append({
+                      "id": name,
+                      "version": version,
+                      "sourceKey": "github",
+                      "sourceHost": "nuget.pkg.github.com",
+                      "nugetContentHash": content_hash,
+                      "archiveSha256": sha256(path.read_bytes()),
+                      "normalizedPayloadSha256": normalized,
+                      "primaryDllSha256": dll,
+                      "declaredReleaseCommit": commit,
+                  })
+              receipt = {
+                  "runId": os.environ["GITHUB_RUN_ID"],
+                  "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
+                  "head": os.environ["GITHUB_SHA"],
+                  "workflowSha": os.environ["GITHUB_WORKFLOW_SHA"],
+                  "sdk": "8.0.129",
+                  "packages": records,
+              }
+              data = canonical(receipt)
+              print("ZEK48_NUGET_EVIDENCE=" + data.decode())
+              print("ZEK48_NUGET_EVIDENCE_SHA256=" + sha256(data))
+
+          try:
+              measure()
+          except Exception:
+              raise SystemExit("EVIDENCE=BLOCKED|REASON=INVALID_RESTORE_OUTPUT") from None
+          PY
