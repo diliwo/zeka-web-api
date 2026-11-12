@@ -264,7 +264,8 @@ jobs:
           path: |
             ${{ runner.temp }}/strict-restore-docker/strict-restore-receipt.json
             ${{ runner.temp }}/strict-restore-docker/buildx-receipt.json
-          if-no-files-found: error
+            ${{ runner.temp }}/strict-restore-docker/failure-receipt.json
+          if-no-files-found: warn
           retention-days: 14
 
   strict_restore_gate:
