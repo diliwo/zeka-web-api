@@ -31,7 +31,7 @@ public sealed class WorkerCredentialBoundaryTests
         var organisation = Guid.NewGuid();
         var credentials = new ObservedCredentials(WorkerCredentialFixture.For([organisation], WorkerCredentialEncoding.AdminAreaProfile));
         var http = new Denied();
-        var services = new ServiceCollection().AddScoped<TenantContextScope>()
+        var services = new ServiceCollection().AddLogging().AddScoped<TenantContextScope>()
             .AddSingleton<IHttpClientFactory>(new Factory(http));
         await using var provider = services.BuildServiceProvider();
         var config = new ConfigurationManager

@@ -193,7 +193,7 @@ public sealed class WorkerAuthorizationRetryTests
         var organisation = Guid.NewGuid();
         var state = new State(organisation);
         var handler = new SequenceHandler(state, organisation, [401, 401]);
-        var services = new ServiceCollection().AddScoped<TenantContextScope>()
+        var services = new ServiceCollection().AddLogging().AddScoped<TenantContextScope>()
             .AddSingleton<IHttpClientFactory>(new ClientFactory(handler));
         await using var provider = services.BuildServiceProvider();
         var configuration = new ConfigurationManager
