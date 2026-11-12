@@ -46,6 +46,13 @@
          without referencing another service's Application, Domain, or persistence assemblies. -->
     <Compile Include="../../../AdminAreaManagement/AdminAreaManagement.API/TenantAuthentication.cs" Link="AdminAreaBearerRegistration.cs" />
     <Compile Include="../../../ClientManagement/Client.API/TenantAuthentication.cs" Link="ClientBearerRegistration.cs" />
+    <!-- Compile the Client challenge logger and its literal source dependencies in this test assembly. -->
+    <Compile Include="../../../ClientManagement/Client.API/Services/AuthDependencyUnavailableLog.cs" Link="ClientAuthDependencyUnavailableLog.cs" />
+    <Compile Include="../../../ClientManagement/Client.Application/Common/Authorization/TenantAccessDiagnostics.cs" Link="ClientTenantAccessDiagnostics.cs" />
+    <Compile Include="../../../ClientManagement/Client.Application/Common/Authorization/TenantAccess.cs" Link="ClientTenantAccess.cs" />
+    <Compile Include="../../../ClientManagement/Client.Application/ActionWrites/ActionWriteAuthority.cs" Link="ClientActionWriteAuthority.cs" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/RealHostStartupTests.cs" Link="RealHostStartupTests.cs" /></ItemGroup>
   <ItemGroup>

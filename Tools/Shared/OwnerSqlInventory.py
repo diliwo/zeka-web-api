@@ -21,6 +21,7 @@ from pathlib import Path
 SCHEMA = "zeka-owner-sql-execution/v1"
 SCHEMA_V2 = "zeka-owner-sql-execution/v2"
 TOOLS = ("Tools/Zeka.AuthOwnerProvision", "Tools/Zeka.DbMigrate", "Tools/Zeka.LocalStack.DatabaseSetup")
+ROOT_LOCK_PROPS_SHA256 = "921d89480d2f4f6b97cb1453b963b0809092a9e01bd62879f3f1ae0a1cbcc1c6"
 AUTH_WEB_PROJECT = "Services/AuthManager/AuthManager.API/AuthManager.API.csproj"
 SERVICE_PROJECTS = (
     AUTH_WEB_PROJECT,
@@ -338,11 +339,17 @@ def discover_project_sources(root: Path, roots: list[Path]) -> tuple[list[Path],
         if project in projects: continue
         if not project.is_file() or project.suffix.lower() != ".csproj":
             raise InventoryError("Missing/unsupported source project")
-        # Directory build composition can add Compile/ProjectReference items from
-        # outside a csproj. Reject it even when it lives above the repository.
+        # Only the reviewed root lockfile selector may participate in build composition.
         for ancestor in (project.parent, *project.parent.parents):
-            if any((ancestor/name).exists() for name in
-                   ("Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props")):
+            for name in ("Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props"):
+                candidate = ancestor/name
+                if not os.path.lexists(candidate):
+                    continue
+                if ancestor == root and name == "Directory.Build.props":
+                    approved_props = contained(candidate)
+                    if approved_props.is_file() and digest(approved_props) == ROOT_LOCK_PROPS_SHA256:
+                        files.add(approved_props)
+                        continue
                 raise InventoryError("Directory build composition requires explicit source-scope review")
         tree = ET.fromstring(public_bytes(project))
         auth_web = project.relative_to(root).as_posix() == AUTH_WEB_PROJECT

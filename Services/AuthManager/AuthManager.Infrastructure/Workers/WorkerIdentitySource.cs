@@ -34,10 +34,11 @@ public sealed class WorkerIdentitySource(AuthDbContext database, UserManager<Use
                     $"SELECT * FROM \"PermissionSets\" WHERE \"Id\" = {PermissionSet.OrganisationOwnerId} FOR SHARE").LoadAsync(ct));
         }
         var organisation = await database.Organisations.SingleOrDefaultAsync(x => x.Id == organisationId, ct);
-        var owner = await database.Users.SingleOrDefaultAsync(x => x.Id == caller.SubjectId, ct);
+        // The request precheck may still track an older owner or session snapshot.
+        var owner = await database.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == caller.SubjectId, ct);
         var membership = await database.OrganisationMemberships.SingleOrDefaultAsync(x => x.OrganisationId == organisationId && x.UserId == caller.SubjectId, ct);
         var role = await database.PermissionSets.SingleOrDefaultAsync(x => x.Id == PermissionSet.OrganisationOwnerId, ct);
-        var family = await database.BrowserSessionFamilies.SingleOrDefaultAsync(x => x.Id == caller.SessionId, ct);
+        var family = await database.BrowserSessionFamilies.AsNoTracking().SingleOrDefaultAsync(x => x.Id == caller.SessionId, ct);
         if (organisation is null || organisation.Status != OrganisationStatus.Active || organisation.OwnerUserId != caller.SubjectId
             || owner is null || owner.Status != UserStatus.Active || !owner.EmailConfirmed || string.IsNullOrWhiteSpace(owner.SecurityStamp)
             || owner.LockoutEnabled && owner.LockoutEnd > now

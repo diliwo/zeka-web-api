@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - develop
+      - codex/m1-c1-integration
     types:
       - opened
       - reopened
@@ -72,8 +73,28 @@ jobs:
       - name: Build solution
         run: dotnet build zeka-web-api.sln --configuration Release --no-restore
 
+      - name: Install pinned standalone Sonar CLI
+        shell: bash
+        run: &install_standalone_sonar |
+          set -euo pipefail
+          version=1.9.0.15656
+          expected_sha256=42ec815ef8015921a76b76c865932130d756c5c5a977d82bca9fa81d09bfccd8
+          bin_dir="$(mktemp -d "${RUNNER_TEMP}/zeka-sonar.XXXXXX")"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --retry 2 --connect-timeout 15 --max-time 90 \
+            --output "${bin_dir}/sonar" \
+            "https://binaries.sonarsource.com/Distribution/sonarqube-cli/${version}/linux/sonarqube-cli-${version}-linux-x86-64.bin"
+          printf '%s  %s\n' "${expected_sha256}" "${bin_dir}/sonar" | sha256sum --check --status
+          chmod 0700 "${bin_dir}/sonar"
+          test "$("${bin_dir}/sonar" --version)" = 1.9.0
+          printf '%s\n' "${bin_dir}" >> "${GITHUB_PATH}"
+
       - name: Run non-PostgreSQL test projects
         shell: bash
+        env: &standalone_sonar_auth
+          SONARQUBE_CLI_SERVER: https://sonarcloud.io
+          SONARQUBE_CLI_ORG: ${{ vars.SONAR_ORGANIZATION }}
+          SONARQUBE_CLI_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           test_projects=(
             "Services/AuthManager/Tests/Domain.UnitTests/Domain.UnitTests.csproj"
@@ -1318,7 +1339,12 @@ jobs:
           print(f"Verified Python reconciler line coverage: {lines_covered}/{lines_valid}")
           PY
 
+      - name: Install pinned standalone Sonar CLI
+        shell: bash
+        run: *install_standalone_sonar
+
       - name: Run complete suite and collect coverage for analysis
+        env: *standalone_sonar_auth
         run: |
           docker info
           dotnet test zeka-web-api.sln -m:1 --configuration Release --no-build --no-restore \

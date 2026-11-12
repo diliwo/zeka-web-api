@@ -450,6 +450,49 @@ class DiscoveryClosureTests(unittest.TestCase):
                 root, project = self.source(content='<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><'+prop+'>Hidden.targets</'+prop+'></PropertyGroup></Project>')
                 with self.assertRaises(module.InventoryError): self.closure(root, [project])
 
+    def reviewed_rid_lock_props(self):
+        return (
+            b"<Project>\n"
+            b"  <PropertyGroup Condition=\"'$(RestoreContractRid)' == 'linux-x64'\">\n"
+            b"    <NuGetLockFilePath>$(MSBuildProjectDirectory)/packages.linux-x64.lock.json</NuGetLockFilePath>\n"
+            b"  </PropertyGroup>\n"
+            b"</Project>\n"
+        )
+
+    def test_exact_reviewed_rid_lock_props_is_bound_and_admitted(self):
+        root, project = self.source()
+        props = root/"Directory.Build.props"
+        props.write_bytes(self.reviewed_rid_lock_props())
+
+        projects, sources = self.closure(root, [project])
+
+        self.assertEqual([project.resolve()], projects)
+        self.assertIn(props.resolve(), sources)
+
+    def test_reviewed_props_admission_rejects_other_bytes_and_locations(self):
+        exact = self.reviewed_rid_lock_props()
+        for name, content in (
+            ("mutated", exact + b"\n"),
+            ("import", b'<Project><Import Project="Hidden.props" /></Project>'),
+            ("compile", b'<Project><ItemGroup><Compile Include="Hidden.cs" /></ItemGroup></Project>'),
+            ("reference", b'<Project><ItemGroup><ProjectReference Include="Hidden.csproj" /></ItemGroup></Project>'),
+        ):
+            with self.subTest(case=name):
+                root, project = self.source()
+                (root/"Directory.Build.props").write_bytes(content)
+                with self.assertRaises(module.InventoryError):
+                    self.closure(root, [project])
+
+        for location in ("project", "outside"):
+            with self.subTest(location=location):
+                outer, project = self.source("Repository/Tools/Owner/Owner.csproj")
+                root = outer/"Repository"
+                (root/"Directory.Build.props").write_bytes(exact)
+                ancestor = project.parent if location == "project" else outer
+                (ancestor/"Directory.Build.props").write_bytes(exact)
+                with self.assertRaises(module.InventoryError):
+                    self.closure(root, [project])
+
     def test_directory_build_composition_fails_closed(self):
         for name in ("Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props"):
             with self.subTest(name=name):
