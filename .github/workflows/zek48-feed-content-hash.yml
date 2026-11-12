@@ -1,8 +1,9 @@
 name: ZEK-48 NuGet content hash
 
 on:
-  push:
-    branches: [codex/zek48-feed-content-hash]
+  pull_request:
+    branches: [develop]
+    types: [opened]
     paths: [.github/workflows/zek48-feed-content-hash.yml]
 
 permissions: {}
@@ -10,10 +11,13 @@ permissions: {}
 jobs:
   measure:
     if: >-
-      ${{ github.repository == 'diliwo/zeka-web-api'
-      && github.ref == 'refs/heads/codex/zek48-feed-content-hash'
-      && github.event.created && !github.event.deleted && !github.event.forced
-      && github.event.after == github.sha && github.workflow_sha == github.sha
+      ${{ github.event_name == 'pull_request'
+      && github.repository == 'diliwo/zeka-web-api'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.head.ref == 'codex/zek48-feed-content-hash'
+      && github.event.pull_request.base.ref == 'develop'
+      && github.event.pull_request.draft == true
+      && github.event.action == 'opened'
       && github.run_attempt == '1' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -93,6 +97,8 @@ jobs:
 
       - name: Verify and emit sanitized package hashes
         shell: bash
+        env:
+          ZEKA_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -211,7 +217,8 @@ jobs:
               receipt = {
                   "runId": os.environ["GITHUB_RUN_ID"],
                   "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
-                  "head": os.environ["GITHUB_SHA"],
+                  "head": os.environ["ZEKA_PR_HEAD_SHA"],
+                  "eventMergeSha": os.environ["GITHUB_SHA"],
                   "workflowSha": os.environ["GITHUB_WORKFLOW_SHA"],
                   "sdk": "8.0.129",
                   "packages": records,
