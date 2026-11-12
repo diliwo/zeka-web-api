@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0": {
+      "FluentValidation.DependencyInjectionExtensions": {
+        "type": "Direct",
+        "requested": "[12.1.1, )",
+        "resolved": "12.1.1",
+        "contentHash": "D0VXh4dtjjX2aQizuaa0g6R8X3U1JaVqJPfGCvLwZX9t/O2h7tkpbitbadQMfwcgSPdDbI2vDxuwRMv/Uf9dHA==",
+        "dependencies": {
+          "FluentValidation": "12.1.1",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "2.1.0"
+        }
+      },
+      "FluentValidation": {
+        "type": "Transitive",
+        "resolved": "12.1.1",
+        "contentHash": "EPpkIe1yh1a0OXyC100oOA8WMbZvqUu5plwhvYcb7oSELfyUZzfxV48BLhvs3kKo4NwG7MGLNgy1RJiYtT8Dpw=="
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions": {
+        "type": "Transitive",
+        "resolved": "2.1.0",
+        "contentHash": "8/CtASu80UIoyG+r8FstrmZW5GLtXxzoYpjj3jV0FKZCL5CiFgSH3pAmqut/dC68mu7N1bU6v0UtKKL3gCUQGQ=="
+      },
+      "Zeka.Extensions.MultiTenancy.Abstractions": {
+        "type": "Transitive",
+        "resolved": "2.0.0-preview.1",
+        "contentHash": "gHNc0w6UNCpMKo6UBEyuLu1WCRaUjL13gw1xFc5anKyP+vDlJCSgdpnnafxzrrtmGK/IK8jQ2xGcg/j2864vOw=="
+      },
+      "authmanager.core": {
+        "type": "Project",
+        "dependencies": {
+          "Zeka.Extensions.MultiTenancy.Abstractions": "[2.0.0-preview.1, )"
+        }
+      },
+      "zeka.lifecycle.contracts": {
+        "type": "Project"
+      }
+    }
+  }
+}

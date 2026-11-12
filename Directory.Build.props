@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup Condition="'$(RestoreContractRid)' == 'linux-x64'">
+    <NuGetLockFilePath>$(MSBuildProjectDirectory)/packages.linux-x64.lock.json</NuGetLockFilePath>
+  </PropertyGroup>
+</Project>
