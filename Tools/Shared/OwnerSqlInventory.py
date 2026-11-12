@@ -19,8 +19,11 @@ import unicodedata
 from pathlib import Path
 
 SCHEMA = "zeka-owner-sql-execution/v1"
+SCHEMA_V2 = "zeka-owner-sql-execution/v2"
 TOOLS = ("Tools/Zeka.AuthOwnerProvision", "Tools/Zeka.DbMigrate", "Tools/Zeka.LocalStack.DatabaseSetup")
-INFRA_PROJECTS = (
+AUTH_WEB_PROJECT = "Services/AuthManager/AuthManager.API/AuthManager.API.csproj"
+SERVICE_PROJECTS = (
+    AUTH_WEB_PROJECT,
     "Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj",
     "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/AdminAreaManagement.Infrastructure.csproj",
     "Services/ClientManagement/Client.Infrastructure/ClientManagement.Infrastructure.csproj",
@@ -55,6 +58,19 @@ RAW_EXECUTE = re.compile(r"(?:\b([A-Za-z_]\w*)\s*)?\??\.\s*(Execute(?:Reader|Sca
 # These APIs must never become an empty inventory or a runtime EF SQL exemption.
 EF_SQL_API = re.compile(r"\b(?:ExecuteSql\w*|SqlQuery\w*|FromSql\w*|ExecuteUpdate(?:Async)?|ExecuteDelete(?:Async)?)\b")
 WRAPPER = "OwnerSqlExecution"
+AUTH_INFRA = "Services/AuthManager/AuthManager.Infrastructure/"
+AUTH_RECEIPT = AUTH_INFRA + "Persistence/AuthOwnerSqlReceipt.cs"
+AUTH_EF_WRAPPERS = {
+    "ObserveAuthLoadAsync": ("FromSqlInterpolated", "LoadAsync"),
+    "ObserveAuthQueryAsync": ("FromSqlInterpolated", "SingleOrDefaultAsync"),
+    "ObserveAuthUpdateAsync": ("ExecuteUpdateAsync", None),
+}
+AUTH_EF_FILES = {
+    AUTH_INFRA + "Identity/BrowserSessions.cs": {"ObserveAuthQueryAsync", "ObserveAuthUpdateAsync"},
+    AUTH_INFRA + "Workers/WorkerIdentitySource.cs": {"ObserveAuthLoadAsync"},
+}
+AUTH_EF_NAME = re.compile(r"\b(" + "|".join(AUTH_EF_WRAPPERS) + r")\b")
+AUTH_EF_CALL = re.compile(r"\bAuthOwnerSqlReceipt\s*\.\s*" + AUTH_EF_NAME.pattern + r"\s*\(")
 
 class InventoryError(ValueError):
     pass
@@ -186,17 +202,59 @@ def helper_ranges(code: str, names: tuple[str, ...]) -> tuple[list[tuple[int,int
             bodies.append((body_start, body_end))
     return bodies, declarations
 
+def auth_ef_sites(relative: str, code: str) -> tuple[set[int], set[int]]:
+    """Recognize only the sealed Auth call sites with a single observed EF command."""
+    if relative != AUTH_RECEIPT and re.search(r"\bObserveAuthCommand\b", code):
+        raise InventoryError("Auth EF receipt observer used outside its adapter: " + relative)
+    if relative == AUTH_RECEIPT:
+        # These exact enum references classify provider events; they do not invoke EF.
+        event_kinds = re.finditer(r"\bCommandSource\s*\.\s*(ExecuteUpdate|FromSqlQuery)\b(?!\s*\()", code)
+        return set(), {kind.start(1) for kind in event_kinds}
+
+    sites, supported_ef, wrapped_names = set(), set(), set()
+    for call in AUTH_EF_CALL.finditer(code):
+        name = call.group(1)
+        if name not in AUTH_EF_FILES.get(relative, ()):
+            raise InventoryError("Unregistered Auth EF receipt call in " + relative)
+        opening = call.end() - 1
+        end = matching(code, opening, "(", ")")
+        prefix = re.match(r"\s*database\s*,\s*\(\s*\)\s*=>\s*", code[opening+1:end])
+        operations = list(EF_SQL_API.finditer(code, opening+1, end))
+        expected_api, terminal = AUTH_EF_WRAPPERS[name]
+        if prefix is None or len(operations) != 1 or operations[0].group() != expected_api:
+            raise InventoryError("Unsupported Auth EF receipt operation in " + relative)
+        operation = operations[0]
+        receiver = code[opening+1+prefix.end():operation.start()]
+        expected_receiver = r"database\s*\.\s*\w+\s*\.\s*" if terminal else r"affected\s*\.\s*"
+        call_arguments = re.match(r"\s*\(", code[operation.end():end])
+        if not re.fullmatch(expected_receiver, receiver) or call_arguments is None:
+            raise InventoryError("Unsupported Auth EF receipt operation in " + relative)
+        operation_end = matching(code, operation.end()+call_arguments.end()-1, "(", ")")
+        tail = code[operation_end+1:end]
+        # The whole expression must execute and finish one supported command. No caller
+        # identity overrides, deferred enumerables, other expressions or second commands.
+        expected_tail = r"\s*\.\s*" + terminal + r"\s*\(\s*\w+\s*\)\s*" if terminal else r"\s*"
+        if operation_end >= end or not re.fullmatch(expected_tail, tail):
+            raise InventoryError("Unsupported Auth EF receipt completion in " + relative)
+        wrapped_names.add(call.start(1))
+        supported_ef.add(operation.start())
+        sites.add(call.start())
+    if any(name.start() not in wrapped_names for name in AUTH_EF_NAME.finditer(code)):
+        raise InventoryError("Unqualified/unsupported Auth EF receipt call in " + relative)
+    return sites, supported_ef
+
+
 def csharp_producers(relative: str, text: str) -> list[dict]:
     code = code_mask(text)
     if any(unicodedata.category(char) == "Cf" for char in code):
         raise InventoryError("C# identifier format characters require explicit SQL discovery review in " + relative)
     if re.search(r"\\(?:u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})", code):
         raise InventoryError("Escaped C# identifiers require explicit SQL discovery review in " + relative)
-    if EF_SQL_API.search(code):
+    offsets, supported_ef = auth_ef_sites(relative, code)
+    if any(api.start() not in supported_ef for api in EF_SQL_API.finditer(code)):
         raise InventoryError("Unsupported runtime EF SQL API in " + relative)
     helper_names = HELPERS.get(relative, ())
     bodies, declarations = helper_ranges(code, helper_names)
-    offsets = set()
     recognized = {m.start(2) for m in RAW_EXECUTE.finditer(code)}
     for m in re.finditer(r"\bExecute(?:Reader|Scalar|NonQuery|BootstrapNonQuery)(?:Async)?\b",code):
         if m.start() not in recognized:
@@ -219,7 +277,7 @@ def csharp_producers(relative: str, text: str) -> list[dict]:
         for match in re.finditer(r"\b" + re.escape(name) + r"\s*\(", code):
             if match.start() not in declarations: offsets.add(match.start())
     # Additional provider execution APIs require explicit review, not an exemption.
-    if re.search(r"\b(?:ExecuteDbDataReader|ExecuteSqlCommand|ExecuteUpdate|ExecuteDelete)(?:Async)?\b", code):
+    if re.search(r"\b(?:ExecuteDbDataReader|ExecuteSqlCommand)(?:Async)?\b", code):
         raise InventoryError("Unsupported database execution API in " + relative)
     return [{"producerId": relative + ":L" + str(code.count("\n",0,i)+1),
              "source": relative, "kind": "csharp-callsite"} for i in sorted(offsets)]
@@ -287,7 +345,9 @@ def discover_project_sources(root: Path, roots: list[Path]) -> tuple[list[Path],
                    ("Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props")):
                 raise InventoryError("Directory build composition requires explicit source-scope review")
         tree = ET.fromstring(public_bytes(project))
-        if tree.tag != "Project" or tree.attrib != {"Sdk": "Microsoft.NET.Sdk"}:
+        auth_web = project.relative_to(root).as_posix() == AUTH_WEB_PROJECT
+        sdk = "Microsoft.NET.Sdk.Web" if auth_web else "Microsoft.NET.Sdk"
+        if tree.tag != "Project" or tree.attrib != {"Sdk": sdk}:
             raise InventoryError("Unsupported project SDK/source composition")
         projects.add(project)
         if any(node.tag not in {"PropertyGroup", "ItemGroup"} for node in tree):
@@ -295,6 +355,8 @@ def discover_project_sources(root: Path, roots: list[Path]) -> tuple[list[Path],
         parent = {child: node for node in tree.iter() for child in node}
         safe_properties = {"OutputType", "TargetFramework", "ImplicitUsings", "Nullable", "AssemblyName",
                            "Version", "ZekaSourceSha", "InformationalVersion", "IncludeSourceRevisionInInformationalVersion"}
+        if auth_web:
+            safe_properties |= {"InvariantGlobalization", "DockerDefaultTargetOS", "DockerfileContext", "UserSecretsId"}
         removals, linked, references = [], [], []
         for node in tree.iter():
             tag = node.tag.split("}")[-1]
@@ -465,7 +527,7 @@ def validate_closed_scripts(root: Path) -> dict[str, str]:
 def recheck_source_sets(root: Path, expected_graph_paths: set[str], expected_script_paths: set[str]) -> None:
     """Detect late source additions/removals as well as cached-input byte changes."""
     tool_projects, tool_files = discover_tools(root)
-    projects, closure_files = discover_project_sources(root, tool_projects + [root/p for p in INFRA_PROJECTS])
+    projects, closure_files = discover_project_sources(root, tool_projects + [root/p for p in SERVICE_PROJECTS])
     paths = set(projects) | set(tool_files) | set(closure_files) | {root/p for p in EXTRA} | {root/"Tools/Shared/OwnerSqlExecution.cs"}
     actual = {path.relative_to(root).as_posix() for path in paths}
     if actual != expected_graph_paths:
@@ -486,7 +548,7 @@ def build_inventory(root: Path) -> dict:
     script_paths = set(bindings) - {CLOSED_SURFACE}
     # Seal every default/linked/transitive source and project before any runtime
     # classification: a changed owner caller must not invoke unchanged excluded SQL.
-    projects, closure_files = discover_project_sources(root, tool_projects + [root/p for p in INFRA_PROJECTS])
+    projects, closure_files = discover_project_sources(root, tool_projects + [root/p for p in SERVICE_PROJECTS])
     files.extend(closure_files)
     files.append(root/core)
     graph_bindings, source_data = {}, {}
@@ -537,7 +599,9 @@ def compare(inventory: dict, records: list[dict]) -> dict:
     expected = {p["producerId"]: p for p in inventory["producers"]}
     allowed_fields = {"schema","producerId","producerSha256","querySha256","serverMajor","executionCompleted",
                       "outcome","sqlState","processId","observedAtUtc","sourceBindings"}
-    successful, observed_errors, failures = set(), set(), []
+    failures = []
+    terminals: dict[tuple[str, int, str, str], tuple[str, set[str]]] = {}
+    ambiguous = set()
     for index, receipt in enumerate(records):
         # Never echo a receipt or arbitrary caller-supplied identity into the report.
         label = "receipt["+str(index)+"]"
@@ -547,11 +611,18 @@ def compare(inventory: dict, records: list[dict]) -> dict:
         identity = receipt.get("producerId")
         producer = expected.get(identity) if isinstance(identity,str) else None
         if not producer: failures.append(label+": unknown producer"); continue
-        if (receipt.get("schema") != SCHEMA or type(receipt.get("serverMajor")) is not int or receipt.get("serverMajor") != 17 or
-            receipt.get("executionCompleted") is not True or
-            receipt.get("producerSha256") != producer["producerSha256"] or
-            not isinstance(receipt.get("querySha256"),str) or not re.fullmatch(r"[0-9a-f]{64}",receipt["querySha256"]) or
-            receipt.get("outcome") not in ("success", "postgres_error")):
+        schema = receipt.get("schema")
+        v2 = schema == SCHEMA_V2
+        outcome = receipt.get("outcome")
+        allowed_outcomes = ("success", "postgres_error", "cancelled") if v2 else ("success", "postgres_error")
+        expected_completion = outcome != "cancelled"
+        if (schema not in (SCHEMA, SCHEMA_V2)
+            or (v2 and (producer.get("kind") != "csharp-callsite" or producer.get("source") not in AUTH_EF_FILES))
+            or type(receipt.get("serverMajor")) is not int or receipt["serverMajor"] != 17
+            or outcome not in allowed_outcomes or receipt.get("executionCompleted") is not expected_completion
+            or receipt.get("producerSha256") != producer["producerSha256"]
+            or not isinstance(receipt.get("querySha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", receipt["querySha256"])):
             failures.append(label+": schema/source/provider/execution mismatch"); continue
         if producer.get("kind") == "bootstrap-batch" and receipt["querySha256"] != producer["producerSha256"]:
             failures.append(label+": bootstrap query/source digest mismatch"); continue
@@ -569,10 +640,34 @@ def compare(inventory: dict, records: list[dict]) -> dict:
         except ValueError:
             failures.append(label+": invalid UTC observation timestamp");continue
         state = receipt.get("sqlState")
-        if (state is not None and (not isinstance(state,str) or not re.fullmatch(r"[A-Z0-9]{5}",state))) or (receipt["outcome"] == "success" and state is not None):
+        if ((state is not None and (not isinstance(state, str) or not re.fullmatch(r"[A-Z0-9]{5}", state)))
+            or (outcome != "postgres_error" and state is not None)
+            or (v2 and ("sqlState" not in receipt
+                        or (outcome == "postgres_error" and (state is None or state.startswith("00")))))):
             failures.append(label+": invalid SQLSTATE/outcome metadata");continue
-        if receipt["outcome"] == "success": successful.add(identity)
-        else: observed_errors.add(identity)
+
+        # The native provenance identifies a terminal observation. Normalize UTC spelling
+        # while retaining the seventh fractional digit from .NET's round-trip timestamp.
+        second, _, fraction = stamp.removesuffix("Z").removesuffix("+00:00").partition(".")
+        terminal = (identity, receipt["processId"], second, fraction.ljust(7, "0"))
+        prior = terminals.get(terminal)
+        if prior is None:
+            terminals[terminal] = (schema, {outcome})
+        elif v2 or prior[0] == SCHEMA_V2:
+            failures.append(label+": duplicate or conflicting terminal receipt")
+            ambiguous.add(terminal)
+        else:
+            # Repeated v1 observations retain the historical comparison behavior.
+            prior[1].add(outcome)
+
+    successful, observed_errors = set(), set()
+    for terminal, (_, outcomes) in terminals.items():
+        if terminal in ambiguous:
+            continue
+        if "success" in outcomes:
+            successful.add(terminal[0])
+        if "postgres_error" in outcomes:
+            observed_errors.add(terminal[0])
     missing = sorted(set(expected)-successful)
     return {"schema":"zeka-owner-sql-coverage/v1", "status":"PASS" if not failures and not missing else "FAIL",
             "expectedProducerCount":len(expected), "successfulProducerCount":len(successful),

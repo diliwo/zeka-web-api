@@ -1,8 +1,8 @@
 {
   "schema": "zeka-owner-sql-referenced-source-boundary/v1",
   "reviewPolicy": "Every referenced compiled source/project file-set or byte change requires explicit source review and manifest acceptance; no automatic enrollment.",
-  "baseRevision": "966e548c3dafebc71f57c7bf3b1bcb614d4d10f2",
-  "sourceGraphSha256": "80e80cda48c3dfdc3362998a2214bfcf7afc343cfb9ca25d73e858d6df4a8522",
+  "baseRevision": "97a133bca86cb86cd9cb0e04a9b29e55331beb02",
+  "sourceGraphSha256": "009a0d74ffb81f69e5e725e43e254e019136c4ac22046c54e9430ef96531fd6e",
   "runtimeOnlySources": {
     "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/Closures/AdminAreaClosureGate.cs": {
       "sha256": "31feff4756e455cd900c14201868fd55d18850849f71a9dc872a6039acc85c9d",
@@ -28,11 +28,6 @@
       "sha256": "48f3960192c5a155674dc0bad34aced65ebe18d81aa8e98c2a7344f54040a836",
       "classification": "service-runtime-only",
       "reason": "Existing AdminArea runtime context, tenant-attempt, lifecycle, export, recovery or hosted-health SQL outside the current owner tooling flow; migrator uses its separate deployment context."
-    },
-    "Services/AuthManager/AuthManager.Infrastructure/Identity/BrowserSessions.cs": {
-      "sha256": "718bcf06a6c1d829253b28ec745b74f4f6cc3d907b50891a2d15d2747d18f5dd",
-      "classification": "service-runtime-only",
-      "reason": "Browser sign-in, refresh and session SQL is outside the current owner provisioning flow; owner command does not register or resolve browser sessions."
     },
     "Services/AuthManager/AuthManager.Infrastructure/Lifecycle/AuthClosureParticipant.cs": {
       "sha256": "28149dc80673ab24d1bb19786f577d16307fa9aa0219e2889e021c8cbc8cba9b",

@@ -5,6 +5,7 @@ using AuthManager.API.Endpoints;
 using AuthManager.Application;
 using AuthManager.Infrastructure;
 using AuthManager.Infrastructure.Authentication;
+using AuthManager.Infrastructure.Workers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +20,7 @@ builder.Services.AddTenantAuthentication(builder.Configuration);
 builder.Services.AddAssigneeServiceAuthentication(builder.Configuration);
 builder.Services.AddAccessTokenIssuer(builder.Configuration);
 builder.Services.AddBrowserSessionTransport();
+builder.Services.AddM1WorkerRotation(builder.Configuration, builder.Environment);
 LocalStackHealth.Add(builder);
 var app = builder.Build();
 app.UseLocalStackHealth();
@@ -27,6 +29,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.MapBrowserSessions();
+app.MapWorkerRotation();
 app.MapTenantAccess();
 app.MapBrowserEligibleOrganisations();
 app.MapAssigneeEligibility();

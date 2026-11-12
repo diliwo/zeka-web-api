@@ -153,8 +153,8 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
         var affected = database.BrowserSessionFamilies.Where(x => x.UserId == family.UserId && x.RevokedAtUtc == null);
         if (user is not null && Eligible(user, now) && !string.IsNullOrEmpty(user.SecurityStamp))
             affected = affected.Where(x => x.SecurityStamp == family.SecurityStamp);
-        await affected
-            .ExecuteUpdateAsync(set => set.SetProperty(x => x.RevokedAtUtc, (DateTimeOffset?)now), cancellationToken);
+        await AuthOwnerSqlReceipt.ObserveAuthUpdateAsync(database, () => affected
+            .ExecuteUpdateAsync(set => set.SetProperty(x => x.RevokedAtUtc, (DateTimeOffset?)now), cancellationToken));
         family.RevokedAtUtc = now;
         await EventAsync(family.UserId, family.Id, "identity_invalidated", cancellationToken);
         return false;
@@ -182,16 +182,19 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
 
     private async Task<BrowserSessionFamily?> LockFamilyAsync(Guid id, CancellationToken cancellationToken)
     {
-        var family = await database.BrowserSessionFamilies.FromSqlInterpolated(
-            $"SELECT * FROM \"BrowserSessionFamilies\" WHERE \"Id\" = {id} FOR UPDATE")
-            .SingleOrDefaultAsync(cancellationToken);
+        var family = await AuthOwnerSqlReceipt.ObserveAuthQueryAsync(database, () =>
+            database.BrowserSessionFamilies.FromSqlInterpolated(
+                $"SELECT * FROM \"BrowserSessionFamilies\" WHERE \"Id\" = {id} FOR UPDATE")
+                .SingleOrDefaultAsync(cancellationToken));
         if (family is not null) await database.Entry(family).ReloadAsync(cancellationToken);
         return family;
     }
     private async Task<User?> LockUserAsync(Guid id, CancellationToken cancellationToken)
     {
-        var user = await database.Users.FromSqlInterpolated(
-            $"SELECT * FROM \"AspNetUsers\" WHERE \"Id\" = {id} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
+        var user = await AuthOwnerSqlReceipt.ObserveAuthQueryAsync(database, () =>
+            database.Users.FromSqlInterpolated(
+                $"SELECT * FROM \"AspNetUsers\" WHERE \"Id\" = {id} FOR UPDATE")
+                .SingleOrDefaultAsync(cancellationToken));
         if (user is not null) await database.Entry(user).ReloadAsync(cancellationToken);
         return user;
     }

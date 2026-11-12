@@ -17,6 +17,17 @@ internal static class OwnerSqlExecution
 {
     private static readonly object WriteLock = new();
 
+    internal static bool IsEnabled => Environment.GetEnvironmentVariable("ZEKA_OWNER_SQL_EVIDENCE") == "1";
+
+    internal static (Action Complete, Action<PostgresException> Fail, Action<OperationCanceledException> Cancel) ObserveAuthCommand(
+        DbCommand command, string file, int line)
+    {
+        var observation = Prepare(command, file, line)
+            ?? throw new InvalidOperationException("OWNER_SQL_EVIDENCE_CONFIGURATION_MISSING");
+        return (() => observation.Write("success"), error => PreserveFailure(observation, error),
+            error => PreserveTerminal(observation, error, "cancelled"));
+    }
+
     internal static async Task<DbDataReader> ExecuteReaderAsync(DbCommand command, CancellationToken token,
         [CallerFilePath] string producerFile = "", [CallerLineNumber] int producerLine = 0)
     {
@@ -183,12 +194,15 @@ internal static class OwnerSqlExecution
         public override Task<bool> IsDBNullAsync(int i,CancellationToken token) => inner.IsDBNullAsync(i,token);
         public override System.Data.DataTable? GetSchemaTable() => inner.GetSchemaTable();
     }
-    private static void PreserveFailure(Observation? observation, PostgresException exception)
+    private static void PreserveFailure(Observation? observation, PostgresException exception) =>
+        PreserveTerminal(observation, exception, "postgres_error", exception.SqlState);
+
+    private static void PreserveTerminal(Observation? observation, Exception exception, string outcome, string? state = null)
     {
-        try { observation?.Write("postgres_error", exception.SqlState); }
+        try { observation?.Write(outcome, state); }
         catch
         {
-            // A collector failure must not replace the original PostgreSQL diagnostic.
+            // A collector failure must not replace the original execution failure.
             // The missing/malformed receipt still fails the coverage comparator closed.
             exception.Data["OwnerSqlEvidenceCaptureFailed"] = true;
         }
@@ -196,7 +210,7 @@ internal static class OwnerSqlExecution
 
     private static Observation? Prepare(DbCommand command, string file, int line)
     {
-        if (Environment.GetEnvironmentVariable("ZEKA_OWNER_SQL_EVIDENCE") != "1") return null;
+        if (!IsEnabled) return null;
         if (command.Connection is not NpgsqlConnection connection || connection.State != System.Data.ConnectionState.Open
             || connection.PostgreSqlVersion.Major != 17)
             throw new InvalidOperationException("OWNER_SQL_EVIDENCE_REQUIRES_POSTGRESQL_17");
@@ -215,8 +229,16 @@ internal static class OwnerSqlExecution
         // boundaries may be translated into the independently supplied, current source checkout.
         var normalized = file.Replace('\\', '/');
         var anchors = new[] { "Tools/", "Shared/", "Services/AuthManager/AuthManager.Infrastructure/Persistence/" };
+        var authSources = new[]
+        {
+            "Services/AuthManager/AuthManager.Infrastructure/Identity/BrowserSessions.cs",
+            "Services/AuthManager/AuthManager.Infrastructure/Workers/WorkerIdentitySource.cs",
+            "Services/AuthManager/AuthManager.Infrastructure/Workers/WorkerRotationStore.cs"
+        };
         var candidates = anchors.Select(anchor => normalized.IndexOf("/" + anchor, StringComparison.Ordinal))
-            .Where(index => index >= 0).Select(index => normalized[(index + 1)..]).Distinct().ToArray();
+            .Where(index => index >= 0).Select(index => normalized[(index + 1)..])
+            .Concat(authSources.Where(source => normalized.EndsWith("/" + source, StringComparison.Ordinal)))
+            .Distinct().ToArray();
         if (candidates.Length != 1)
             throw new InvalidOperationException("OWNER_SQL_EVIDENCE_PRODUCER_REJECTED");
         var relative = candidates[0];
@@ -259,10 +281,12 @@ internal static class OwnerSqlExecution
     {
         internal void Write(string outcome, string? state = null)
         {
+            var cancelled = outcome == "cancelled";
             var receipt = new
             {
-                schema = "zeka-owner-sql-execution/v1", producerId = Id, producerSha256 = Hash, querySha256 = QueryHash,
-                serverMajor = 17, executionCompleted = true, outcome, sqlState = state,
+                schema = cancelled ? "zeka-owner-sql-execution/v2" : "zeka-owner-sql-execution/v1",
+                producerId = Id, producerSha256 = Hash, querySha256 = QueryHash,
+                serverMajor = 17, executionCompleted = !cancelled, outcome, sqlState = state,
                 processId = Environment.ProcessId, observedAtUtc = DateTimeOffset.UtcNow
             };
             lock (WriteLock)

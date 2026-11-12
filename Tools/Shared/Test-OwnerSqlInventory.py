@@ -76,6 +76,102 @@ private static async Task RowsAsync(DbConnection c,string sql,CancellationToken 
         self.assertEqual(result["status"],"FAIL")
         self.assertEqual(result["postgresErrorProducers"],["a.cs:L1"])
 
+    def auth_receipt_fixture(self):
+        inventory, receipt = self.fixture()
+        source = module.AUTH_INFRA + "Identity/BrowserSessions.cs"
+        producer = inventory["producers"][0]
+        producer.update(producerId=source + ":L42", source=source, kind="csharp-callsite")
+        receipt.update(producerId=producer["producerId"], schema=module.SCHEMA_V2, sqlState=None)
+        return inventory, receipt
+
+    def test_v2_terminal_state_table(self):
+        inventory, receipt = self.auth_receipt_fixture()
+        success = module.compare(inventory, [receipt])
+        self.assertEqual(success["status"], "PASS")
+        self.assertEqual(success["successfulProducerCount"], 1)
+
+        error = {**receipt, "outcome": "postgres_error", "sqlState": "55P03"}
+        failed = module.compare(inventory, [error])
+        self.assertEqual(failed["status"], "FAIL")
+        self.assertEqual(failed["invalidReceiptReasons"], [])
+        self.assertEqual(failed["postgresErrorProducers"], [receipt["producerId"]])
+
+        cancelled = {**receipt, "outcome": "cancelled", "executionCompleted": False}
+        incomplete = module.compare(inventory, [cancelled])
+        self.assertEqual(incomplete["status"], "FAIL")
+        self.assertEqual(incomplete["successfulProducerCount"], 0)
+        self.assertEqual(incomplete["missingSuccessfulProducers"], [receipt["producerId"]])
+        self.assertEqual(incomplete["postgresErrorProducers"], [])
+        self.assertEqual(incomplete["invalidReceiptReasons"], [])
+
+    def test_v2_rejects_invalid_terminal_state_combinations(self):
+        inventory, receipt = self.auth_receipt_fixture()
+        for outcome, completed, state in (
+            ("success", False, None), ("success", True, "55P03"), ("success", 1, None),
+            ("postgres_error", False, "55P03"), ("postgres_error", True, None),
+            ("postgres_error", True, "00000"), ("postgres_error", True, "55p03"),
+            ("cancelled", True, None), ("cancelled", False, "55P03"),
+            ("cancelled", 0, None), ("other", False, None),
+        ):
+            with self.subTest(outcome=outcome, completed=completed, state=state):
+                malformed = {**receipt, "outcome": outcome, "executionCompleted": completed, "sqlState": state}
+                result = module.compare(inventory, [receipt, malformed])
+                self.assertEqual(result["status"], "FAIL")
+                self.assertEqual(len(result["invalidReceiptReasons"]), 1)
+        missing_state = {key: value for key, value in receipt.items() if key != "sqlState"}
+        self.assertEqual(module.compare(inventory, [missing_state])["status"], "FAIL")
+
+    def test_v2_keeps_the_existing_source_provider_and_field_gates(self):
+        inventory, receipt = self.auth_receipt_fixture()
+        for field, value in (
+            ("schema", "other"), ("producerId", "unregistered"), ("producerSha256", "d" * 64),
+            ("querySha256", "not-a-digest"), ("serverMajor", 16), ("processId", True),
+            ("observedAtUtc", "2026-11-03T00:00:00+01:00"), ("sourceBindings", {}),
+            ("commandText", "forbidden field"),
+        ):
+            with self.subTest(field=field, value=value):
+                result = module.compare(inventory, [{**receipt, field: value}])
+                self.assertEqual(result["status"], "FAIL")
+                self.assertEqual(len(result["invalidReceiptReasons"]), 1)
+        other_inventory, other_receipt = self.fixture()
+        other_receipt.update(schema=module.SCHEMA_V2, sqlState=None)
+        self.assertEqual(module.compare(other_inventory, [other_receipt])["status"], "FAIL")
+
+    def test_duplicate_and_conflicting_v2_terminals_are_uncredited(self):
+        inventory, receipt = self.auth_receipt_fixture()
+        cancelled = {**receipt, "outcome": "cancelled", "executionCompleted": False}
+        error = {**receipt, "outcome": "postgres_error", "sqlState": "55P03"}
+        legacy = {**receipt, "schema": module.SCHEMA}
+        for first, second in (
+            (receipt, receipt), (cancelled, cancelled), (error, error),
+            (receipt, cancelled), (error, cancelled), (legacy, cancelled), (cancelled, legacy),
+            (receipt, {**cancelled, "observedAtUtc": "2026-11-03T00:00:00.0000000+00:00",
+                       "querySha256": "e" * 64}),
+        ):
+            with self.subTest(first=first["outcome"], second=second["outcome"]):
+                result = module.compare(inventory, [first, second])
+                self.assertEqual(result["status"], "FAIL")
+                self.assertEqual(result["successfulProducerCount"], 0)
+                self.assertEqual(result["postgresErrorProducers"], [])
+                self.assertIn("duplicate or conflicting terminal receipt", result["invalidReceiptReasons"][0])
+
+    def test_distinct_terminal_timestamps_and_repeated_v1_rows_keep_their_credit(self):
+        inventory, receipt = self.auth_receipt_fixture()
+        success = {**receipt, "observedAtUtc": "2026-11-03T00:00:00.0000001Z"}
+        cancelled = {**receipt, "observedAtUtc": "2026-11-03T00:00:00.0000002+00:00",
+                     "outcome": "cancelled", "executionCompleted": False}
+        result = module.compare(inventory, [success, cancelled])
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["successfulProducerCount"], 1)
+
+        inventory, legacy = self.fixture()
+        repeated = module.compare(inventory, [legacy, legacy, {**legacy, "outcome": "postgres_error"}])
+        self.assertEqual(repeated["status"], "PASS")
+        self.assertEqual(repeated["successfulProducerCount"], 1)
+        self.assertEqual(repeated["postgresErrorProducers"], [legacy["producerId"]])
+        legacy_cancelled = {**legacy, "outcome": "cancelled", "executionCompleted": False, "sqlState": None}
+        self.assertEqual(module.compare(inventory, [legacy_cancelled])["status"], "FAIL")
+
     def test_internal_scan_failure_never_reads_content(self):
         # Explicit synthetic scanner fixture, not a real source scan receipt.
         with tempfile.TemporaryDirectory() as directory:
@@ -235,6 +331,50 @@ class DiscoveryClosureTests(unittest.TestCase):
             with self.subTest(call=call), self.assertRaises(module.InventoryError):
                 module.csharp_producers("Tools/Owner/Program.cs", call)
 
+    def test_auth_ef_receipts_bind_only_exact_executing_operations(self):
+        browser = module.AUTH_INFRA + "Identity/BrowserSessions.cs"
+        worker = module.AUTH_INFRA + "Workers/WorkerIdentitySource.cs"
+        lock = 'AuthOwnerSqlReceipt.ObserveAuthQueryAsync(database, () => database.Users.FromSqlInterpolated(sql).SingleOrDefaultAsync(ct))'
+        update = 'AuthOwnerSqlReceipt.ObserveAuthUpdateAsync(database, () => affected.ExecuteUpdateAsync(set => set.SetProperty(x => x.RevokedAtUtc, now), ct))'
+        load = 'AuthOwnerSqlReceipt.ObserveAuthLoadAsync(database, () => database.Users.FromSqlInterpolated(sql).LoadAsync(ct))'
+        for source, expression in ((browser, lock), (browser, update), (worker, load)):
+            with self.subTest(source=source, expression=expression):
+                self.assertEqual(module.csharp_producers(source, "\nawait " + expression + ";"),
+                                 [{"producerId": source + ":L2", "source": source, "kind": "csharp-callsite"}])
+        for source, expression in (
+            (browser, 'affected.ExecuteUpdateAsync(set, ct)'),
+            (worker, lock),
+            (browser, update.replace("ExecuteUpdateAsync", "ExecuteDeleteAsync")),
+            (browser, update[:-1] + ", file, 12)"),
+            (browser, lock.replace("SingleOrDefaultAsync(ct)", "AsAsyncEnumerable()")),
+            (browser, lock.replace("FromSqlInterpolated(sql)", "FromSqlInterpolated(SqlQueryRaw(sql))")),
+            (browser, lock.replace("AuthOwnerSqlReceipt.", "")),
+            (browser, lock + "; affected.ExecuteUpdateAsync(set, ct)"),
+            (browser, "OwnerSqlExecution.ObserveAuthCommand(command, file, line)"),
+        ):
+            with self.subTest(source=source, expression=expression), self.assertRaises(module.InventoryError):
+                module.csharp_producers(source, "await " + expression + ";")
+
+    def test_auth_adapter_enum_is_metadata_only(self):
+        enum_value = "var update = CommandSource.ExecuteUpdate; var read = CommandSource.FromSqlQuery;"
+        self.assertEqual(module.csharp_producers(module.AUTH_RECEIPT, enum_value), [])
+        for operation in ("affected.ExecuteUpdateAsync(set, ct);", "CommandSource.ExecuteUpdate();", "CommandSource.FromSqlQuery();"):
+            with self.subTest(operation=operation), self.assertRaises(module.InventoryError):
+                module.csharp_producers(module.AUTH_RECEIPT, enum_value + operation)
+
+    def test_auth_web_project_is_exact_and_default_compiles_endpoints(self):
+        root, project = self.source(module.AUTH_WEB_PROJECT, '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><InvariantGlobalization>true</InvariantGlobalization></PropertyGroup><ItemGroup><ProjectReference Include="../AuthCore/AuthCore.csproj" /></ItemGroup></Project>')
+        caller = self.write(root, project.parent.relative_to(root) / "Program.cs", "class Program {}")
+        endpoint = self.write(root, project.parent.relative_to(root) / "Endpoints/WorkerRotationEndpoints.cs", "class Endpoints {}")
+        dependency = self.write(root, project.parent.parent.relative_to(root) / "AuthCore/AuthCore.csproj", '<Project Sdk="Microsoft.NET.Sdk" />')
+        self.assertEqual(self.closure(root, [project]), (sorted([project, dependency]), sorted([caller, endpoint])))
+        other = self.write(root, "Other/Other.csproj", '<Project Sdk="Microsoft.NET.Sdk.Web" />')
+        with self.assertRaises(module.InventoryError):
+            self.closure(root, [other])
+        self.write(root, module.AUTH_WEB_PROJECT, '<Project Sdk="Microsoft.NET.Sdk.Web"><ItemGroup><Compile Include="../Helpers/*.cs" /></ItemGroup></Project>')
+        with self.assertRaises(module.InventoryError):
+            self.closure(root, [project])
+
     def test_native_method_group_and_unqualified_references_fail_closed(self):
         for call in ('var execute = command.ExecuteNonQueryAsync;',
                      'Func<CancellationToken,Task<DbDataReader>> run = command.ExecuteReaderAsync;',
@@ -377,7 +517,7 @@ class FinalSourceSetTests(unittest.TestCase):
 
     def check(self, root, expected_graph, expected_scripts):
         # Fixture-only source read stub. Production cache checks remain unchanged.
-        with mock.patch.object(module, "public_bytes", side_effect=lambda p:p.read_bytes()), mock.patch.object(module, "INFRA_PROJECTS", ()), mock.patch.object(module, "EXTRA", ()):
+        with mock.patch.object(module, "public_bytes", side_effect=lambda p:p.read_bytes()), mock.patch.object(module, "SERVICE_PROJECTS", ()), mock.patch.object(module, "EXTRA", ()):
             module.recheck_source_sets(root, expected_graph, expected_scripts)
 
     def test_unchanged_final_source_sets_pass(self):

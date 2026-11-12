@@ -38,6 +38,10 @@
       "sha256": "0356126a12dd63797cf6afbe59fe13aa966e5cb52653ec2e63fe8eaa1511763a",
       "classification": "reviewed-orchestration-support"
     },
+    "Deployments/local-stack/Invoke-WorkerCredentialRotation.ps1": {
+      "sha256": "0ced6a8671a8e22b7a02ca5dbbb5accd8fd24a34a94e2c6133184231856e3d61",
+      "classification": "reviewed-orchestration-support"
+    },
     "Deployments/local-stack/OwnerFirstAdminPreflightPrivileges.ps1": {
       "sha256": "bafa3e6c890481ec457c4d66322d2fc8ed1c2bf7e98aaf41d7cbd6a99421f82e",
       "classification": "delegated-query-factory"

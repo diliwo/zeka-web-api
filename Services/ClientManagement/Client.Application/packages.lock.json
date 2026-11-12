@@ -1202,7 +1202,7 @@
       "Zeka.Extensions.MultiTenancy.Abstractions": {
         "type": "Transitive",
         "resolved": "2.0.0-preview.1",
-        "contentHash": "Fta+nSPs71T7O6ps1GHVrYL6dXZ71q2BqxyQosL+nEJpC+ekWsV9GHjbCBRwZjQbkFbFjR2jAQ8S5m4VPG+gwQ=="
+        "contentHash": "gHNc0w6UNCpMKo6UBEyuLu1WCRaUjL13gw1xFc5anKyP+vDlJCSgdpnnafxzrrtmGK/IK8jQ2xGcg/j2864vOw=="
       },
       "clientmanagement.core": {
         "type": "Project",

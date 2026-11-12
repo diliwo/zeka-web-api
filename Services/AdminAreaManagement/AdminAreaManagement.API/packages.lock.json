@@ -104,7 +104,7 @@
         "type": "Direct",
         "requested": "[2.0.0-preview.1, )",
         "resolved": "2.0.0-preview.1",
-        "contentHash": "TkRKK6IWTezV5M789lrQOahMGuHAqMssghc/BkQW2CNjR4mBXaKCGXIPHzytxQeO+Sz2RS6y2FwwipGQdx82eg==",
+        "contentHash": "U8ekEdDOXzQQXL/PpCbWv6aow6Sd8cELD10HnsF5bNd20nZ0hkqdXR1aKOib5JEKtrkMkphZK6U8KDXbuLc72A==",
         "dependencies": {
           "Zeka.Extensions.MultiTenancy.Abstractions": "2.0.0-preview.1"
         }
@@ -1716,12 +1716,12 @@
       "Zeka.Extensions.MultiTenancy.Abstractions": {
         "type": "Transitive",
         "resolved": "2.0.0-preview.1",
-        "contentHash": "Fta+nSPs71T7O6ps1GHVrYL6dXZ71q2BqxyQosL+nEJpC+ekWsV9GHjbCBRwZjQbkFbFjR2jAQ8S5m4VPG+gwQ=="
+        "contentHash": "gHNc0w6UNCpMKo6UBEyuLu1WCRaUjL13gw1xFc5anKyP+vDlJCSgdpnnafxzrrtmGK/IK8jQ2xGcg/j2864vOw=="
       },
       "Zeka.Extensions.MultiTenancy.EntityFrameworkCore": {
         "type": "Transitive",
         "resolved": "2.0.0-preview.1",
-        "contentHash": "6h2tTTbFwCz301LsKzCVblpXdkynq/EGEc01BGmyih7NmshS8Rv9hVKwHyhmaO+dFa6YAvzVP30y09wbj9l+Tw==",
+        "contentHash": "UKhVD8J+tH6q5Jkk5BnYLX9j+auvOCGuSb8po86pi3nzcPOQhrwf4+dKcdFYnZnnmP8w0AEqLb9yQgcGnu5KlQ==",
         "dependencies": {
           "Microsoft.EntityFrameworkCore.Relational": "8.0.30",
           "Zeka.Extensions.MultiTenancy.Abstractions": "2.0.0-preview.1"
@@ -1769,6 +1769,7 @@
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[8.0.4, )",
           "System.Configuration.ConfigurationManager": "[8.0.0, )",
           "System.Linq.Dynamic.Core": "[1.6.0, )",
+          "Zeka.Authentication": "[1.0.0, )",
           "Zeka.Extensions.MultiTenancy.EntityFrameworkCore": "[2.0.0-preview.1, )"
         }
       },

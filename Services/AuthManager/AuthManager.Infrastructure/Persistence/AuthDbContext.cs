@@ -1,4 +1,4 @@
-﻿using AuthManager.Infrastructure.Identity.Models;
+using AuthManager.Infrastructure.Identity.Models;
 using AuthManager.Infrastructure.Persistence.Configurations;
 using AuthManager.Core.Organisations;
 using Microsoft.AspNetCore.Identity;
@@ -15,8 +15,13 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     internal bool LifecycleOnly { get; set; }
     internal System.Data.Common.DbTransaction? LifecycleTransaction { get; set; }
 
-    protected override void OnConfiguring(DbContextOptionsBuilder builder) =>
+    internal AuthOwnerSqlReceipt? OwnerSqlReceipt { get; } = AuthOwnerSqlReceipt.CreateIfEnabled();
+
+    protected override void OnConfiguring(DbContextOptionsBuilder builder)
+    {
         builder.AddInterceptors(new Lifecycle.LifecycleCommandGuard(this));
+        if (OwnerSqlReceipt is not null) builder.AddInterceptors(OwnerSqlReceipt);
+    }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     { GuardLifecycleWrites(); return base.SaveChanges(acceptAllChangesOnSuccess); }
