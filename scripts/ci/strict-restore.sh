@@ -159,8 +159,11 @@ verify_all() {
 
 check_credentials() {
     local name
-    [[ ${PACKAGE_USERNAME:-} =~ ^[a-zA-Z0-9_.-]+$ &&
-        ${PACKAGE_READ_TOKEN:-} =~ ^[a-zA-Z0-9_-]+$ ]] || fail 'missing or malformed approved package credential'
+    [[ ${PACKAGE_USERNAME:-} =~ ^[a-zA-Z0-9_.-]+$ ]] || fail 'missing or malformed approved package credential'
+    # GitHub Actions may supply a stateless installation token with a dot-separated JWT.
+    [[ ${PACKAGE_READ_TOKEN:-} =~ ^[a-zA-Z0-9_-]+$ ||
+        ${PACKAGE_READ_TOKEN:-} =~ ^ghs_[0-9]+_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$ ]] ||
+        fail 'missing or malformed approved package credential'
     while IFS= read -r name; do
         case "${name,,}" in
             nugetpackagesourcecredentials_*|nuget_packages|nuget_http_cache_path|nuget_fallback_packages|\

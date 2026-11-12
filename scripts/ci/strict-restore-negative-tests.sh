@@ -67,6 +67,20 @@ export PACKAGE_USERNAME=fixture-account
 export PACKAGE_READ_TOKEN="fixture-$RANDOM-$RANDOM"
 check_credentials
 (
+    export PACKAGE_READ_TOKEN="ghs_${RANDOM}_fixture${RANDOM}.payload${RANDOM}.signature${RANDOM}"
+    check_credentials
+)
+(
+    export PACKAGE_READ_TOKEN="fixture-${RANDOM};unexpected=field"
+    must_fail check_credentials
+    grep -q 'missing or malformed' "$run_dir/result"
+)
+(
+    export PACKAGE_READ_TOKEN=$(printf 'fixture-%s\nunexpected' "$RANDOM")
+    must_fail check_credentials
+    grep -q 'missing or malformed' "$run_dir/result"
+)
+(
     export RestoreSources=https://example.invalid/v3/index.json
     must_fail check_credentials
     grep -q 'ambient NuGet source' "$run_dir/result"
