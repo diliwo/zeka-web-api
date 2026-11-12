@@ -165,6 +165,19 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
             Command(hiddenSupportId, hiddenClientId, hiddenWorkerId, "selected-other"));
         Assert.Equal(HttpStatusCode.Forbidden, wrongSelection.StatusCode);
 
+        // An explicit denial is not the same contract as contradictory successful authority.
+        var contradictoryEvidence = new TenantAttemptEvidenceCollector();
+        await using (var contradictoryApp = await StartHttpApplicationAsync(ownOrganisation,
+            contradictoryEvidence, membership, all, contradictSelection: true))
+        {
+            using var contradictoryClient = contradictoryApp.GetTestClient();
+            SetTenantHeaders(contradictoryClient, otherOrganisation);
+            var contradictory = await contradictoryClient.PostAsJsonAsync("/api/Supports",
+                Command(hiddenSupportId, hiddenClientId, hiddenWorkerId, "contradictory-authority"));
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, contradictory.StatusCode);
+            Assert.Empty(contradictoryEvidence.Snapshot());
+        }
+
         await using var verifyOwn = new ApplicationDbContext(seedOptions, TenantEnforcementTests.Scope(ownOrganisation));
         Assert.Equal("own-updated", (await verifyOwn.SocialCases.SingleAsync(x => x.Id == ownSupportId)).Note);
         Assert.Equal(all ? "unassigned-update" : "unassigned-original",
@@ -219,7 +232,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
     }
 
     private async Task<WebApplication> StartHttpApplicationAsync(Guid organisation,
-        TenantAttemptEvidenceCollector evidence, Guid? membership = null, bool? all = null)
+        TenantAttemptEvidenceCollector evidence, Guid? membership = null, bool? all = null, bool contradictSelection = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.WebHost.UseTestServer();
@@ -242,7 +255,7 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         builder.Services.RemoveAll<ITenantAttemptOrderObserver>();
         builder.Services.AddSingleton<ITenantAttemptOrderObserver>(evidence);
         builder.Services.RemoveAll<ICurrentTenantAccess>();
-        builder.Services.AddScoped<ICurrentTenantAccess>(_ => new Access(organisation, membership, all));
+        builder.Services.AddScoped<ICurrentTenantAccess>(_ => new Access(organisation, membership, all, contradictSelection));
         builder.Services.AddControllers()
             .AddApplicationPart(typeof(ClientManagement.API.Controllers.ClientsController).Assembly);
         var app = builder.Build();
@@ -279,10 +292,13 @@ public sealed class ClientFirstSqlPathEvidenceTests(PostgreSqlClientRuntimeDatab
         client.DefaultRequestHeaders.Add("X-Organisation-Id", organisation.ToString());
     }
 
-    private sealed class Access(Guid organisation, Guid? membership, bool? all) : ICurrentTenantAccess
+    private sealed class Access(Guid organisation, Guid? membership, bool? all, bool contradictSelection) : ICurrentTenantAccess
     {
         public Task<TenantAccessDecision> ResolveAsync(string authenticatedSubjectId, Guid selectedOrganisationId,
-            CancellationToken cancellationToken) => Task.FromResult(new TenantAccessDecision(TenantAccessOutcome.Authorized,
+            CancellationToken cancellationToken) => Task.FromResult(
+            selectedOrganisationId != organisation && !contradictSelection
+                ? new TenantAccessDecision(TenantAccessOutcome.Denied)
+                : new TenantAccessDecision(TenantAccessOutcome.Authorized,
             new(organisation, membership ?? Guid.NewGuid(),
                 all.HasValue
                     ? ["Clients.ViewAll", "Clients.Create", all.Value ? "Clients.EditAll" : "Clients.EditAssigned"]
@@ -335,7 +351,7 @@ public sealed class PostgreSqlClientRuntimeDatabase : IAsyncLifetime
     private const string MigratorPassword = "test-migrator-password";
     private const string RuntimePassword = "test-runtime-password";
     private const string RecoveryPassword = "test-recovery-password";
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer postgres = TenantDatabase.CreatePostgreSqlFixture();
     public string AdministratorConnectionString => postgres.GetConnectionString();
     public string RuntimeConnectionString => Connection("zeka_client_runtime", RuntimePassword);
     public string RecoveryConnectionString =>

@@ -23,6 +23,8 @@ using Xunit;
 using Zeka.Authentication;
 using Zeka.Authentication.Tests;
 using Zeka.Extensions.MultiTenancy.Abstractions;
+using Zeka.WorkerCredentials;
+using Zeka.WorkerCredentials.Testing;
 
 namespace Infrastructure.IntegrationTests;
 
@@ -148,15 +150,14 @@ public sealed class AuthorityCorrectionTests
     public async Task Actual_worker_consumer_logs_mismatch_and_refuses_before_any_database_continuation()
     {
         var organisation = Guid.NewGuid(); var membership = Guid.NewGuid();
-        var bearer = Guid.NewGuid().ToString("N");
+        var credentials = WorkerCredentialFixture.For([organisation], WorkerCredentialEncoding.ClientProfile);
+        var bearer = (await credentials.ReadAsync(default)).Token;
         var contexts = new ConcurrentBag<TenantContextScope>();
         using var records = new RecordingProvider();
         var handler = new Handler(_ => Response(organisation, "private-wrong-worker", membership));
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
-            ["TenantWorker:SubjectId"] = "private-worker",
-            ["TenantWorker:BearerToken"] = bearer
+            ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/"
         }).Build();
         using var host = new HostBuilder()
             .ConfigureLogging(logging => logging.ClearProviders().AddProvider(records))
@@ -178,7 +179,7 @@ public sealed class AuthorityCorrectionTests
         using (var checkScope = host.Services.CreateScope())
             Assert.Null(checkScope.ServiceProvider.GetService<ClientManagement.Infrastructure.Persistence.ApplicationDbContext>());
         var consumer = new ClientManagement.Infrastructure.Messaging.StaffProjectionConsumer(
-            host.Services.GetRequiredService<IServiceScopeFactory>(), configuration);
+            host.Services.GetRequiredService<IServiceScopeFactory>(), configuration, credentials);
         var message = new Zeka.Contracts.Staff.V1.StaffProjectionChangedV1(organisation, membership, 1, true,
             "Synthetic", "Worker", "synthetic.worker", "Synthetic", "SYN");
         var error = await Assert.ThrowsAsync<TenantAccessException>(() => consumer.Handle(message));
