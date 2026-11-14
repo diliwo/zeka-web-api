@@ -9,7 +9,7 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
-from c1_ratchet_trx import identify_project, load_trx, validate_identity
+from c1_ratchet_trx import TrxError, identify_project, load_trx, validate_identity
 
 ANCHOR = "23ad61e84ae976b6a483d2a859871c3b40d98249"
 AUTHORITY = "https://linear.app/zeka-saas/issue/ZEK-17#comment-0281b80b-a1a6-42d9-b8f8-02bd8d117a05"
@@ -355,7 +355,7 @@ def main():
     except (OSError, ValueError, KeyError, TypeError) as error:
         # Only our fixed validation codes may be exported. Native text and untrusted
         # inputs (including parser error messages) stay out of stdout and artifacts.
-        code = str(error) if isinstance(error, RatchetError) else "INPUT_OR_TEST_EVIDENCE_REJECTED"
+        code = str(error) if isinstance(error, (RatchetError, TrxError)) else "INPUT_OR_TEST_EVIDENCE_REJECTED"
         if args.command == "compare" and not args.out.exists():
             save_json(args.out, {"schema": 1, "status": "FAIL", "baselineDiff": None,
                                  "baselineDiffUnavailable": "Unsafe or unavailable baseline data",

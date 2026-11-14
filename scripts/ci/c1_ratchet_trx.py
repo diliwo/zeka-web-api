@@ -4,6 +4,7 @@ import hashlib
 import re
 from decimal import Decimal
 from pathlib import Path, PurePosixPath
+from unicodedata import category
 from xml.etree import ElementTree as ET
 
 
@@ -15,6 +16,10 @@ _NS = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
 _FQN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*[A-Za-z0-9_.+@`]*")
 _COMPONENT = re.compile(r"[A-Za-z0-9_.-]+")
 _GUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+_XUNIT_V2_ADAPTER = "executor://xunit/vstestrunner2/netcoreapp"
+_XUNIT_ABBREVIATED_VALUE = re.compile(
+    r'(?:[:=] |\[|, )"(?P<body>(?:[^"\\]|\\.){24,50}\\?)"\.\.\.(?=\s*(?:,|\)|\]|}))'
+)
 _FRAME = re.compile(r"at (?P<name>[A-Za-z_][A-Za-z0-9_.+@`<>]*(?:\.\.ctor)?)\(")
 _SECRET_SHAPED = re.compile(
     r"op://|[?&](?:token|key|sig|password)=|"
@@ -130,14 +135,19 @@ def validate_identity(identity):
     return tuple(identity)
 
 
-def _protected_row(qualified, row):
+def _protected_row(qualified, row, test_id, adapter):
     # The owner already published these two captions in the authoritative ratchet.
     if not row or _PUBLIC_CAPTIONS.get(qualified) == row:
         return row
     _require(row.startswith("(") and row.endswith(")") and len(row) <= 768
-             and all(character.isprintable() for character in row)
+             and all(character.isprintable() or category(character) == "Zs" for character in row)
              and "…" not in row and "···" not in row,
              "TRX_THEORY_ROW_UNSAFE_OR_AMBIGUOUS")
+    # xUnit v2 abbreviates strings with ASCII dots outside the closing quote.
+    # Its netcoreapp adapter derives testId from the fully serialized arguments.
+    if any(len(match["body"].encode("utf-16-le")) == 100 for match in _XUNIT_ABBREVIATED_VALUE.finditer(row)):
+        _require(adapter == _XUNIT_V2_ADAPTER, "TRX_ABBREVIATED_CASE_ADAPTER_UNSUPPORTED")
+        row = test_id
     return "(sha256:" + hashlib.sha256(row.encode("utf-8")).hexdigest() + ")"
 
 
@@ -248,8 +258,8 @@ def load_trx(path, project):
         method = _one(definition, "TestMethod", "TRX_TEST_METHOD_MISSING_OR_AMBIGUOUS")
         codebase = method.get("codeBase", "")
         codebases.add(codebase)
-        _require(method.get("adapterTypeName", "").casefold().startswith("executor://xunit/"),
-                 "TRX_TEST_ADAPTER_UNSUPPORTED")
+        adapter = method.get("adapterTypeName", "").casefold()
+        _require(adapter.startswith("executor://xunit/"), "TRX_TEST_ADAPTER_UNSUPPORTED")
         assembly = _assembly(codebase, project)
         _require(assembly is not None
                  and definition.get("storage", "").replace("\\", "/").casefold()
@@ -257,7 +267,7 @@ def load_trx(path, project):
                  "TRX_PROJECT_BINARY_MISMATCH")
         qualified = method.get("className", "") + "." + method.get("name", "")
         execution = _one(definition, "Execution", "TRX_EXECUTION_LINK_MISSING_OR_AMBIGUOUS")
-        definitions[test_id] = (assembly, qualified, definition.get("name", ""), _attribute_id(execution, "id"))
+        definitions[test_id] = (assembly, qualified, definition.get("name", ""), _attribute_id(execution, "id"), adapter)
     _require(len(codebases) == 1, "TRX_BINARY_SOURCE_MISSING_OR_AMBIGUOUS")
     entries = {}
     for entry in _one(root, "TestEntries", "TRX_TEST_ENTRIES_MISSING_OR_AMBIGUOUS"):
@@ -279,11 +289,11 @@ def load_trx(path, project):
         _require(test_id in definitions and entries.pop(execution_id, None) == test_id
                  and test_id not in used_definitions, "TRX_RESULT_EXECUTION_UNBOUND")
         used_definitions.add(test_id)
-        assembly, qualified, definition_name, linked_id = definitions[test_id]
+        assembly, qualified, definition_name, linked_id, adapter = definitions[test_id]
         row = _row(qualified, result.get("testName", ""))
         _require(execution_id == linked_id and row == _row(qualified, definition_name),
                  "TRX_RESULT_DEFINITION_MISMATCH")
-        identity = validate_identity([assembly, qualified, _protected_row(qualified, row)])
+        identity = validate_identity([assembly, qualified, _protected_row(qualified, row, test_id, adapter)])
         _require(identity not in identities, "TRX_DUPLICATE_CASE_IDENTITY")
         identities.add(identity)
         outcome = result.get("outcome")

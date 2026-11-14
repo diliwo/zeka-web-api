@@ -115,6 +115,59 @@ class RatchetFixtureTests(TestCase):
         self.assertEqual(self.compare()["baselineDiff"], "")
         self.assertEqual(identify_project(TRX / "candidate.trx", [PROJECT]), PROJECT)
 
+    def test_abbreviated_theory_rows_use_hashed_bound_test_ids(self):
+        from xml.etree import ElementTree as ET
+        ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+        caption = '(kind: "' + 'x' * 50 + '"...)'
+        text = self.candidate.replace('(kind: &quot;permission&quot;)', caption.replace('"', '&quot;'))
+        root = ET.fromstring(text)
+        original_id = "11111111-1111-4111-8111-000000000001"
+        second_id = "11111111-1111-4111-8111-000000000004"
+        original_execution = "22222222-2222-4222-8222-000000000001"
+        second_execution = "22222222-2222-4222-8222-000000000004"
+        for tag in ("Results", "TestDefinitions", "TestEntries"):
+            parent = root.find(ns + tag)
+            row = ET.tostring(parent[0], encoding="unicode")
+            parent.append(ET.fromstring(row.replace(original_id, second_id).replace(original_execution, second_execution)))
+        root.find(f"{ns}ResultSummary/{ns}Counters").attrib.update(total="4", executed="4", failed="2")
+        trx = self.folder / "abbreviated.trx"
+        trx.write_text(ET.tostring(root, encoding="unicode"), encoding="utf-8")
+        rows = load_trx(trx, PROJECT)
+        expected = {case("KnownAuthorityFailure", "(sha256:" + sha256(identifier.encode()).hexdigest() + ")")[-1]
+                    for identifier in (original_id, second_id)}
+        self.assertEqual({row["identity"][-1] for row in rows if row["outcome"] == "Failed"}, expected)
+        self.assertNotIn(caption, str(rows))
+        self.assertNotIn(original_id, str(rows))
+        self.assertNotIn(second_id, str(rows))
+
+        rerun = ET.tostring(root, encoding="unicode").replace(
+            original_execution, "33333333-3333-4333-8333-000000000001")
+        trx.write_text(rerun, encoding="utf-8")
+        self.assertEqual(load_trx(trx, PROJECT), rows)
+
+        trx.write_text(rerun.replace("VsTestRunner2/netcoreapp", "UnknownRunner"), encoding="utf-8")
+        with self.assertRaisesRegex(TrxError, "TRX_ABBREVIATED_CASE_ADAPTER_UNSUPPORTED"):
+            load_trx(trx, PROJECT)
+
+    def test_literal_dots_and_unicode_spaces_preserve_the_caption_hash(self):
+        caption = '(kind: "first\u00a0second\u2003...")'
+        trx = self.folder / "unicode.trx"
+        trx.write_text(self.candidate.replace('(kind: &quot;permission&quot;)', caption.replace('"', '&quot;')),
+                       encoding="utf-8")
+        rows = load_trx(trx, PROJECT)
+        expected = "(sha256:" + sha256(caption.encode("utf-8")).hexdigest() + ")"
+        self.assertIn(case("KnownAuthorityFailure", expected), [row["identity"] for row in rows])
+        self.assertNotIn(caption, str(rows))
+
+    def test_line_or_paragraph_separators_in_theory_captions_are_rejected(self):
+        for separator in ("\u2028", "\u2029", "&#x9;"):
+            with self.subTest(separator=repr(separator)):
+                trx = self.folder / "unsafe.trx"
+                trx.write_text(self.candidate.replace("&quot;permission&quot;", f"&quot;first{separator}second&quot;"),
+                               encoding="utf-8")
+                with self.assertRaisesRegex(TrxError, "TRX_THEORY_ROW_UNSAFE_OR_AMBIGUOUS"):
+                    load_trx(trx, PROJECT)
+
     def test_new_failure_rejected(self):
         text = self.candidate.replace(
             'outcome="Passed" testName="' + FQN + 'Healthy" />',
