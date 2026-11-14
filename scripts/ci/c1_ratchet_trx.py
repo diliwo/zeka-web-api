@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+from collections import Counter
 from decimal import Decimal
 from pathlib import Path, PurePosixPath
 from unicodedata import category
@@ -20,6 +21,7 @@ _XUNIT_V2_ADAPTER = "executor://xunit/vstestrunner2/netcoreapp"
 _XUNIT_ABBREVIATED_VALUE = re.compile(
     r'(?:[:=] |\[|, )"(?P<body>(?:[^"\\]|\\.){24,50}\\?)"\.\.\.(?=\s*(?:,|\)|\]|}))'
 )
+_XUNIT_FAILURE_SUMMARY = re.compile(r"\[xUnit\.net [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{2}\]     (.+) \[FAIL\]")
 _FRAME = re.compile(r"at (?P<name>[A-Za-z_][A-Za-z0-9_.+@`<>]*(?:\.\.ctor)?)\(")
 _SECRET_SHAPED = re.compile(
     r"op://|[?&](?:token|key|sig|password)=|"
@@ -246,6 +248,21 @@ def _signature(result, project, qualified):
     return {"exception": exception, "assertion": assertion, "frame": frame}
 
 
+def _validate_run_infos(summary, failed_displays):
+    for info in summary.findall(f"{_NS}RunInfos/{_NS}RunInfo"):
+        outcome = info.get("outcome", "").casefold()
+        if outcome in ("warning", "informational"):
+            continue
+        _require(outcome == "error" and len(info) == 1, "TRX_RUN_INFRASTRUCTURE_ERROR")
+        text = _one(info, "Text", "TRX_RUN_INFRASTRUCTURE_ERROR")
+        _require(len(text) == 0 and text.text, "TRX_RUN_INFRASTRUCTURE_ERROR")
+        match = _XUNIT_FAILURE_SUMMARY.fullmatch(text.text)
+        # The adapter reports ordinary failed tests both here and as failed rows.
+        # Consume each bound display once, including repeated abbreviated captions.
+        _require(match and failed_displays[match[1]] > 0, "TRX_RUN_INFRASTRUCTURE_ERROR")
+        failed_displays[match[1]] -= 1
+
+
 def load_trx(path, project):
     """Return flat, project-qualified rows only when counts and provenance agree."""
     project = _project_path(project)
@@ -280,6 +297,7 @@ def load_trx(path, project):
     rows = []
     identities = set()
     used_definitions = set()
+    failed_displays = Counter()
     counts = {"Passed": 0, "Failed": 0, "NotExecuted": 0}
     for result in results:
         _require(result.tag == _NS + "UnitTestResult" and result.find(_NS + "InnerResults") is None,
@@ -290,7 +308,8 @@ def load_trx(path, project):
                  and test_id not in used_definitions, "TRX_RESULT_EXECUTION_UNBOUND")
         used_definitions.add(test_id)
         assembly, qualified, definition_name, linked_id, adapter = definitions[test_id]
-        row = _row(qualified, result.get("testName", ""))
+        display = result.get("testName", "")
+        row = _row(qualified, display)
         _require(execution_id == linked_id and row == _row(qualified, definition_name),
                  "TRX_RESULT_DEFINITION_MISMATCH")
         identity = validate_identity([assembly, qualified, _protected_row(qualified, row, test_id, adapter)])
@@ -299,15 +318,15 @@ def load_trx(path, project):
         outcome = result.get("outcome")
         _require(outcome in counts, "TRX_RESULT_OUTCOME_UNSUPPORTED")
         counts[outcome] += 1
+        if outcome == "Failed" and adapter == _XUNIT_V2_ADAPTER:
+            failed_displays[display] += 1
         signature = _signature(result, project, qualified) if outcome == "Failed" else None
         rows.append({"identity": list(identity), "outcome": outcome, "signature": signature})
     _require(not entries and len(used_definitions) == len(definitions), "TRX_INCOMPLETE_RESULT_LINKS")
     summary = _one(root, "ResultSummary", "TRX_RUN_SUMMARY_MISSING_OR_AMBIGUOUS")
     _require(summary.get("outcome") == ("Failed" if counts["Failed"] else "Completed"),
              "TRX_RUN_SUMMARY_INCONSISTENT")
-    run_infos = summary.findall(f"{_NS}RunInfos/{_NS}RunInfo")
-    _require(all(info.get("outcome", "").casefold() in ("warning", "informational") for info in run_infos),
-             "TRX_RUN_INFRASTRUCTURE_ERROR")
+    _validate_run_infos(summary, failed_displays)
     counters = _one(summary, "Counters", "TRX_COUNTERS_MISSING_OR_AMBIGUOUS")
     known_counters = {"total", "passed", "failed", "executed", "notExecuted", *_ZERO_COUNTERS}
     _require(counters.attrib.keys() == known_counters, "TRX_RUN_COUNTER_SET_UNSUPPORTED")
