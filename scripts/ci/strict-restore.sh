@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export LC_ALL=C
+export LC_ALL=C GIT_NO_REPLACE_OBJECTS=1
 
 readonly PROJECT_MANIFEST=scripts/ci/strict-restore-projects.tsv
 readonly LOCK_MANIFEST=scripts/ci/strict-restore-locks.sha256
+# SHA-256 of the reviewed 42-lock manifest in ACCEPTED_FINAL.
+readonly LOCK_MANIFEST_HASH=f5b5b74741c5f200e229100ed5cc74304bfd6fe97116d10abd755c15299765de
 readonly STRICT_CONFIG=scripts/ci/nuget.strict.config
 readonly CONFIG_HASH=840677413139f10e5591265935471a49c33b8862e1b05f608d5e689964d2f917
 readonly ACCEPTED_BASE=97a133bca86cb86cd9cb0e04a9b29e55331beb02
 readonly ACCEPTED_SOURCE=07e7c8c5f253eddecc538ca1e64062cb2972d633
+readonly ACCEPTED_OVERLAY_COMMIT=ae8fc9a8f80a483dc5775ab85cdf6752a996549a
 readonly ACCEPTED_OVERLAY=2623b4f697ad64c5ee6ac59493b6b4ab0d3b1d10
+readonly ACCEPTED_FINAL=5ca8d97db7c7ca72161c1cb6bda8635c56cccf15
 readonly SDK_VERSION=8.0.129
 readonly GITHUB_FEED=https://nuget.pkg.github.com/diliwo/index.json
 readonly PUBLIC_FEED=https://api.nuget.org/v3/index.json
@@ -45,6 +49,8 @@ load_manifests() {
     local -A required=() count=([admin]=0 [client]=0 [auth]=0 [gateway]=0)
     local rid_count=0
     is_regular "$PROJECT_MANIFEST" && is_regular "$LOCK_MANIFEST" || fail 'manifest missing or redirected'
+    [[ $(hash_file "$LOCK_MANIFEST") == "$LOCK_MANIFEST_HASH" ]] ||
+        fail 'lock manifest differs from the accepted authority'
     while IFS= read -r row; do
         IFS=$'\t' read -r project keys rid <<< "$row"
         [[ $row == "$project"$'\t'"$keys"$'\t'"$rid" ]] || fail 'invalid project manifest row'
@@ -123,16 +129,22 @@ check_clean() {
 }
 
 verify_identity() {
-    local head=$1 overlay
+    local head=$1 grafts
     require_sha "$head"
     [[ $(git rev-parse --show-prefix) == '' ]] || fail 'run the contract at the repository root'
     [[ $(git rev-parse HEAD) == "$head" && ${EXPECTED_HEAD:-$head} == "$head" ]] ||
         fail 'actual and expected checkout SHA differ'
-    [[ $(git rev-parse "$ACCEPTED_SOURCE^") == "$ACCEPTED_BASE" ]] || fail 'accepted source parent mismatch'
-    overlay=$(git rev-list --first-parent --reverse "$ACCEPTED_SOURCE..$head" | sed -n '1p')
-    [[ -n $overlay && $(git rev-parse "$overlay^") == "$ACCEPTED_SOURCE" &&
-        $(git rev-parse "$overlay^{tree}") == "$ACCEPTED_OVERLAY" ]] ||
-        fail 'accepted source and test overlay are absent from the first-parent history'
+    grafts=$(git rev-parse --git-path info/grafts) || fail 'cannot resolve Git graft path'
+    [[ ! -v GIT_GRAFT_FILE && ! -e $grafts && ! -L $grafts ]] ||
+        fail 'Git grafts cannot supply accepted ancestry'
+    [[ $(git rev-list --parents -n 1 "$ACCEPTED_SOURCE") == "$ACCEPTED_SOURCE $ACCEPTED_BASE" ]] ||
+        fail 'accepted source parent mismatch'
+    [[ $(git rev-list --parents -n 1 "$ACCEPTED_OVERLAY_COMMIT") == "$ACCEPTED_OVERLAY_COMMIT $ACCEPTED_SOURCE" &&
+        $(git rev-parse "$ACCEPTED_OVERLAY_COMMIT^{tree}") == "$ACCEPTED_OVERLAY" ]] ||
+        fail 'accepted test overlay identity or tree mismatch'
+    git merge-base --is-ancestor "$ACCEPTED_OVERLAY_COMMIT" "$ACCEPTED_FINAL" &&
+        git merge-base --is-ancestor "$ACCEPTED_FINAL" "$head" ||
+        fail 'accepted final lineage is absent from checkout history'
     if [[ ${GITHUB_ACTIONS:-} == true ]] && git symbolic-ref --quiet HEAD >/dev/null; then
         fail 'hosted proof requires a detached head checkout'
     fi
