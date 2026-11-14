@@ -34,6 +34,10 @@
     <Compile Include="../../../Shared/RuntimeDatabaseIdentityValidator.cs" Link="Security/RuntimeDatabaseIdentityValidator.cs" />
     <Compile Include="../../../Shared/TenantAttemptOrderObserver.cs" Link="Security/TenantAttemptOrderObserver.cs" />
     <Compile Include="../../../Shared/StaffProjectionTransport.cs" Link="Messaging/StaffProjectionTransport.cs" />
+    <Compile Include="../../../Shared/WorkerCredentials/LinuxProtectedWorkerCredentialReader.cs" Link="WorkerCredentials/LinuxProtectedWorkerCredentialReader.cs" />
+    <Compile Include="../../../Shared/WorkerCredentials/ProtectedWorkerCredentialProvider.cs" Link="WorkerCredentials/ProtectedWorkerCredentialProvider.cs" />
+    <Compile Include="../../../Shared/WorkerCredentials/WorkerCredentialOperation.cs" Link="WorkerCredentials/WorkerCredentialOperation.cs" />
+    <Compile Include="../../../Shared/WorkerCredentials/WorkerCredentialPackage.cs" Link="WorkerCredentials/WorkerCredentialPackage.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -42,4 +46,5 @@
 
 <ItemGroup><PackageReference Include="Zeka.Extensions.MultiTenancy.EntityFrameworkCore" Version="2.0.0-preview.1" /></ItemGroup>
   <ItemGroup><Compile Include="../../../Tools/Shared/OwnerSqlExecution.cs" Link="Evidence/OwnerSqlExecution.cs" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../../../Shared/Zeka.Authentication/Zeka.Authentication.csproj" /></ItemGroup>
 </Project>

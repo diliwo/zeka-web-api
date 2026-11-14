@@ -1,3 +1,5 @@
+using Zeka.WorkerCredentials;
+using Zeka.WorkerCredentials.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using ClientManagement.Application.Common.Authorization;
@@ -27,8 +29,7 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
         var config = new ConfigurationManager();
         config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["TenantWorker:SubjectId"] = "worker",
-            ["TenantWorker:BearerToken"] = "synthetic-test-token",
+            ["TenantWorker:SubjectId"] = WorkerCredentialFixture.Subject.ToString("D"),
             ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
             ["ConnectionStrings:ClientApiConnection"] = fixture.ConnectionString
         });
@@ -37,7 +38,9 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
         services.AddSingleton<IHttpClientFactory>(new Factory(handler));
         await using var provider = services.BuildServiceProvider();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(fixture.ConnectionString).Options;
-        var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), config);
+        var credentials = WorkerCredentialFixture.For([a, b], WorkerCredentialEncoding.ClientProfile);
+        handler.ExpectedTokenHash = WorkerCredentialFixture.TokenSha256((await credentials.ReadAsync(default)).Token);
+        var consumer = new StaffProjectionConsumer(provider.GetRequiredService<IServiceScopeFactory>(), config, credentials);
         var created = Message(a, membership, 1, true, "original");
         await consumer.Handle(created); await consumer.Handle(created);
         await using (var context = new ApplicationDbContext(options, TenantEnforcementTests.Scope(a)))
@@ -82,12 +85,13 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
     private sealed class AccessHandler : HttpMessageHandler
     {
         public bool Allow { get; set; } = true;
+        public string? ExpectedTokenHash { get; set; }
         public bool AllowMembership { get; set; } = true;
         public Dictionary<Guid, Guid> Memberships { get; } = new();
         public HashSet<Guid> Inactive { get; } = new();
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Assert.Equal("synthetic-test-token", request.Headers.Authorization?.Parameter);
+            Assert.Equal(ExpectedTokenHash, WorkerCredentialFixture.TokenSha256(request.Headers.Authorization?.Parameter));
             if (request.RequestUri!.AbsolutePath.Contains("/memberships/"))
             {
                 var segments = request.RequestUri.Segments;
@@ -103,7 +107,7 @@ public sealed class StaffProjectionTests(TenantDatabase fixture) : IClassFixture
                 Content = JsonContent.Create(new
                 {
                     ContractVersion = 1,
-                    SubjectId = "worker",
+                    SubjectId = WorkerCredentialFixture.Subject.ToString("D"),
                     OrganisationId = Guid.Parse(request.RequestUri!.Segments.Last()),
                     OrganisationMembershipId = Guid.NewGuid(),
                     EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },

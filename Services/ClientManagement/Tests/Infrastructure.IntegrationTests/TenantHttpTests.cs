@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using Zeka.Extensions.MultiTenancy.Abstractions;
 
 namespace Infrastructure.IntegrationTests;
 
@@ -100,8 +101,8 @@ public sealed class TenantHttpTests
     }
 
     [Theory]
-    [InlineData("subject")] [InlineData("organisation")] [InlineData("version")] [InlineData("permission")]
-    public async Task Adapter_rejects_conflicting_or_unknown_contract_values(string invalid)
+    [InlineData("subject")] [InlineData("organisation")] [InlineData("version")]
+    public async Task Adapter_rejects_conflicting_identity_or_unsupported_version(string invalid)
     {
         var organisation = Guid.NewGuid();
         using var http = new HttpClient(new ResponseHandler(_ => new(HttpStatusCode.OK)
@@ -110,10 +111,43 @@ public sealed class TenantHttpTests
                 SubjectId = invalid == "subject" ? "other" : "subject",
                 OrganisationId = invalid == "organisation" ? Guid.NewGuid() : organisation,
                 OrganisationMembershipId = Guid.NewGuid(), DecisionVersion = "1", ObservedAtUtc = DateTimeOffset.UtcNow,
-                EffectivePermissionCodes = new[] { invalid == "permission" ? "unknown" : "ReferenceData.View" } })
+                EffectivePermissionCodes = new[] { "ReferenceData.View" } })
         })) { BaseAddress = new("https://auth.invalid/") };
         Assert.Equal(TenantAccessOutcome.Unavailable,
             (await new CurrentTenantAccessClient(http, new Credential()).ResolveAsync("subject", organisation, default)).Outcome);
+    }
+
+    [Fact]
+    public async Task Adapter_filters_unknown_extra_grant_without_authorizing_missing_permission()
+    {
+        var organisation = Guid.NewGuid();
+        using var http = new HttpClient(new ResponseHandler(_ => new(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new
+            {
+                ContractVersion = 1,
+                SubjectId = "subject",
+                OrganisationId = organisation,
+                OrganisationMembershipId = Guid.NewGuid(),
+                DecisionVersion = "1",
+                ObservedAtUtc = DateTimeOffset.UtcNow,
+                EffectivePermissionCodes = new[] { "ReferenceData.View", "Future.Permission" }
+            })
+        })) { BaseAddress = new("https://auth.invalid/") };
+        var adapter = new CurrentTenantAccessClient(http, new Credential());
+
+        var decision = await adapter.ResolveAsync("subject", organisation, default);
+
+        Assert.Equal(TenantAccessOutcome.Authorized, decision.Outcome);
+        var membership = Assert.IsType<AuthorizedTenantMembership>(decision.Membership);
+        Assert.Equal("ReferenceData.View", Assert.Single(membership.EffectivePermissionCodes));
+
+        var scope = new TenantContextScope();
+        var operation = new TenantOperation(adapter, new Identity("subject", organisation), scope, scope);
+        var error = await Assert.ThrowsAsync<TenantAccessException>(() =>
+            operation.AuthorizeAsync(new("Clients.ViewAll"), default));
+        Assert.Equal(AccessFailure.Denied, error.Failure);
+        Assert.ThrowsAny<InvalidOperationException>(() => scope.Current);
     }
 
     [Fact]
@@ -127,6 +161,7 @@ public sealed class TenantHttpTests
         Assert.Equal(1, handler.Calls);
         Assert.InRange(started.Elapsed.TotalSeconds, 1, 5);
     }
+    private sealed record Identity(string SubjectId, Guid SelectedOrganisationId) : IOperationIdentity;
     private sealed class Credential : ITenantAccessCredential { public string BearerToken => "synthetic-test-token"; }
     private sealed class ResponseHandler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
     {

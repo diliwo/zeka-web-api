@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - develop
+      - codex/m1-c1-integration
     types:
       - opened
       - reopened
@@ -67,13 +68,33 @@ jobs:
         run: |
           : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
           export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
-          dotnet restore zeka-web-api.sln --configfile nuget.config
+          dotnet restore zeka-web-api.sln --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
 
       - name: Build solution
         run: dotnet build zeka-web-api.sln --configuration Release --no-restore
 
+      - name: Install pinned standalone Sonar CLI
+        shell: bash
+        run: &install_standalone_sonar |
+          set -euo pipefail
+          version=1.9.0.15656
+          expected_sha256=42ec815ef8015921a76b76c865932130d756c5c5a977d82bca9fa81d09bfccd8
+          bin_dir="$(mktemp -d "${RUNNER_TEMP}/zeka-sonar.XXXXXX")"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --retry 2 --connect-timeout 15 --max-time 90 \
+            --output "${bin_dir}/sonar" \
+            "https://binaries.sonarsource.com/Distribution/sonarqube-cli/${version}/linux/sonarqube-cli-${version}-linux-x86-64.bin"
+          printf '%s  %s\n' "${expected_sha256}" "${bin_dir}/sonar" | sha256sum --check --status
+          chmod 0700 "${bin_dir}/sonar"
+          test "$("${bin_dir}/sonar" --version)" = 1.9.0
+          printf '%s\n' "${bin_dir}" >> "${GITHUB_PATH}"
+
       - name: Run non-PostgreSQL test projects
         shell: bash
+        env: &standalone_sonar_auth
+          SONARQUBE_CLI_SERVER: https://sonarcloud.io
+          SONARQUBE_CLI_ORG: ${{ vars.SONAR_ORGANIZATION }}
+          SONARQUBE_CLI_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           test_projects=(
             "Services/AuthManager/Tests/Domain.UnitTests/Domain.UnitTests.csproj"
@@ -657,11 +678,11 @@ jobs:
         run: |
           : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
           export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
-          dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
-          dotnet restore Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
-          dotnet restore Services/AdminAreaManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --configfile nuget.config
-          dotnet restore Services/ClientManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --configfile nuget.config
-          dotnet restore Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
+          dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
+          dotnet restore Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
+          dotnet restore Services/AdminAreaManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
+          dotnet restore Services/ClientManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
+          dotnet restore Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
 
       - name: Build exact-head AuthManager gateway test assembly
         shell: bash
@@ -832,7 +853,7 @@ jobs:
         run: |
           : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
           export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
-          dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
+          dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
 
       - name: Verify isolated PostgreSQL role smoke and LIFE-05A purge/verify tests
         env:
@@ -877,10 +898,10 @@ jobs:
         run: |
           : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
           export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
-          dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
-          dotnet restore Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
-          dotnet restore Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --configfile nuget.config
-          dotnet restore Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj --configfile nuget.config
+          dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
+          dotnet restore Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
+          dotnet restore Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
+          dotnet restore Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
 
       - name: Run every declared platform target without skips
         run: ./scripts/ci/run-production-conformance.sh TestResults/production-conformance
@@ -894,10 +915,39 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  docker_images:
-    name: Docker images (4)
+  docker_change_detection:
+    name: MVP Docker change detection
     needs: source_policy
     if: ${{ needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - name: Check out exact pull-request head and base ancestry
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify immutable base-to-head change
+        id: detect
+        env:
+          EXPECTED_BASE: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          relevant=$(bash scripts/ci/strict-restore.sh relevant "$EXPECTED_BASE" "$EXPECTED_HEAD")
+          case "$relevant" in true|false) ;; *) exit 1 ;; esac
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+
+  docker_images:
+    name: Docker images (4)
+    needs: [source_policy, docker_change_detection]
+    if: ${{ needs.source_policy.outputs.trusted == 'true' && needs.docker_change_detection.result == 'success' && needs.docker_change_detection.outputs.relevant == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -907,6 +957,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Verify Docker and Compose
         run: |
@@ -916,9 +967,11 @@ jobs:
       - name: Build all four development images with an ephemeral BuildKit secret
         env:
           GITHUB_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           : "${GITHUB_TOKEN:?No package-read credential is available}"
-          docker compose --progress plain build \
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          docker compose --progress plain build --build-arg "STRICT_RESTORE_HEAD=$EXPECTED_HEAD" \
             adminareaman.api \
             clientman.api \
             authman.api \
@@ -941,7 +994,13 @@ jobs:
           export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
           payload="$RUNNER_TEMP/zeka-owner-helper-publish"
           evidence="$RUNNER_TEMP/zeka-owner-helper-evidence"
-          dotnet publish Tools/Zeka.AuthOwnerProvision/Zeka.AuthOwnerProvision.csproj --configuration Release --runtime linux-x64 --self-contained false --output "$payload" -p:ZekaSourceSha="$EXPECTED_HEAD"
+          helper=Tools/Zeka.AuthOwnerProvision/Zeka.AuthOwnerProvision.csproj
+          dotnet restore "$helper" --runtime linux-x64 --locked-mode \
+            --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:SelfContained=false \
+            -p:RestoreContractRid=linux-x64 -p:RestorePackagesWithLockFile=true \
+            -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources= -p:ZekaSourceSha="$EXPECTED_HEAD"
+          dotnet publish "$helper" --configuration Release --runtime linux-x64 --self-contained false \
+            --no-restore --output "$payload" -p:RestoreContractRid=linux-x64 -p:ZekaSourceSha="$EXPECTED_HEAD"
           binary_sha=$(sha256sum "$payload/zeka-auth-owner-provision.dll" | cut -d' ' -f1)
           docker pull mcr.microsoft.com/dotnet/aspnet:8.0.29
           python Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerImageContainment.py --publish "$payload" --evidence "$evidence" --source-commit "$EXPECTED_HEAD" --binary-sha256 "$binary_sha"
@@ -1162,8 +1221,9 @@ jobs:
           export NuGetPackageSourceCredentials_github="Username=${PACKAGE_USERNAME};Password=${PACKAGE_READ_TOKEN};ValidAuthenticationTypes=Basic"
           python -m pip install --disable-pip-version-check --no-deps --require-hashes --only-binary :all: \
             --requirement scripts/ci/requirements-coverage.txt
+          # Bootstrap the pinned scanner tool separately from the locked application graph.
           dotnet tool restore --configfile nuget.config
-          dotnet restore zeka-web-api.sln --configfile nuget.config
+          dotnet restore zeka-web-api.sln --locked-mode --configfile scripts/ci/nuget.strict.config -p:Configuration=Release -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
 
       - name: Begin pull-request analysis
         env:
@@ -1279,7 +1339,12 @@ jobs:
           print(f"Verified Python reconciler line coverage: {lines_covered}/{lines_valid}")
           PY
 
+      - name: Install pinned standalone Sonar CLI
+        shell: bash
+        run: *install_standalone_sonar
+
       - name: Run complete suite and collect coverage for analysis
+        env: *standalone_sonar_auth
         run: |
           docker info
           dotnet test zeka-web-api.sln -m:1 --configuration Release --no-build --no-restore \
@@ -1342,6 +1407,7 @@ jobs:
       - postgresql
       - life05a_verifier
       - production_conformance
+      - docker_change_detection
       - docker_images
       - powershell_coverage
       - sonar
@@ -1356,6 +1422,8 @@ jobs:
           POSTGRESQL_RESULT: ${{ needs.postgresql.result }}
           LIFE05A_VERIFIER_RESULT: ${{ needs.life05a_verifier.result }}
           PRODUCTION_CONFORMANCE_RESULT: ${{ needs.production_conformance.result }}
+          DOCKER_DETECT_RESULT: ${{ needs.docker_change_detection.result }}
+          DOCKER_RELEVANCE: ${{ needs.docker_change_detection.outputs.relevant }}
           DOCKER_IMAGES_RESULT: ${{ needs.docker_images.result }}
           POWERSHELL_COVERAGE_RESULT: ${{ needs.powershell_coverage.result }}
           SONAR_RESULT: ${{ needs.sonar.result }}
@@ -1371,7 +1439,6 @@ jobs:
             "PostgreSQL Testcontainers:${POSTGRESQL_RESULT}" \
             "LIFE-05A synthetic verifier (exact head):${LIFE05A_VERIFIER_RESULT}" \
             "Issue 46 production conformance targets:${PRODUCTION_CONFORMANCE_RESULT}" \
-            "Docker images (4):${DOCKER_IMAGES_RESULT}" \
             "Windows PowerShell core coverage:${POWERSHELL_COVERAGE_RESULT}" \
             "SonarQube Cloud / Quality Gate:${SONAR_RESULT}"
           do
@@ -1384,4 +1451,16 @@ jobs:
               aggregate_status=1
             fi
           done
+          case "${DOCKER_DETECT_RESULT}:${DOCKER_RELEVANCE}:${DOCKER_IMAGES_RESULT}" in
+            success:true:success)
+              echo "Docker images (4): success"
+              ;;
+            success:false:skipped)
+              echo "Docker images (4): not applicable"
+              ;;
+            *)
+              echo "::error title=Docker images (4)::Detection or applicable Docker execution did not pass."
+              aggregate_status=1
+              ;;
+          esac
           exit "${aggregate_status}"

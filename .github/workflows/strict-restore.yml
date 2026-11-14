@@ -1,0 +1,298 @@
+name: Strict Restore
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions: {}
+
+env:
+  EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+  EXPECTED_BASE: ${{ github.event.pull_request.base.sha }}
+  EVENT_SHA: ${{ github.sha }}
+  SYNTHETIC_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+
+jobs:
+  source_policy:
+    name: Strict restore source policy
+    runs-on: ubuntu-24.04
+    permissions: {}
+    outputs:
+      trusted: ${{ steps.classify.outputs.trusted }}
+    steps:
+      - name: Classify pull-request source
+        id: classify
+        env:
+          BASE_REPOSITORY: ${{ github.repository }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [[ -n "$BASE_REPOSITORY" && "$HEAD_REPOSITORY" == "$BASE_REPOSITORY" ]]; then
+            echo "trusted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "trusted=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Strict restore requires a same-repository pull request."
+          fi
+
+  change_detection:
+    name: Strict restore change detection
+    needs: source_policy
+    if: ${{ needs.source_policy.result == 'success' && needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - name: Check out exact pull-request head and base ancestry
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Exercise strict-restore rejection paths without credentials
+        run: bash scripts/ci/strict-restore-negative-tests.sh
+
+      - name: Classify immutable base-to-head change
+        id: detect
+        run: |
+          set -euo pipefail
+          bash scripts/ci/strict-restore.sh verify "$EXPECTED_HEAD"
+          relevant=$(bash scripts/ci/strict-restore.sh relevant "$EXPECTED_BASE" "$EXPECTED_HEAD")
+          case "$relevant" in true|false) ;; *) exit 1 ;; esac
+          printf 'relevant=%s\n' "$relevant" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux strict restore (portable and owner-helper RID)
+    needs: source_policy
+    if: ${{ needs.source_policy.result == 'success' && needs.source_policy.outputs.trusted == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out exact pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install exact .NET SDK without an Actions cache
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+          cache: false
+
+      - name: Verify clean source and tracked NuGet credential policy
+        run: |
+          set -euo pipefail
+          bash scripts/ci/strict-restore.sh verify "$EXPECTED_HEAD"
+          bash scripts/security/check-nuget-credentials.sh
+
+      - name: Restore the portable solution and linux-x64 owner helper with independent empty caches
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          receipt_dir="$RUNNER_TEMP/strict-restore-linux"
+          bash scripts/ci/strict-restore.sh linux "$EXPECTED_HEAD" "$receipt_dir"
+          test -s "$receipt_dir/portable.json"
+          test -s "$receipt_dir/owner-helper-linux-x64.json"
+
+      - name: Retain sanitized Linux strict-restore receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: strict-restore-linux
+          path: |
+            ${{ runner.temp }}/strict-restore-linux/portable.json
+            ${{ runner.temp }}/strict-restore-linux/owner-helper-linux-x64.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  docker:
+    name: Docker strict restore (${{ matrix.target }})
+    needs: [source_policy, change_detection]
+    if: ${{ needs.source_policy.result == 'success' && needs.source_policy.outputs.trusted == 'true' && needs.change_detection.result == 'success' && needs.change_detection.outputs.relevant == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: admin
+            dockerfile: Services/AdminAreaManagement/AdminAreaManagement.API/Dockerfile
+          - target: client
+            dockerfile: Services/ClientManagement/Client.API/Dockerfile
+          - target: auth
+            dockerfile: Services/AuthManager/AuthManager.API/Dockerfile
+          - target: gateway
+            dockerfile: ApiGateways/Ocelot.ApiGateway/Dockerfile
+    steps:
+      - name: Check out exact pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Export verified committed build context
+        run: |
+          set -euo pipefail
+          bash scripts/ci/strict-restore.sh context "$EXPECTED_HEAD" "$RUNNER_TEMP/strict-restore-context"
+
+      - name: Run the real uncached Docker restore stage and verify its receipt
+        env:
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          RESTORE_TARGET: ${{ matrix.target }}
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${PACKAGE_READ_TOKEN:?No package-read credential is available}"
+          context="$RUNNER_TEMP/strict-restore-context"
+          output="$RUNNER_TEMP/strict-restore-docker"
+          progress="$RUNNER_TEMP/strict-restore-buildx.private.log"
+          buildx_help=$(docker buildx build --help)
+          if [[ "$buildx_help" != *"--no-cache-filter"* ]]; then
+            echo "::error::Buildx does not support targeted stage cache invalidation."
+            exit 1
+          fi
+          buildx_version=$(docker buildx version)
+          buildkit_version=$(docker buildx inspect | awk '/BuildKit version:/ {print $NF}')
+          test -n "$buildkit_version"
+          mkdir "$output"
+          native_exit=0
+          docker buildx build "$context" --file "$context/$DOCKERFILE" \
+            --platform linux/amd64 --target strict-restore-proof \
+            --no-cache-filter restore --progress plain \
+            --build-arg "STRICT_RESTORE_HEAD=$EXPECTED_HEAD" \
+            --secret id=github_token,env=PACKAGE_READ_TOKEN \
+            --output "type=local,dest=$output" >"$progress" 2>&1 || native_exit=$?
+          if [[ "$native_exit" -ne 0 ]]; then
+            stage=before-restore
+            if grep -Eq '^#[0-9]+ \[[^]]*restore [0-9]+/[0-9]+\] RUN .*strict-restore\.sh docker ' "$progress"; then
+              stage=restore
+            fi
+            category=buildx-native-failure
+            if grep -Fq 'strict-restore: missing or malformed approved package credential' "$progress"; then
+              category=credential-format-guard
+            elif grep -Fq 'strict-restore: ambient NuGet source, cache, credential provider or restore override' "$progress"; then
+              category=ambient-restore-override
+            elif grep -Fq 'strict-restore: expected SDK 8.0.129' "$progress"; then
+              category=sdk-version
+            fi
+            codes=$( { grep -Eo 'NU[0-9]{4}|NETSDK[0-9]{4}|MSB[0-9]{4}' "$progress" || true; } | sort -u | paste -sd, -)
+            printf '::error::Docker strict restore (%s) exited %s (stage=%s category=%s codes=%s).\n' \
+              "$RESTORE_TARGET" "$native_exit" "$stage" "$category" "${codes:-none}"
+            printf '{"head":"%s","target":"%s","nativeExit":%d,"stage":"%s","category":"%s","diagnosticCodes":"%s"}\n' \
+              "$EXPECTED_HEAD" "$RESTORE_TARGET" "$native_exit" "$stage" "$category" "$codes" > "$output/failure-receipt.json"
+            exit "$native_exit"
+          fi
+
+          step=$(sed -nE 's/^#([0-9]+) \[[^]]*restore [0-9]+\/[0-9]+\] RUN .*strict-restore\.sh docker .*$/\1/p' "$progress" | sort -u)
+          [[ "$step" =~ ^[0-9]+$ ]]
+          if grep -Eq "^#${step} CACHED( |$)" "$progress"; then
+            echo "::error::The Docker restore RUN was cached."
+            exit 1
+          fi
+          grep -Eq "^#${step} DONE( |$)" "$progress"
+          unset PACKAGE_READ_TOKEN
+          sdk_image=$(tr -d '\r' < "$context/$DOCKERFILE" | sed -nE 's/^FROM (mcr\.microsoft\.com\/dotnet\/sdk:[^ ]+@sha256:[a-f0-9]{64}) AS sdk$/\1/p')
+          test -n "$sdk_image"
+          test "$(find "$output" -mindepth 1 -printf '%P\n')" = strict-restore-receipt.json
+          python3 - "$output" "$DOCKERFILE" "$RESTORE_TARGET" "$buildx_version" "$buildkit_version" "$sdk_image" "$step" <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import platform
+          import subprocess
+          import sys
+          from datetime import datetime, timezone
+
+          output, dockerfile, target, buildx, buildkit, sdk_image, step = sys.argv[1:]
+          output = pathlib.Path(output)
+          receipt = output / "strict-restore-receipt.json"
+          receipt_bytes = receipt.read_bytes()
+          data = json.loads(receipt_bytes)
+          if (
+              data.get("head") != os.environ["EXPECTED_HEAD"]
+              or data.get("sourceBound") is not True
+              or data.get("nativeExit") != 0
+              or data.get("sdk") != "8.0.129"
+              or data.get("proof") != f"docker-{target}"
+          ):
+              raise SystemExit("Docker restore receipt did not prove the exact requested source, SDK and target.")
+          metadata = {
+              "head": os.environ["EXPECTED_HEAD"],
+              "tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+              "base": os.environ["EXPECTED_BASE"],
+              "eventSha": os.environ["EVENT_SHA"],
+              "syntheticMergeSha": os.environ["SYNTHETIC_MERGE_SHA"],
+              "runner": {key: os.environ.get(key) for key in ("RUNNER_OS", "RUNNER_ARCH", "RUNNER_NAME", "ImageOS", "ImageVersion")},
+              "hostKernel": platform.release(),
+              "platform": "linux/amd64",
+              "dockerfile": dockerfile,
+              "target": target,
+              "buildx": buildx,
+              "buildkit": buildkit,
+              "sdkImage": sdk_image,
+              "uncachedRestoreStep": int(step),
+              "nativeExit": 0,
+              "receiptSha256": hashlib.sha256(receipt_bytes).hexdigest(),
+              "runUrl": f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}',
+              "job": os.environ["GITHUB_JOB"],
+              "finishedUtc": datetime.now(timezone.utc).isoformat(),
+          }
+          (output / "buildx-receipt.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Retain sanitized Docker strict-restore receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: strict-restore-docker-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/strict-restore-docker/strict-restore-receipt.json
+            ${{ runner.temp }}/strict-restore-docker/buildx-receipt.json
+            ${{ runner.temp }}/strict-restore-docker/failure-receipt.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  strict_restore_gate:
+    name: Strict Restore Gate
+    needs: [source_policy, change_detection, linux, docker]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Fail closed when protected restore was not authorized
+        if: ${{ needs.source_policy.result != 'success' || needs.source_policy.outputs.trusted != 'true' }}
+        run: |
+          echo "::error::Strict restore did not execute from a trusted pull-request source."
+          exit 1
+
+      - name: Check out exact pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          persist-credentials: false
+
+      - name: Require the Linux proof and each applicable Docker proof
+        env:
+          SOURCE_RESULT: ${{ needs.source_policy.result }}
+          DETECT_RESULT: ${{ needs.change_detection.result }}
+          LINUX_RESULT: ${{ needs.linux.result }}
+          DOCKER_RELEVANCE: ${{ needs.change_detection.outputs.relevant }}
+          DOCKER_RESULT: ${{ needs.docker.result }}
+        run: bash scripts/ci/strict-restore.sh gate "$SOURCE_RESULT" "$DETECT_RESULT" "$LINUX_RESULT" "$DOCKER_RELEVANCE" "$DOCKER_RESULT"

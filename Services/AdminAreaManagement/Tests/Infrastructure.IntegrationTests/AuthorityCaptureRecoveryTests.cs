@@ -17,6 +17,8 @@ using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Xunit;
 using Zeka.Extensions.MultiTenancy.Abstractions;
+using Zeka.WorkerCredentials;
+using Zeka.WorkerCredentials.Testing;
 
 namespace Infrastructure.IntegrationTests;
 
@@ -129,12 +131,15 @@ public sealed class AuthorityCaptureRecoveryTests
     public async Task Worker_manual_authorization_routes_integrity_event_without_listener_before_database_continuation()
     {
         var records = new Records(); var org = Guid.NewGuid(); var calls = 0; var databaseResolutions = 0;
+        var credentials = WorkerCredentialFixture.For([org], WorkerCredentialEncoding.AdminAreaProfile);
+        var bearer = (await credentials.ReadAsync(default)).Token;
+        var bearerHash = WorkerCredentialFixture.TokenSha256(bearer);
+        const string returnedSubject = "different-synthetic-worker";
         TenantContextScope? observedTenant = null;
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
-            ["TenantWorker:SubjectId"] = "synthetic-worker",
-            ["TenantWorker:BearerToken"] = "synthetic-test-token",
+            ["TenantAuthorization:AuthManagementUrl"] = WorkerCredentialFixture.Issuer,
+            ["TenantWorker:SubjectId"] = WorkerCredentialFixture.Subject.ToString("D"),
             ["TenantWorker:OrganisationIds:0"] = org.ToString()
         }).Build();
         using var host = new HostBuilder().ConfigureLogging(logs => logs.ClearProviders().AddProvider(records))
@@ -148,12 +153,14 @@ public sealed class AuthorityCaptureRecoveryTests
                     throw new InvalidOperationException("Database continuation is forbidden in this authority-refusal fixture.");
                 });
                 services.Configure<HttpClientFactoryOptions>("TenantWorkerAccess", options =>
-                    options.HttpMessageHandlerBuilderActions.Add(builder => builder.PrimaryHandler = new Handler(_ =>
+                    options.HttpMessageHandlerBuilderActions.Add(builder => builder.PrimaryHandler = new Handler(request =>
                     {
                         calls++;
+                        Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+                        Assert.Equal(bearerHash, WorkerCredentialFixture.TokenSha256(request.Headers.Authorization?.Parameter));
                         return new(HttpStatusCode.OK) { Content = JsonContent.Create(new
                         {
-                            ContractVersion = 1, SubjectId = "different-synthetic-worker", OrganisationId = org,
+                            ContractVersion = 1, SubjectId = returnedSubject, OrganisationId = org,
                             OrganisationMembershipId = Guid.NewGuid(), EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },
                             DecisionVersion = "v1", ObservedAtUtc = DateTimeOffset.UtcNow
                         }) };
@@ -162,7 +169,7 @@ public sealed class AuthorityCaptureRecoveryTests
         var source = (ActivitySource)typeof(TenantAccessDiagnostics).GetField("Signals", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
         Assert.False(source.HasListeners());
         var worker = new StaffProjectionRetryWorker(host.Services.GetRequiredService<IServiceScopeFactory>(), configuration,
-            host.Services.GetRequiredService<ILogger<StaffProjectionRetryWorker>>());
+            host.Services.GetRequiredService<ILogger<StaffProjectionRetryWorker>>(), credentials);
         var failed = await worker.DispatchCycleAsync(default);
         Assert.True(failed); Assert.Equal(1, calls); Assert.Equal(0, databaseResolutions);
         Assert.NotNull(observedTenant); Assert.Throws<TenantContextException>(() => observedTenant.Current);
@@ -172,8 +179,9 @@ public sealed class AuthorityCaptureRecoveryTests
         Assert.Null(record.Exception);
         var safe = string.Join("|", record.State.Values);
         Assert.DoesNotContain(org.ToString(), safe, StringComparison.Ordinal);
-        Assert.DoesNotContain("synthetic-worker", safe, StringComparison.Ordinal);
-        Assert.DoesNotContain("synthetic-test-token", safe, StringComparison.Ordinal);
+        Assert.DoesNotContain(WorkerCredentialFixture.Subject.ToString("D"), safe, StringComparison.Ordinal);
+        Assert.DoesNotContain(returnedSubject, safe, StringComparison.Ordinal);
+        Assert.False(safe.Contains(bearer, StringComparison.Ordinal), "Worker bearer appeared in diagnostic state.");
         Assert.DoesNotContain("TeamConfiguration.ManageStaffProfiles", safe, StringComparison.Ordinal);
         // The BackgroundService was never started: this is one controlled method invocation only.
     }

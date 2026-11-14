@@ -9,7 +9,23 @@ namespace Infrastructure.IntegrationTests;
 
 public sealed class TenantDatabase : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer postgres = CreatePostgreSqlFixture();
+
+    internal static PostgreSqlContainer CreatePostgreSqlFixture()
+    {
+        var builder = new PostgreSqlBuilder("postgres:17-alpine");
+        if (OperatingSystem.IsWindows())
+        {
+            // Each fixture disposes its own container. A private session avoids starting the shared port-publishing reaper.
+            builder = builder
+                .WithLabel(DotNet.Testcontainers.Containers.ResourceReaper.ResourceReaperSessionLabel, Guid.NewGuid().ToString("D"))
+                .WithLabel("zeka.client.pg-fixture", "windows-loopback")
+                .WithCreateParameterModifier(parameters =>
+                    parameters.HostConfig.PortBindings["5432/tcp"].Single().HostIP = "127.0.0.1");
+        }
+
+        return builder.Build();
+    }
     public string ConnectionString => postgres.GetConnectionString();
     public async Task InitializeAsync()
     {

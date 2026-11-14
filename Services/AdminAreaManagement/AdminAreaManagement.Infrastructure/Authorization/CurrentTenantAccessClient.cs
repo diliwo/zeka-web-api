@@ -1,3 +1,4 @@
+using Zeka.WorkerCredentials;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Net;
@@ -56,8 +57,9 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
             cancellationToken.ThrowIfCancellationRequested();
             var token = credential.BearerToken;
             if (string.IsNullOrWhiteSpace(token)) return Finish(TenantAccessOutcome.Unauthenticated);
-            // Two safe GETs at most; delay and body consumption share the overall deadline.
-            for (var attempt = 1; attempt <= 2; attempt++)
+            // Two ordinary safe GETs, plus at most one worker-only 401 retry. All share this deadline.
+            var retriedUnauthorized = false;
+            for (int attempt = 1, maximumAttempts = 2; attempt <= maximumAttempts; attempt++)
             {
                 TenantAccessDiagnostics.Observe(() =>
                 {
@@ -70,7 +72,21 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
                 try
                 {
                     using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-                    if (response.StatusCode == HttpStatusCode.Unauthorized) return Finish(TenantAccessOutcome.Unauthenticated);
+                    if (response.StatusCode == HttpStatusCode.Unauthorized)
+                    {
+                        if (!retriedUnauthorized && credential is IWorkerCredential401Retry worker
+                            && await worker.ReloadAfterUnauthorizedAsync(deadline.Token))
+                        {
+                            token = credential.BearerToken;
+                            if (string.IsNullOrWhiteSpace(token)) return Unavailable(TenantAccessDiagnostics.DependencyUnavailable);
+                            retriedUnauthorized = true;
+                            maximumAttempts++;
+                            continue; // The same safe Auth query, never the business operation.
+                        }
+                        return credential is IWorkerCredential401Retry
+                            ? Unavailable(TenantAccessDiagnostics.DependencyUnavailable)
+                            : Finish(TenantAccessOutcome.Unauthenticated);
+                    }
                     if (response.StatusCode == HttpStatusCode.Forbidden) return Finish(TenantAccessOutcome.Denied);
                     if (!response.IsSuccessStatusCode)
                     {
@@ -78,7 +94,7 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
                             new KeyValuePair<string, object?>("reason", TenantAccessDiagnostics.DependencyUnavailable)));
                         var transient = response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests
                             || (int)response.StatusCode >= 500;
-                        if (!transient || attempt == 2) return Finish(TenantAccessOutcome.Unavailable,
+                        if (!transient || attempt == maximumAttempts) return Finish(TenantAccessOutcome.Unavailable,
                             reason: TenantAccessDiagnostics.DependencyUnavailable);
                     }
                     else
@@ -124,7 +140,7 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
                 {
                     TenantAccessDiagnostics.Observe(() => Failures.Add(1,
                         new KeyValuePair<string, object?>("reason", TenantAccessDiagnostics.DependencyUnavailable)));
-                    if (attempt == 2) return Finish(TenantAccessOutcome.Unavailable,
+                    if (attempt == maximumAttempts) return Finish(TenantAccessOutcome.Unavailable,
                         reason: TenantAccessDiagnostics.DependencyUnavailable);
                 }
                 await Task.Delay(TimeSpan.FromMilliseconds(100), deadline.Token);
@@ -132,6 +148,10 @@ public sealed class CurrentTenantAccessClient(HttpClient client, ITenantAccessCr
             return Unavailable(TenantAccessDiagnostics.DependencyUnavailable);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Unavailable(TenantAccessDiagnostics.DependencyUnavailable);
+        }
+        catch (WorkerCredentialUnavailableException)
         {
             return Unavailable(TenantAccessDiagnostics.DependencyUnavailable);
         }
