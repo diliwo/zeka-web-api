@@ -5,9 +5,11 @@ import argparse
 import difflib
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 from c1_ratchet_trx import TrxError, identify_project, load_trx, validate_identity
 
@@ -34,13 +36,23 @@ def object_pairs(pairs):
     return result
 
 
-def read_json(path):
+def read_json_bytes(path):
     require(path.is_file() and not path.is_symlink(), "MISSING_OR_UNSAFE_JSON")
-    require(path.stat().st_size <= MAX_JSON, "JSON_TOO_LARGE")
+    with path.open("rb") as handle:
+        data = handle.read(MAX_JSON + 1)
+    require(len(data) <= MAX_JSON, "JSON_TOO_LARGE")
+    return data
+
+
+def parse_json(data):
     try:
-        return json.loads(path.read_bytes(), object_pairs_hook=object_pairs)
+        return json.loads(data, object_pairs_hook=object_pairs)
     except (UnicodeError, json.JSONDecodeError) as error:
         raise RatchetError("MALFORMED_JSON") from error
+
+
+def read_json(path):
+    return parse_json(read_json_bytes(path))
 
 
 def save_json(path, value):
@@ -68,14 +80,149 @@ def project_path(value):
 
 
 def validate_context(value):
-    shape(value, "schema event candidate base testTree baseTree runId runAttempt repository", "INVALID_CONTEXT")
-    require(type(value["schema"]) is int and value["schema"] == 1
+    shape(value, "schema event candidate base testTree baseTree runId runAttempt repository "
+                 "mode tooling policySha256 baselineSha256", "INVALID_CONTEXT")
+    require(type(value["schema"]) is int and value["schema"] == 2
             and value["event"] in ("pull_request", "push")
             and value["repository"] == "diliwo/zeka-web-api"
-            and all(hex_sha(value[field]) for field in ("candidate", "base", "testTree", "baseTree"))
-            and all(isinstance(value[field], (str, int)) and re.fullmatch(r"[1-9][0-9]*", str(value[field]))
+            and value["mode"] in ("bootstrap", "installed")
+            and all(hex_sha(value[field]) for field in ("candidate", "base", "testTree", "baseTree", "tooling"))
+            and value["candidate"] != value["base"]
+            and all(hex_sha(value[field], 64) for field in ("policySha256", "baselineSha256"))
+            and all(isinstance(value[field], str) and re.fullmatch(r"[1-9][0-9]*", value[field])
                     for field in ("runId", "runAttempt")), "INVALID_CONTEXT")
+    if value["mode"] == "installed":
+        require(value["tooling"] == value["base"], "UNTRUSTED_POLICY_REVISION")
+    else:
+        require(value["baselineSha256"] == INITIAL_BASELINE_SHA256
+                and (value["event"] == "push" or value["tooling"] == value["candidate"]),
+                "UNTRUSTED_BASELINE_BOOTSTRAP")
     return value
+
+
+def validate_hosted_context(value):
+    require(all(value[field] == os.environ.get(variable) for field, variable in (
+        ("repository", "GITHUB_REPOSITORY"), ("event", "GITHUB_EVENT_NAME"),
+        ("runId", "GITHUB_RUN_ID"), ("runAttempt", "GITHUB_RUN_ATTEMPT"),
+    )), "WORKFLOW_RUN_CONTEXT_MISMATCH")
+
+
+def read_accepted_baseline(path, context):
+    data = read_json_bytes(path)
+    require(hashlib.sha256(data).hexdigest() == context["baselineSha256"],
+            "ACCEPTED_BASELINE_BYTES_MISMATCH")
+    return parse_json(data)
+
+
+_POLICY_TYPES = {"object": dict, "array": list, "string": str, "integer": int, "boolean": bool}
+_POLICY_LIMITS = {
+    "minProperties": (dict, len), "maxProperties": (dict, len),
+    "minItems": (list, len), "maxItems": (list, len),
+    "minLength": (str, len), "maxLength": (str, len),
+    "minimum": (int, lambda value: value),
+}
+_POLICY_KEYWORDS = set(_POLICY_LIMITS) | {
+    "$ref", "title", "description", "type", "const", "properties", "required",
+    "additionalProperties", "propertyNames", "prefixItems", "items", "pattern", "format",
+}
+_POLICY_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
+
+
+def _check_schema(schema, definitions, chain=()):
+    invalid = "UNSUPPORTED_BASELINE_SCHEMA"
+    if type(schema) is bool:
+        return
+    require(type(schema) is dict and schema.keys() <= _POLICY_KEYWORDS, invalid)
+    if "$ref" in schema:
+        reference = schema["$ref"]
+        require(isinstance(reference, str) and re.fullmatch(r"#/\$defs/[A-Za-z0-9_-]+", reference), invalid)
+        name = reference.rsplit("/", 1)[1]
+        require(name in definitions and name not in chain, invalid)
+        _check_schema(definitions[name], definitions, (*chain, name))
+    if "type" in schema:
+        require(isinstance(schema["type"], str) and schema["type"] in _POLICY_TYPES, invalid)
+    if "const" in schema:
+        require(type(schema["const"]) in (str, int, bool, type(None)), invalid)
+    for keyword in ("title", "description"):
+        require(keyword not in schema or isinstance(schema[keyword], str), invalid)
+    for keyword in schema.keys() & _POLICY_LIMITS.keys():
+        lower = -sys.maxsize if keyword == "minimum" else 0
+        require(type(schema[keyword]) is int and schema[keyword] >= lower, invalid)
+    if "pattern" in schema:
+        require(isinstance(schema["pattern"], str) and len(schema["pattern"]) <= 512, invalid)
+        try:
+            re.compile(schema["pattern"])
+        except re.error as error:
+            raise RatchetError(invalid) from error
+    require("format" not in schema or schema["format"] == "uri", invalid)
+    if "required" in schema:
+        names = schema["required"]
+        require(type(names) is list and all(isinstance(name, str) for name in names)
+                and len(names) == len(set(names)), invalid)
+    properties, prefix = schema.get("properties", {}), schema.get("prefixItems", [])
+    require(type(properties) is dict and type(prefix) is list, invalid)
+    for subschema in (*properties.values(), *prefix):
+        _check_schema(subschema, definitions, chain)
+    for keyword in ("additionalProperties", "propertyNames", "items"):
+        if keyword in schema:
+            _check_schema(schema[keyword], definitions, chain)
+
+
+def _check_policy_value(schema, value, definitions):
+    invalid = "BASELINE_SCHEMA_VALIDATION_FAILED"
+    if type(schema) is bool:
+        require(schema, invalid)
+        return
+    if "$ref" in schema:
+        _check_policy_value(definitions[schema["$ref"].rsplit("/", 1)[1]], value, definitions)
+    if "type" in schema:
+        require(type(value) is _POLICY_TYPES[schema["type"]], invalid)
+    if "const" in schema:
+        require(type(value) is type(schema["const"]) and value == schema["const"], invalid)
+    for keyword in schema.keys() & _POLICY_LIMITS.keys():
+        kind, measure = _POLICY_LIMITS[keyword]
+        if type(value) is kind:
+            require((measure(value) <= schema[keyword] if keyword.startswith("max")
+                     else measure(value) >= schema[keyword]), invalid)
+    if isinstance(value, str):
+        if "pattern" in schema:
+            require(re.search(schema["pattern"], value), invalid)
+        if schema.get("format") == "uri":
+            require(re.fullmatch(r"[A-Za-z][A-Za-z0-9+.-]*:[!-~]+", value)
+                    and not re.search(r"%(?![0-9a-fA-F]{2})|[<>\\^\x60{|}]", value), invalid)
+            try:
+                require(urlsplit(value).scheme, invalid)
+            except ValueError as error:
+                raise RatchetError(invalid) from error
+    if isinstance(value, dict):
+        require(value.keys() >= set(schema.get("required", ())), invalid)
+        properties = schema.get("properties", {})
+        for key, item in value.items():
+            _check_policy_value(schema.get("propertyNames", True), key, definitions)
+            _check_policy_value(properties.get(key, schema.get("additionalProperties", True)), item, definitions)
+    if isinstance(value, list):
+        prefix = schema.get("prefixItems", ())
+        for index, item in enumerate(value):
+            _check_policy_value(prefix[index] if index < len(prefix) else schema.get("items", True),
+                                item, definitions)
+
+
+def validate_policy_schema(baseline, schema_path=None):
+    """Apply the supported Draft 2020-12 subset from the selected tooling's schema."""
+    path = schema_path if schema_path is not None else Path(__file__).with_name("c1-ratchet") / "baseline.schema.json"
+    schema = read_json(path)
+    require(type(schema) is dict and schema.get("$schema") == _POLICY_SCHEMA_DRAFT
+            and type(schema.get("$defs")) is dict, "UNSUPPORTED_BASELINE_SCHEMA")
+    definitions = schema["$defs"]
+    root = {key: value for key, value in schema.items() if key not in ("$schema", "$defs")}
+    try:
+        for name, subschema in definitions.items():
+            require(re.fullmatch(r"[A-Za-z0-9_-]+", name), "UNSUPPORTED_BASELINE_SCHEMA")
+            _check_schema(subschema, definitions, (name,))
+        _check_schema(root, definitions)
+        _check_policy_value(root, baseline, definitions)
+    except RecursionError as error:
+        raise RatchetError("UNSUPPORTED_BASELINE_SCHEMA") from error
 
 
 def identity(value):
@@ -324,29 +471,24 @@ def main():
     sub.choices["capture"].add_argument("--role", choices=ROLES, required=True)
     sub.choices["capture"].add_argument("--run-inputs", type=Path, required=True)
     sub.choices["compare"].add_argument("--evidence", type=Path, required=True)
-    sub.choices["compare"].add_argument("--base-baseline", type=Path, required=True)
+    sub.choices["compare"].add_argument("--accepted-baseline", type=Path, required=True)
     args = cli.parse_args()
     try:
         context = validate_context(read_json(args.context))
-        candidate = read_json(args.baseline)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            validate_hosted_context(context)
         if args.command == "capture":
-            validate_baseline(candidate)
-            require(args.lane in candidate["jobs"], "UNKNOWN_REQUIRED_JOB")
-            result = capture(context, candidate, args.lane, args.role, args.run_inputs)
+            accepted = read_accepted_baseline(args.baseline, context)
+            validate_policy_schema(accepted)
+            validate_baseline(accepted)
+            require(args.lane in accepted["jobs"], "UNKNOWN_REQUIRED_JOB")
+            result = capture(context, accepted, args.lane, args.role, args.run_inputs)
         else:
-            initial = not args.base_baseline.exists()
-            if initial:
-                require(context["base"] == ANCHOR
-                        and context["baseTree"] == "5014e711075f86282b0c54171ddbfacdd656f583"
-                        and hex_sha(INITIAL_BASELINE_SHA256, 64),
-                        "UNTRUSTED_BASELINE_BOOTSTRAP")
-                reviewed = Path(__file__).with_name("c1-ratchet") / "baseline-v1.json"
-                accepted = read_json(reviewed)
-                require(hashlib.sha256(reviewed.read_bytes()).hexdigest() == INITIAL_BASELINE_SHA256,
-                        "UNTRUSTED_BASELINE_BOOTSTRAP")
-            else:
-                accepted = read_json(args.base_baseline)
-            result = compare(context, candidate, accepted, args.evidence, initial)
+            accepted = read_accepted_baseline(args.accepted_baseline, context)
+            candidate = read_json(args.baseline)
+            validate_policy_schema(accepted)
+            validate_policy_schema(candidate)
+            result = compare(context, candidate, accepted, args.evidence, context["mode"] == "bootstrap")
         save_json(args.out, result)
         if args.command == "compare":
             print(f"C1 Failure Ratchet: {result['status']} ({len(result['errors'])} findings)")

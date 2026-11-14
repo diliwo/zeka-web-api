@@ -12,6 +12,9 @@ context=$2
 lane=$3
 role=$4
 raw=$5
+tooling=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+tooling_sha=$(jq -er .tooling "$context")
+[[ $tooling_sha =~ ^[0-9a-f]{40}$ && $(git -C "$tooling" rev-parse HEAD) == "$tooling_sha" ]]
 auth=Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj
 admin=Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj
 client=Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj
@@ -79,7 +82,7 @@ if [[ $phase == prepare ]]; then
     fi
     for project in "${restore_targets[@]}"; do
       quiet "restore-${project//\//_}" dotnet restore "$project" --locked-mode \
-        --configfile scripts/ci/nuget.strict.config -p:Configuration=Release \
+        --configfile "$tooling/scripts/ci/nuget.strict.config" -p:Configuration=Release \
         -p:RestorePackagesWithLockFile=true -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources=
     done
   )
@@ -204,7 +207,9 @@ case $lane in
   production-conformance)
     quiet docker docker info
     status=0
-    quiet conformance bash scripts/ci/run-production-conformance.sh "$raw/conformance" || status=$?
+    cmp -- "$tooling/Deployments/database/production-conformance.targets.json" \
+      Deployments/database/production-conformance.targets.json
+    quiet conformance bash "$tooling/scripts/ci/run-production-conformance.sh" "$raw/conformance" || status=$?
     for row in "auth|$auth" "adminarea|$admin" "client|$client" "migration|$migrator"; do
       suite=${row%%|*}
       project=${row#*|}

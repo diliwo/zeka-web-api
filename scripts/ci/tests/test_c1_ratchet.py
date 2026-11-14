@@ -2,18 +2,26 @@
 
 from copy import deepcopy
 from hashlib import sha256
+import json
 from pathlib import Path
+import subprocess
+from unittest.mock import patch
 from tempfile import TemporaryDirectory
 from unittest import TestCase, main
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from c1_ratchet import ANCHOR, AUTHORITY, RatchetError, capture, compare, save_json, validate_context
+from c1_ratchet import (
+    ANCHOR, AUTHORITY, RatchetError, capture, compare, read_accepted_baseline,
+    read_json, save_json, validate_context, validate_hosted_context, validate_policy_schema,
+)
 from c1_ratchet_trx import TrxError, identify_project, load_trx
 
 
 TRX = Path(__file__).with_name("c1-ratchet")
+TOOLING = Path(__file__).resolve().parents[1]
+POLICY = TOOLING / "c1-ratchet"
 PROJECT = "Services/Synthetic/Tests/C1.Ratchet.TestFixtures.csproj"
 ASSEMBLY = "C1.Ratchet.TestFixtures"
 FQN = "C1.Ratchet.TestFixtures.ProbeTests."
@@ -42,7 +50,7 @@ class RatchetFixtureTests(TestCase):
         self.evidence = self.folder / "evidence"
         self.evidence.mkdir()
         self.context = validate_context({
-            "schema": 1,
+            "schema": 2,
             "event": "pull_request",
             "candidate": "1" * 40,
             "base": ANCHOR,
@@ -51,6 +59,10 @@ class RatchetFixtureTests(TestCase):
             "runId": "100",
             "runAttempt": "1",
             "repository": "diliwo/zeka-web-api",
+            "mode": "installed",
+            "tooling": ANCHOR,
+            "policySha256": "5" * 64,
+            "baselineSha256": "6" * 64,
         })
         self.lane = "non-pg"
         self.baseline = {
@@ -114,6 +126,140 @@ class RatchetFixtureTests(TestCase):
         self.assertEqual(self.compare()["status"], "PASS")
         self.assertEqual(self.compare()["baselineDiff"], "")
         self.assertEqual(identify_project(TRX / "candidate.trx", [PROJECT]), PROJECT)
+
+    def test_hosted_context_rejects_other_run_or_attempt(self):
+        hosted = {
+            "GITHUB_REPOSITORY": self.context["repository"],
+            "GITHUB_EVENT_NAME": self.context["event"],
+            "GITHUB_RUN_ID": self.context["runId"],
+            "GITHUB_RUN_ATTEMPT": self.context["runAttempt"],
+        }
+        with patch.dict("os.environ", hosted):
+            validate_hosted_context(self.context)
+            for key, other in (("runId", "101"), ("runAttempt", "2")):
+                with self.subTest(field=key), self.assertRaisesRegex(RatchetError, "WORKFLOW_RUN_CONTEXT_MISMATCH"):
+                    validate_hosted_context({**self.context, key: other})
+
+    def test_installed_context_rejects_candidate_owned_tooling(self):
+        with self.assertRaisesRegex(RatchetError, "UNTRUSTED_POLICY_REVISION"):
+            validate_context({**self.context, "tooling": self.context["candidate"]})
+
+    def test_bootstrap_context_rejects_unapproved_baseline_digest(self):
+        with self.assertRaisesRegex(RatchetError, "UNTRUSTED_BASELINE_BOOTSTRAP"):
+            validate_context({**self.context, "mode": "bootstrap", "tooling": self.context["candidate"]})
+
+    def test_accepted_baseline_bytes_cannot_be_replaced_or_removed(self):
+        path = self.folder / "accepted.json"
+        save_json(path, self.baseline)
+        context = {**self.context, "baselineSha256": sha256(path.read_bytes()).hexdigest()}
+        self.assertEqual(read_accepted_baseline(path, context), self.baseline)
+        path.write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(RatchetError, "ACCEPTED_BASELINE_BYTES_MISMATCH"):
+            read_accepted_baseline(path, context)
+        path.unlink()
+        with self.assertRaisesRegex(RatchetError, "MISSING_OR_UNSAFE_JSON"):
+            read_accepted_baseline(path, context)
+
+    def test_exact_tooling_schema_accepts_the_reviewed_v1_and_normal_fixture(self):
+        validate_policy_schema(read_json(POLICY / "baseline-v1.json"))
+        validate_policy_schema(self.baseline)
+
+    def test_tooling_schema_rejects_object_array_and_scalar_drift(self):
+        baseline = self.baseline
+        attempts = (
+            {**baseline, "schema": True},
+            {**baseline, "authority": "relative/owner"},
+            {**baseline, "jobs": {"Lane": baseline["jobs"][self.lane]}},
+            {**baseline, "jobs": {self.lane: {PROJECT: {"count": True, "allowed_skips": []}}}},
+            {**baseline, "jobs": {self.lane: {PROJECT: {"count": 0, "allowed_skips": []}}}},
+            {**baseline, "failures": [{**baseline["failures"][0], "identity": ["A", "M"]}]},
+            {**baseline, "failures": [{**baseline["failures"][0], "identity": ["A", "M", "x" * 1025]}]},
+            {**baseline, "obligations": []},
+            {**baseline, "ratchet-admission": "candidate claim"},
+        )
+        for index, attempt in enumerate(attempts, start=1):
+            with self.subTest(attempt=index), self.assertRaisesRegex(
+                    RatchetError, "^BASELINE_SCHEMA_VALIDATION_FAILED$"):
+                validate_policy_schema(attempt)
+
+    def test_unsupported_malformed_and_remote_schema_are_rejected_even_if_unused(self):
+        original = read_json(POLICY / "baseline.schema.json")
+        attempts = (
+            {"oneOf": [{"type": "string"}]},
+            {"$ref": "https://example.invalid/schema"},
+            {"$ref": "#/$defs/unused"},
+            {"properties": []},
+            {"required": ["duplicate", "duplicate"]},
+            {"pattern": "["},
+        )
+        path = self.folder / "baseline.schema.json"
+        for index, attempt in enumerate(attempts, start=1):
+            with self.subTest(attempt=index):
+                tampered = {**original, "$defs": {**original["$defs"], "unused": attempt}}
+                path.write_text(json.dumps(tampered), encoding="utf-8")
+                with self.assertRaisesRegex(RatchetError, "^UNSUPPORTED_BASELINE_SCHEMA$"):
+                    validate_policy_schema(self.baseline, path)
+
+    def run_schema_cli(self, action, schema, proposed=None):
+        root = self.folder / ("cli-" + action)
+        root.mkdir()
+        (root / "c1-ratchet").mkdir()
+        for filename in ("c1_ratchet.py", "c1_ratchet_trx.py"):
+            (root / filename).write_bytes((TOOLING / filename).read_bytes())
+        save_json(root / "c1-ratchet" / "baseline.schema.json", schema)
+        accepted = root / "accepted.json"
+        save_json(accepted, self.baseline)
+        context = root / "context.json"
+        digest_context = {**self.context, "baselineSha256": sha256(accepted.read_bytes()).hexdigest()}
+        save_json(context, digest_context)
+        for receipt_path in self.evidence.glob("*.json"):
+            receipt = read_json(receipt_path)
+            receipt["context"] = digest_context
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        out = root / "output.json"
+        baseline = accepted
+        if action == "compare":
+            baseline = root / "candidate" / "baseline-v1.json"
+            baseline.parent.mkdir()
+            save_json(baseline, proposed if proposed is not None else self.baseline)
+            # A permissive candidate schema cannot affect selected tooling validation.
+            save_json(baseline.with_name("baseline.schema.json"), {"type": "object"})
+            args = ["--accepted-baseline", str(accepted), "--evidence", str(self.evidence)]
+        else:
+            args = ["--lane", self.lane, "--role", "base", "--run-inputs", str(self.folder / "base")]
+        command = [sys.executable, "-E", str(root / "c1_ratchet.py"), action,
+                   "--context", str(context), "--baseline", str(baseline), "--out", str(out), *args]
+        with patch.dict("os.environ", {"GITHUB_ACTIONS": "false"}):
+            result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)
+        return result, out
+
+    def test_capture_cli_rejects_data_invalid_under_selected_schema(self):
+        self.both()
+        schema = read_json(POLICY / "baseline.schema.json")
+        schema["properties"]["id"]["minLength"] = 50
+        result, out = self.run_schema_cli("capture", schema)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("BASELINE_SCHEMA_VALIDATION_FAILED", result.stderr)
+        self.assertFalse(out.exists())
+
+    def test_compare_cli_rejects_candidate_under_tooling_schema_before_semantic_diff(self):
+        self.both()
+        schema = read_json(POLICY / "baseline.schema.json")
+        schema["properties"]["id"]["maxLength"] = len(self.baseline["id"])
+        result, out = self.run_schema_cli("compare", schema, {**self.baseline, "id": self.baseline["id"] + "-other"})
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assert_failed_for(read_json(out), "BASELINE_SCHEMA_VALIDATION_FAILED")
+
+    def test_compare_and_capture_cli_accept_current_schema(self):
+        self.both()
+        schema = read_json(POLICY / "baseline.schema.json")
+        result, out = self.run_schema_cli("compare", schema)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(read_json(out)["status"], "PASS")
+
+        result, out = self.run_schema_cli("capture", schema)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(read_json(out)["lane"], self.lane)
 
     def test_abbreviated_theory_rows_use_hashed_bound_test_ids(self):
         from xml.etree import ElementTree as ET
