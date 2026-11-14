@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C1 failure ratchet baseline version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "revision", "anchor", "authority", "jobs", "failures", "obligations"],
+  "properties": {
+    "schema": {"const": 1},
+    "id": {"type": "string", "pattern": "^C1-RATCHET-[a-z0-9-]+$"},
+    "revision": {"$ref": "#/$defs/sha"},
+    "anchor": {"$ref": "#/$defs/sha"},
+    "authority": {"type": "string", "format": "uri"},
+    "jobs": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]{0,39}$"},
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": {"pattern": "^[A-Za-z0-9._/-]{1,280}$"},
+        "additionalProperties": {"$ref": "#/$defs/projectPolicy"}
+      }
+    },
+    "failures": {"type": "array", "items": {"$ref": "#/$defs/failure"}},
+    "obligations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {"$ref": "#/$defs/obligation"}
+    }
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "project": {"type": "string", "pattern": "^[A-Za-z0-9._/-]+\\.csproj$"},
+    "identity": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,180}$", "description": "Assembly name without the DLL extension."},
+        {"type": "string", "pattern": "^[A-Za-z0-9_.+\\x60]{1,420}$", "description": "Fully qualified type and method."},
+        {"type": "string", "maxLength": 1024, "description": "Exact xUnit parameter row, including parentheses, or the empty string."}
+      ]
+    },
+    "issues": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "pattern": "^(ZEK-|GitHub #)[0-9]+$"}
+    },
+    "projectPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "allowed_skips"],
+      "properties": {
+        "project": {"$ref": "#/$defs/project"},
+        "count": {"type": "integer", "minimum": 1},
+        "allowed_skips": {"type": "array", "items": {"$ref": "#/$defs/skip"}}
+      }
+    },
+    "skip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "platform", "reason"],
+      "properties": {
+        "identity": {"$ref": "#/$defs/identity"},
+        "platform": {"const": "linux"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 180}
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exception", "assertion", "frame"],
+      "properties": {
+        "exception": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,160}$"},
+        "assertion": {"type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,240}$"},
+        "frame": {"type": "string", "pattern": "^[A-Za-z0-9_.+\\x60<>$-]{1,420}$"}
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "project", "identity", "signatures", "issues"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[AC][1-9][0-9]?$"},
+        "project": {"$ref": "#/$defs/project"},
+        "identity": {"$ref": "#/$defs/identity"},
+        "signatures": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/signature"}},
+        "issues": {"$ref": "#/$defs/issues"}
+      }
+    },
+    "obligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "project", "identity", "status", "description", "issues", "evidence"],
+      "properties": {
+        "id": {"const": "H1"},
+        "project": {"$ref": "#/$defs/project"},
+        "identity": {"$ref": "#/$defs/identity"},
+        "status": {"const": "NOT_REPRODUCED_RETAINED"},
+        "description": {"type": "string", "maxLength": 240},
+        "issues": {"$ref": "#/$defs/issues"},
+        "evidence": {"type": "string", "format": "uri"}
+      }
+    }
+  }
+}

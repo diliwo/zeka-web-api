@@ -1,0 +1,391 @@
+{
+  "schema": 1,
+  "id": "C1-RATCHET-5ca8d97-v1",
+  "revision": "5ca8d97db7c7ca72161c1cb6bda8635c56cccf15",
+  "anchor": "23ad61e84ae976b6a483d2a859871c3b40d98249",
+  "authority": "https://linear.app/zeka-saas/issue/ZEK-17#comment-0281b80b-a1a6-42d9-b8f8-02bd8d117a05",
+  "jobs": {
+    "non-postgres": {
+      "Services/AuthManager/Tests/Domain.UnitTests/Domain.UnitTests.csproj": {
+        "count": 46,
+        "allowed_skips": []
+      },
+      "Services/AuthManager/Tests/Application.UnitTests/Application.UnitTests.csproj": {
+        "count": 43,
+        "allowed_skips": []
+      },
+      "Tools/Zeka.AuthOwnerProvision.Tests/Zeka.AuthOwnerProvision.Tests.csproj": {
+        "count": 105,
+        "allowed_skips": []
+      },
+      "Services/AuthManager/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj": {
+        "count": 1,
+        "allowed_skips": []
+      },
+      "Services/AdminAreaManagement/Tests/Domain.UnitTests/Domain.UnitTests.csproj": {
+        "count": 60,
+        "allowed_skips": []
+      },
+      "Services/AdminAreaManagement/Tests/Application.UnitTests/Application.UnitTests.csproj": {
+        "count": 78,
+        "allowed_skips": []
+      },
+      "Services/ClientManagement/Tests/Domain.UnitTests/Domain.UnitTests.csproj": {
+        "count": 35,
+        "allowed_skips": []
+      },
+      "Services/ClientManagement/Tests/Application.UnitTests/Application.UnitTests.csproj": {
+        "count": 41,
+        "allowed_skips": []
+      }
+    },
+    "postgresql": {
+      "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 450,
+        "allowed_skips": []
+      },
+      "Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 309,
+        "allowed_skips": []
+      },
+      "Services/AdminAreaManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj": {
+        "count": 5,
+        "allowed_skips": []
+      },
+      "Services/ClientManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj": {
+        "count": 16,
+        "allowed_skips": []
+      },
+      "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 349,
+        "allowed_skips": []
+      }
+    },
+    "sonar-suite": {
+      "Services/AuthManager/Tests/Domain.UnitTests/Domain.UnitTests.csproj": {
+        "count": 46,
+        "allowed_skips": []
+      },
+      "Services/AuthManager/Tests/Application.UnitTests/Application.UnitTests.csproj": {
+        "count": 43,
+        "allowed_skips": []
+      },
+      "Tools/Zeka.AuthOwnerProvision.Tests/Zeka.AuthOwnerProvision.Tests.csproj": {
+        "count": 105,
+        "allowed_skips": []
+      },
+      "Services/AuthManager/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj": {
+        "count": 1,
+        "allowed_skips": []
+      },
+      "Services/AdminAreaManagement/Tests/Domain.UnitTests/Domain.UnitTests.csproj": {
+        "count": 60,
+        "allowed_skips": []
+      },
+      "Services/AdminAreaManagement/Tests/Application.UnitTests/Application.UnitTests.csproj": {
+        "count": 78,
+        "allowed_skips": []
+      },
+      "Services/ClientManagement/Tests/Domain.UnitTests/Domain.UnitTests.csproj": {
+        "count": 35,
+        "allowed_skips": []
+      },
+      "Services/ClientManagement/Tests/Application.UnitTests/Application.UnitTests.csproj": {
+        "count": 41,
+        "allowed_skips": []
+      },
+      "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 450,
+        "allowed_skips": []
+      },
+      "Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 309,
+        "allowed_skips": []
+      },
+      "Services/AdminAreaManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj": {
+        "count": 5,
+        "allowed_skips": []
+      },
+      "Services/ClientManagement/Tests/Application.IntegrationTests/Application.IntegrationTests.csproj": {
+        "count": 16,
+        "allowed_skips": []
+      },
+      "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 349,
+        "allowed_skips": []
+      },
+      "Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj": {
+        "count": 39,
+        "allowed_skips": []
+      },
+      "Shared/Zeka.Lifecycle.Contracts.Tests/Zeka.Lifecycle.Contracts.Tests.csproj": {
+        "count": 21,
+        "allowed_skips": []
+      },
+      "Tools/Zeka.OwnerSqlEvidence.Tests/Zeka.OwnerSqlEvidence.Tests.csproj": {
+        "count": 11,
+        "allowed_skips": []
+      }
+    },
+    "gateway": {
+      "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 21,
+        "allowed_skips": []
+      }
+    },
+    "owner-provision": {
+      "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 4,
+        "allowed_skips": []
+      }
+    },
+    "production-conformance": {
+      "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 2,
+        "allowed_skips": []
+      },
+      "Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 35,
+        "allowed_skips": []
+      },
+      "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj": {
+        "count": 1,
+        "allowed_skips": []
+      },
+      "Tools/Zeka.DbMigrate.Tests/Zeka.DbMigrate.Tests.csproj": {
+        "count": 11,
+        "allowed_skips": []
+      }
+    }
+  },
+  "failures": [
+    {
+      "id": "A1",
+      "project": "Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.TenantHttpTests.Adapter_rejects_conflicting_or_unknown_contract_values",
+        "(invalid: \"permission\")"
+      ],
+      "signatures": [
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.Equal:Unavailable:Authorized",
+          "frame": "Infrastructure.IntegrationTests.TenantHttpTests.Adapter_rejects_conflicting_or_unknown_contract_values"
+        }
+      ],
+      "issues": [
+        "GitHub #44",
+        "ZEK-17"
+      ]
+    },
+    {
+      "id": "A2",
+      "project": "Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.FirstSqlPathEvidenceTests.Conflicting_header_and_authorized_identity_is_rejected_before_persistence",
+        ""
+      ],
+      "signatures": [
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.Equal:Forbidden:ServiceUnavailable",
+          "frame": "Infrastructure.IntegrationTests.FirstSqlPathEvidenceTests.Conflicting_header_and_authorized_identity_is_rejected_before_persistence"
+        }
+      ],
+      "issues": [
+        "GitHub #45",
+        "GitHub #44",
+        "ZEK-17"
+      ]
+    },
+    {
+      "id": "A3",
+      "project": "Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.FirstSqlPathEvidenceTests.AdminArea_retry_worker_proves_first_sql_order_on_restricted_runtime",
+        ""
+      ],
+      "signatures": [
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.Single:empty",
+          "frame": "Infrastructure.IntegrationTests.FirstSqlPathEvidenceTests.AdminArea_retry_worker_proves_first_sql_order_on_restricted_runtime"
+        }
+      ],
+      "issues": [
+        "ZEK-34",
+        "GitHub #45",
+        "GitHub #46"
+      ]
+    },
+    {
+      "id": "A4",
+      "project": "Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.AdminAreaClosureParticipantEvidenceTests.Pre_boundary_projection_publication_commits_before_fence_and_database_denies_later_DML",
+        ""
+      ],
+      "signatures": [
+        {
+          "exception": "System.TimeoutException",
+          "assertion": "operation-timed-out",
+          "frame": "Infrastructure.IntegrationTests.AdminAreaClosureParticipantEvidenceTests.Pre_boundary_projection_publication_commits_before_fence_and_database_denies_later_DML"
+        }
+      ],
+      "issues": [
+        "GitHub #46",
+        "ZEK-17"
+      ]
+    },
+    {
+      "id": "A5",
+      "project": "Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.AccessResilienceTests.Retry_shares_timeout_budget_and_caller_cancellation_propagates",
+        ""
+      ],
+      "signatures": [
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.InRange:1.5:3:outside",
+          "frame": "Infrastructure.IntegrationTests.AccessResilienceTests.Retry_shares_timeout_budget_and_caller_cancellation_propagates"
+        }
+      ],
+      "issues": [
+        "ZEK-21",
+        "GitHub #44"
+      ]
+    },
+    {
+      "id": "C1",
+      "project": "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.AccessResilienceTests.Retry_shares_timeout_budget_and_caller_cancellation_propagates",
+        ""
+      ],
+      "signatures": [
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.InRange:1.5:3:outside",
+          "frame": "Infrastructure.IntegrationTests.AccessResilienceTests.Retry_shares_timeout_budget_and_caller_cancellation_propagates"
+        },
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.Equal:2:1",
+          "frame": "Infrastructure.IntegrationTests.AccessResilienceTests.Retry_shares_timeout_budget_and_caller_cancellation_propagates"
+        }
+      ],
+      "issues": [
+        "ZEK-21",
+        "GitHub #44"
+      ]
+    },
+    {
+      "id": "C2",
+      "project": "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.Issue81AuthorityHttpTests.Eligibility_two_second_total_deadline_cancels_without_a_write_decision",
+        ""
+      ],
+      "signatures": [
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.InRange:1.8:2.8:outside",
+          "frame": "Infrastructure.IntegrationTests.Issue81AuthorityHttpTests.Eligibility_two_second_total_deadline_cancels_without_a_write_decision"
+        }
+      ],
+      "issues": [
+        "GitHub #81",
+        "ZEK-5",
+        "ZEK-21"
+      ]
+    },
+    {
+      "id": "C3",
+      "project": "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.AccessResilienceTests.Metrics_and_traces_record_retry_latency_and_failure_without_identity_or_body",
+        ""
+      ],
+      "signatures": [
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.Equal:Unavailable:Authorized",
+          "frame": "Infrastructure.IntegrationTests.AccessResilienceTests.Metrics_and_traces_record_retry_latency_and_failure_without_identity_or_body"
+        }
+      ],
+      "issues": [
+        "GitHub #44",
+        "ZEK-17",
+        "ZEK-21"
+      ]
+    },
+    {
+      "id": "C4",
+      "project": "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.DossierLookupHttpTests.Lookup_rejects_anonymous_wrong_organisation_and_edit_only_authority",
+        ""
+      ],
+      "signatures": [
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.Equal:Forbidden:ServiceUnavailable",
+          "frame": "Infrastructure.IntegrationTests.DossierLookupHttpTests.Lookup_rejects_anonymous_wrong_organisation_and_edit_only_authority"
+        }
+      ],
+      "issues": [
+        "GitHub #87",
+        "GitHub #44",
+        "ZEK-17"
+      ]
+    },
+    {
+      "id": "C5",
+      "project": "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.AuthenticationStartupTests.Tracked_settings_and_environment_overrides_start_only_with_known_authentication_keys",
+        "(unexpectedKey: null)"
+      ],
+      "signatures": [
+        {
+          "exception": "not-emitted",
+          "assertion": "Assert.True:True:False:inner-System.ArgumentException:ManagementEndpoint-required",
+          "frame": "Zeka.Authentication.Tests.RealHostStartupTests.Tracked_settings_and_environment_overrides_start_only_with_known_authentication_keys"
+        }
+      ],
+      "issues": [
+        "ZEK-22",
+        "GitHub #22"
+      ]
+    }
+  ],
+  "obligations": [
+    {
+      "id": "H1",
+      "project": "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+      "identity": [
+        "Infrastructure.IntegrationTests",
+        "Infrastructure.IntegrationTests.Issue76ActionWriteTests.Integrated_client_lock_wait_makes_final_PostgreSQL_observation_stale",
+        ""
+      ],
+      "status": "NOT_REPRODUCED_RETAINED",
+      "issues": [
+        "GitHub #76",
+        "ZEK-5"
+      ],
+      "evidence": "https://github.com/diliwo/zeka-web-api/actions/runs/43314934322/job/131520423950",
+      "description": "The expected authority exception was not thrown after the final PostgreSQL authority observation became stale. Retain the authorization-freshness obligation until independently accepted revision-bound resolution."
+    }
+  ]
+}

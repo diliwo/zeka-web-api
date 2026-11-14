@@ -1,0 +1,420 @@
+name: C1 validation
+
+on:
+  pull_request:
+    branches: [codex/m1-c1-integration]
+    types: [opened, reopened, synchronize, ready_for_review]
+  push:
+    branches: [codex/m1-c1-integration]
+
+permissions: {}
+
+env:
+  BASELINE_PATH: scripts/ci/c1-ratchet/baseline-v1.json
+  GIT_NO_REPLACE_OBJECTS: "1"
+  GIT_NO_LAZY_FETCH: "1"
+
+jobs:
+  context:
+    name: Resolve C1 ratchet context
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      candidate: ${{ steps.resolve.outputs.candidate }}
+      base: ${{ steps.resolve.outputs.base }}
+      context: ${{ steps.resolve.outputs.context }}
+      tooling: ${{ steps.resolve.outputs.tooling }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - name: Check out the exact event object and history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: resolve
+        name: Resolve the candidate, base, trees and run identity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          C1_RATCHET_BOOTSTRAP_AUTHORITY: ${{ vars.C1_RATCHET_BOOTSTRAP_AUTHORITY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$GITHUB_REPOSITORY" = diliwo/zeka-web-api
+          # Read the live tip to reject stale first-use events. Test policy still uses recorded SHAs.
+          protected_head=$(gh api "repos/$GITHUB_REPOSITORY/branches/codex%2Fm1-c1-integration" \
+            --jq 'select(.protected == true and .name == "codex/m1-c1-integration") | .commit.sha')
+          [[ $protected_head =~ ^[0-9a-f]{40}$ ]]
+          export C1_RATCHET_PROTECTED_TARGET=refs/heads/codex/m1-c1-integration
+          export C1_RATCHET_PROTECTED_HEAD="$protected_head"
+          unset GH_TOKEN
+          python3 -I - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import tempfile
+          from hashlib import sha256
+          from pathlib import Path
+
+          env = os.environ
+          workflow = ".github/workflows/c1-validation.yml"
+          resolver = "scripts/ci/c1_ratchet_context.py"
+          baseline = "scripts/ci/c1-ratchet/baseline-v1.json"
+          core = (workflow, "scripts/ci/c1-ratchet", resolver, "scripts/ci/c1_ratchet.py",
+                  "scripts/ci/c1_ratchet_jobs.py", "scripts/ci/c1_ratchet_trx.py",
+                  "scripts/ci/run-c1-ratchet.sh")
+
+          def require(condition):
+              if not condition:
+                  raise ValueError
+
+          def oid(value):
+              return isinstance(value, str) and re.fullmatch("[0-9a-f]{40}", value) and int(value, 16)
+
+          def git(*args):
+              return subprocess.check_output(("git", "--no-replace-objects", *args),
+                                             stderr=subprocess.DEVNULL, timeout=30)
+
+          def tree(revision):
+              require(oid(revision) and git("cat-file", "-t", revision).strip() == b"commit")
+              return git("rev-parse", f"{revision}^{{tree}}").strip().decode("ascii")
+
+          def parents(revision):
+              return git("rev-list", "--parents", "-n", "1", revision).decode("ascii").split()[1:]
+
+          def policy_file(revision, path):
+              row = git("ls-tree", revision, "--", path).rstrip(b"\r\n")
+              meta, actual = row.split(b"\t")
+              mode, kind, _ = meta.split(b" ")
+              require(actual == path.encode("ascii") and mode in (b"100644", b"100755") and kind == b"blob")
+              return mode.decode("ascii"), git("cat-file", "blob", f"{revision}:{path}")
+
+          def blob(revision, path):
+              return policy_file(revision, path)[1]
+
+          def policy_digest(revision):
+              paths = (
+                  workflow, ".github/workflows/mvp-validation.yml",
+                  "Deployments/database/production-conformance.targets.json", "Directory.Build.props",
+                  "global.json", "scripts/ci/c1-ratchet/baseline.schema.json", baseline,
+                  "scripts/ci/c1_ratchet.py", resolver, "scripts/ci/c1_ratchet_jobs.py",
+                  "scripts/ci/c1_ratchet_trx.py", "scripts/ci/nuget.strict.config",
+                  "scripts/ci/run-c1-ratchet.sh", "scripts/ci/run-production-conformance.sh",
+                  "scripts/security/check-nuget-credentials.sh",
+              )
+              digest = sha256()
+              for path in sorted(paths):
+                  mode, body = policy_file(revision, path)
+                  digest.update(f"{path}\t{mode}\t{sha256(body).hexdigest()}\n".encode("ascii"))
+              return digest.hexdigest()
+
+          def unique(items):
+              value = dict(items)
+              require(len(value) == len(items))
+              return value
+
+          try:
+              with Path(env["GITHUB_EVENT_PATH"]).open("rb") as event_file:
+                  event_bytes = event_file.read(4194305)
+              require(len(event_bytes) <= 4194304)
+              event = json.loads(event_bytes, object_pairs_hook=unique)
+              repo = env["GITHUB_REPOSITORY"]
+              target = env["C1_RATCHET_PROTECTED_TARGET"]
+              tip = env["C1_RATCHET_PROTECTED_HEAD"]
+              require(repo == event["repository"]["full_name"] == "diliwo/zeka-web-api")
+              require(target == "refs/heads/codex/m1-c1-integration")
+              require(git("rev-parse", "--is-shallow-repository").strip() == b"false" and "GIT_GRAFT_FILE" not in env)
+              grafts = Path(os.fsdecode(git("rev-parse", "--git-path", "info/grafts").strip()))
+              require(not grafts.exists() and not grafts.is_symlink())
+              event_sha = env["GITHUB_SHA"]
+              event_tree = tree(event_sha)
+              require(git("rev-parse", "HEAD").strip().decode("ascii") == event_sha)
+              tree(tip)
+              name = env["GITHUB_EVENT_NAME"]
+              if name == "pull_request":
+                  pr = event["pull_request"]
+                  require(type(event["number"]) is int and pr["number"] == event["number"] > 0
+                          and env["GITHUB_REF"] == f"refs/pull/{event['number']}/merge")
+                  require(pr["base"]["repo"]["full_name"] == pr["head"]["repo"]["full_name"] == repo
+                          and "refs/heads/" + pr["base"]["ref"] == target)
+                  base, candidate = pr["base"]["sha"], pr["head"]["sha"]
+                  require(parents(event_sha) == [base, candidate])
+              else:
+                  require(name == "push" and event["ref"] == env["GITHUB_REF"] == target
+                          and event["created"] is False and event["deleted"] is False and event["forced"] is False)
+                  base, candidate = event["before"], event["after"]
+                  require(candidate == event_sha)
+              base_tree, candidate_tree = tree(base), tree(candidate)
+              require(base != candidate)
+              git("merge-base", "--is-ancestor", base if name == "pull_request" else candidate, tip)
+              if name == "push":
+                  git("merge-base", "--is-ancestor", base, candidate)
+              if git("ls-tree", base, "--", *core):
+                  source = base
+                  body = blob(source, resolver)
+              else:
+                  git("rev-list", "--objects", "--missing=error", base, tip, event_sha)
+                  require(not git("rev-list", "-1", "--full-history", base, "--", *core))
+                  raw = env["C1_RATCHET_BOOTSTRAP_AUTHORITY"]
+                  require(0 < len(raw) <= 8192)
+                  grant = json.loads(raw, object_pairs_hook=unique)
+                  require(set(grant) == set("schema repository ref base baseTree source sourceTree bundleSha256 "
+                                            "resolverSha256 baselineSha256".split()))
+                  require(type(grant["schema"]) is int and grant["schema"] == 1 and grant["repository"] == repo
+                          and grant["ref"] == target and grant["base"] == base and grant["baseTree"] == base_tree)
+                  source = grant["source"]
+                  require(tree(source) == grant["sourceTree"] == candidate_tree == event_tree)
+                  git("merge-base", "--is-ancestor", base, source)
+                  if name == "pull_request":
+                      require(source == candidate and tip == base)
+                  else:
+                      require(tip == candidate and (source == candidate or parents(candidate) == [base, source]))
+                  body = blob(source, resolver)
+                  v1 = "81e9f33157c0933d892e22042d63939d35cef8e6ab9aff8ed968d1230e48f85b"
+                  require(grant["baselineSha256"] == sha256(blob(source, baseline)).hexdigest() == v1
+                          and sha256(body).hexdigest() == grant["resolverSha256"]
+                          and policy_digest(source) == grant["bundleSha256"])
+              workflow_sha = env["GITHUB_WORKFLOW_SHA"]
+              workflow_ref = env["GITHUB_WORKFLOW_REF"]
+              allowed_refs = [f"{repo}/{workflow}@{env['GITHUB_REF']}"]
+              if name == "pull_request" and workflow_sha == candidate:
+                  allowed_refs.append(f"{repo}/{workflow}@refs/heads/{env['GITHUB_HEAD_REF']}")
+              require(workflow_sha in (event_sha, candidate) and workflow_ref in allowed_refs
+                      and blob(workflow_sha, workflow) == blob(source, workflow) == blob(event_sha, workflow))
+              with tempfile.TemporaryDirectory(prefix="c1-ratchet-loader-", dir=env["RUNNER_TEMP"]) as folder:
+                  file = Path(folder) / "c1_ratchet_context.py"
+                  file.write_bytes(body)
+                  sys.exit(subprocess.call((sys.executable, "-I", str(file))))
+          except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
+              print("C1 ratchet policy loader refused the event or unreviewed authority.", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+  test:
+    name: C1 ${{ matrix.role }} ${{ matrix.lane }}
+    needs: context
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.context.outputs.matrix || '{"role":["unavailable"],"lane":["unavailable"]}') }}
+    env:
+      LANE: ${{ matrix.lane }}
+      ROLE: ${{ matrix.role }}
+      CONTEXT_JSON: ${{ needs.context.outputs.context }}
+      SOURCE_SHA: ${{ matrix.role == 'base' && needs.context.outputs.base || needs.context.outputs.candidate }}
+    steps:
+      - name: Check out exact test source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+
+      - name: Check out ratchet tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.context.outputs.tooling }}
+          path: tooling
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - name: Allocate private output and sanitized artifact paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          raw=$(mktemp -d "$RUNNER_TEMP/c1-ratchet-$ROLE-$LANE.XXXXXX")
+          safe=$(mktemp -d "$RUNNER_TEMP/c1-ratchet-safe.XXXXXX")
+          printf '%s\n' "$CONTEXT_JSON" >"$raw/context.json"
+          printf 'RATCHET_RAW=%s\nRATCHET_SAFE=%s\n' "$raw" "$safe" >>"$GITHUB_ENV"
+
+      - name: Reject tracked NuGet credentials before credential delivery
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmp -- scripts/security/check-nuget-credentials.sh \
+            "$GITHUB_WORKSPACE/tooling/scripts/security/check-nuget-credentials.sh"
+          bash scripts/security/check-nuget-credentials.sh
+
+      - name: Restore and prepare the profile
+        shell: bash
+        working-directory: source
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          git -C "$GITHUB_WORKSPACE/tooling" diff --exit-code --quiet HEAD --
+          git -C "$GITHUB_WORKSPACE/tooling" diff --cached --exit-code --quiet HEAD --
+          tooling_status=$(git -C "$GITHUB_WORKSPACE/tooling" status --porcelain=v1 --untracked-files=all --ignored)
+          test -z "$tooling_status"
+          python3 -I "$GITHUB_WORKSPACE/tooling/scripts/ci/c1_ratchet_context.py" verify-tooling \
+            "$RATCHET_RAW/context.json" "$GITHUB_WORKSPACE/tooling"
+          bash "$GITHUB_WORKSPACE/tooling/scripts/ci/run-c1-ratchet.sh" prepare \
+            "$RATCHET_RAW/context.json" "$LANE" "$ROLE" "$RATCHET_RAW"
+
+      - name: Install pinned standalone Sonar CLI for original scanner-aware tests
+        if: ${{ matrix.lane == 'non-postgres' || matrix.lane == 'sonar-suite' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=1.9.0.15656
+          expected=42ec815ef8015921a76b76c865932130d756c5c5a977d82bca9fa81d09bfccd8
+          bin=$(mktemp -d "$RUNNER_TEMP/c1-ratchet-sonar.XXXXXX")
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --retry 2 --connect-timeout 15 --max-time 90 \
+            --output "$bin/sonar" \
+            "https://binaries.sonarsource.com/Distribution/sonarqube-cli/$version/linux/sonarqube-cli-$version-linux-x86-64.bin"
+          printf '%s  %s\n' "$expected" "$bin/sonar" | sha256sum --check --status
+          chmod 0700 "$bin/sonar"
+          test "$("$bin/sonar" --version)" = 1.9.0
+          printf '%s\n' "$bin" >>"$GITHUB_PATH"
+
+      - name: Execute test profile
+        shell: bash
+        working-directory: source
+        env:
+          SONARQUBE_CLI_SERVER: https://sonarcloud.io
+          SONARQUBE_CLI_ORG: ${{ (matrix.lane == 'non-postgres' || matrix.lane == 'sonar-suite') && vars.SONAR_ORGANIZATION || '' }}
+          SONARQUBE_CLI_TOKEN: ${{ (matrix.lane == 'non-postgres' || matrix.lane == 'sonar-suite') && secrets.SONAR_TOKEN || '' }}
+        run: |
+          set -euo pipefail
+          git -C "$GITHUB_WORKSPACE/tooling" diff --exit-code --quiet HEAD --
+          git -C "$GITHUB_WORKSPACE/tooling" diff --cached --exit-code --quiet HEAD --
+          tooling_status=$(git -C "$GITHUB_WORKSPACE/tooling" status --porcelain=v1 --untracked-files=all --ignored)
+          test -z "$tooling_status"
+          python3 -I "$GITHUB_WORKSPACE/tooling/scripts/ci/c1_ratchet_context.py" verify-tooling \
+            "$RATCHET_RAW/context.json" "$GITHUB_WORKSPACE/tooling"
+          bash "$GITHUB_WORKSPACE/tooling/scripts/ci/run-c1-ratchet.sh" execute \
+            "$RATCHET_RAW/context.json" "$LANE" "$ROLE" "$RATCHET_RAW"
+
+      - name: Normalize TRX evidence without test output
+        if: ${{ always() }}
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          git -C "$GITHUB_WORKSPACE/tooling" diff --exit-code --quiet HEAD --
+          git -C "$GITHUB_WORKSPACE/tooling" diff --cached --exit-code --quiet HEAD --
+          tooling_status=$(git -C "$GITHUB_WORKSPACE/tooling" status --porcelain=v1 --untracked-files=all --ignored)
+          test -z "$tooling_status"
+          python3 -I "$GITHUB_WORKSPACE/tooling/scripts/ci/c1_ratchet_context.py" verify-tooling \
+            "$RATCHET_RAW/context.json" "$GITHUB_WORKSPACE/tooling"
+          python3 -B -E "$GITHUB_WORKSPACE/tooling/scripts/ci/c1_ratchet.py" capture \
+            --context "$RATCHET_RAW/context.json" --lane "$LANE" --role "$ROLE" \
+            --baseline "$GITHUB_WORKSPACE/tooling/$BASELINE_PATH" \
+            --run-inputs "$RATCHET_RAW" --out "$RATCHET_SAFE/$ROLE-$LANE.json"
+
+      - name: Upload only sanitized test identity and result evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: c1-ratchet-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.role }}-${{ matrix.lane }}
+          path: ${{ env.RATCHET_SAFE }}/${{ matrix.role }}-${{ matrix.lane }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+  ratchet:
+    name: C1 Failure Ratchet
+    needs: [context, test]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    env:
+      CONTEXT_JSON: ${{ needs.context.outputs.context }}
+      CONTEXT_RESULT: ${{ needs.context.result }}
+      TEST_RESULT: ${{ needs.test.result }}
+    steps:
+      - name: Check out the admitted comparator
+        if: ${{ needs.context.result == 'success' }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.context.outputs.tooling }}
+          path: tooling
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out proposed baseline
+        if: ${{ needs.context.result == 'success' }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.context.outputs.candidate }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Download this attempt's sanitized evidence
+        id: evidence
+        if: ${{ always() && needs.context.result == 'success' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: c1-ratchet-${{ github.run_id }}-${{ github.run_attempt }}-*
+          merge-multiple: true
+          path: evidence
+
+      - name: Compare test inventories and independently inspect every required job
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOWNLOAD_RESULT: ${{ steps.evidence.outcome }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/c1-ratchet-receipt" evidence
+          receipt="$RUNNER_TEMP/c1-ratchet-receipt"
+          printf '%s\n' "$CONTEXT_JSON" >"$receipt/context.json"
+          compare=1
+          if [[ $CONTEXT_RESULT == success ]]; then
+            git -C tooling diff --exit-code --quiet HEAD --
+            git -C tooling diff --cached --exit-code --quiet HEAD --
+            tooling_status=$(git -C tooling status --porcelain=v1 --untracked-files=all --ignored)
+            test -z "$tooling_status"
+            python3 -I tooling/scripts/ci/c1_ratchet_context.py verify-tooling "$receipt/context.json" tooling
+            compare=0
+            python3 -B -E tooling/scripts/ci/c1_ratchet.py compare \
+              --context "$receipt/context.json" --evidence evidence \
+              --baseline "candidate/$BASELINE_PATH" --accepted-baseline "tooling/$BASELINE_PATH" \
+              --out "$receipt/comparison.json" || compare=$?
+          fi
+          query=0
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+            >"$RUNNER_TEMP/c1-ratchet-native-jobs.json" || query=$?
+          export COMPARE_EXIT=$compare JOB_API_EXIT=$query
+          if [[ $CONTEXT_RESULT != success ]]; then
+            printf '%s\n' '{"schema":1,"jobs":{},"errors":["CONTEXT_NOT_ADMITTED"],"status":"FAIL"}' \
+              >"$receipt/upstream-jobs.json"
+            exit 1
+          fi
+          python3 -B -E tooling/scripts/ci/c1_ratchet_jobs.py "$RUNNER_TEMP/c1-ratchet-native-jobs.json" \
+            "$receipt/upstream-jobs.json" "tooling/$BASELINE_PATH"
+
+      - name: Retain comparison and required-job receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: c1-ratchet-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/c1-ratchet-receipt/comparison.json
+            ${{ runner.temp }}/c1-ratchet-receipt/upstream-jobs.json
+          if-no-files-found: error
+          retention-days: 14
