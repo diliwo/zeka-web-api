@@ -132,6 +132,9 @@ class RatchetFixtureTests(TestCase):
         root.find(f"{ns}ResultSummary/{ns}Counters").attrib.update(total="4", executed="4", failed="2")
         trx = self.folder / "abbreviated.trx"
         trx.write_text(ET.tostring(root, encoding="unicode"), encoding="utf-8")
+        report = f"[xUnit.net 00:00:00.33]     {FQN}KnownAuthorityFailure{caption.replace(chr(34), '&quot;')} [FAIL]"
+        with_reports = self.with_runner_errors(trx.read_text(encoding="utf-8"), report, report)
+        trx.write_text(with_reports, encoding="utf-8")
         rows = load_trx(trx, PROJECT)
         expected = {case("KnownAuthorityFailure", "(sha256:" + sha256(identifier.encode()).hexdigest() + ")")[-1]
                     for identifier in (original_id, second_id)}
@@ -177,6 +180,40 @@ class RatchetFixtureTests(TestCase):
         ).replace('passed="2" failed="1"', 'passed="1" failed="2"')
         self.both(text)
         self.assert_failed_for(self.compare(), "NEW_FAILURE")
+
+    def test_runner_failure_summary_correlates_to_new_failure(self):
+        text = self.candidate.replace(
+            'outcome="Passed" testName="' + FQN + 'Healthy" />',
+            'outcome="Failed" testName="' + FQN + 'Healthy">'
+            '<Output><ErrorInfo><Message>Assert.True() Failure&#10;Expected: True&#10;Actual: False</Message>'
+            '<StackTrace>at ' + FQN + 'Healthy()</StackTrace></ErrorInfo></Output></UnitTestResult>',
+        ).replace('passed="2" failed="1"', 'passed="1" failed="2"')
+        text = self.with_runner_errors(text, f"[xUnit.net 00:00:00.33]     {FQN}Healthy [FAIL]")
+        evidence = self.both(text)
+        self.assert_failed_for(self.compare(), "NEW_FAILURE")
+        self.assertNotIn("[xUnit.net", str(evidence))
+
+    def test_unbound_or_repeated_run_errors_reject_evidence(self):
+        failure_display = FQN + 'KnownAuthorityFailure(kind: &quot;permission&quot;)'
+        valid = f"[xUnit.net 00:00:00.33]     {failure_display} [FAIL]"
+        for errors in (
+            ("Test host crashed",),
+            ("",),
+            (f"[xUnit.net 00:00:00.33]     {FQN}Healthy [FAIL]",),
+            (valid.replace("permission", "different"),),
+            (valid + " while closing the recorder",),
+            (valid, valid),
+        ):
+            with self.subTest(errors=errors):
+                trx = self.folder / "run-error.trx"
+                trx.write_text(self.with_runner_errors(self.candidate, *errors), encoding="utf-8")
+                with self.assertRaisesRegex(TrxError, "TRX_RUN_INFRASTRUCTURE_ERROR"):
+                    load_trx(trx, PROJECT)
+
+    @staticmethod
+    def with_runner_errors(text, *errors):
+        items = "".join(f'<RunInfo outcome="Error"><Text>{error}</Text></RunInfo>' for error in errors)
+        return text.replace("</ResultSummary>", f"<RunInfos>{items}</RunInfos></ResultSummary>")
 
     def test_unrecognized_failure_exports_only_safe_rejection_signature(self):
         text = self.candidate.replace("Assert.Equal() Failure", "Unsupported raw diagnostic")
