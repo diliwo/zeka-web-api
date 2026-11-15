@@ -5,6 +5,10 @@ repo_root=$(git rev-parse --show-toplevel)
 source_sha=$(git -C "${repo_root}" rev-parse --verify HEAD)
 inventory="${repo_root}/Deployments/database/production-conformance.targets.json"
 results_dir="${1:-${repo_root}/TestResults/production-conformance}"
+native_status_dir=${2:-}
+if [[ -n ${native_status_dir} ]]; then
+  [[ -d ${native_status_dir} && ! -L ${native_status_dir} ]]
+fi
 
 expected=(
   ROLE-01 ROLE-02 ROLE-03 ROLE-04
@@ -55,10 +59,17 @@ for entry in "${projects[@]}"; do
   suite=${entry%%|*}
   project=${entry#*|}
   echo "::group::Issue #46 production conformance: ${suite}"
-  if ! dotnet test "${repo_root}/${project}" --configuration Release --no-restore \
-      /p:ZekaSourceSha="${source_sha}" \
-      --filter 'Issue=46&Evidence=PlatformConformance' \
-      --logger "trx;LogFileName=${suite}.trx" --results-directory "${results_dir}"; then
+  native_status=0
+  dotnet test "${repo_root}/${project}" --configuration Release --no-restore \
+    /p:ZekaSourceSha="${source_sha}" \
+    --filter 'Issue=46&Evidence=PlatformConformance' \
+    --logger "trx;LogFileName=${suite}.trx" --results-directory "${results_dir}" || native_status=$?
+  if [[ -n ${native_status_dir} ]]; then
+    status_file="${native_status_dir}/${suite}.exit"
+    [[ ! -e ${status_file} && ! -L ${status_file} ]]
+    printf '%s\n' "${native_status}" >"${status_file}"
+  fi
+  if (( native_status != 0 )); then
     test_status=1
   fi
   trx="${results_dir}/${suite}.trx"
