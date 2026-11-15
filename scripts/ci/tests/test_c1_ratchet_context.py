@@ -232,7 +232,9 @@ class ContextTests(TestCase):
     def test_candidate_baseline_verifier_policy_and_workflow_tampering_fail(self):
         for tamper in (BASELINE, "scripts/ci/c1_ratchet.py", RESOLVER, WORKFLOW,
                        "scripts/ci/c1_ratchet_trx.py", "scripts/ci/run-c1-ratchet.sh",
-                       "scripts/ci/run-production-conformance.sh",
+                       "scripts/ci/run-production-conformance.sh", "scripts/ci/tests/test_c1_ratchet.py",
+                       "scripts/ci/tests/test_c1_ratchet_context.py", "scripts/ci/tests/c1-ratchet/baseline.trx",
+                       "scripts/ci/tests/c1-ratchet/candidate.trx",
                        "Deployments/database/production-conformance.targets.json", "Directory.Build.props"):
             with self.subTest(path=tamper):
                 candidate = self.changed(self.ordinary, tamper, b"unapproved policy rewrite\n")

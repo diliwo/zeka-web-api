@@ -37,6 +37,10 @@ POLICY_PATHS = tuple(sorted(INSTALL_PATHS + (
     "global.json",
     "scripts/ci/nuget.strict.config",
     "scripts/ci/run-production-conformance.sh",
+    "scripts/ci/tests/test_c1_ratchet.py",
+    "scripts/ci/tests/test_c1_ratchet_context.py",
+    "scripts/ci/tests/c1-ratchet/baseline.trx",
+    "scripts/ci/tests/c1-ratchet/candidate.trx",
     "scripts/security/check-nuget-credentials.sh",
 )))
 LANES = (

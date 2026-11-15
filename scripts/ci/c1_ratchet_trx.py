@@ -1,6 +1,7 @@
 """Read native VSTest TRX without exporting raw diagnostics or result paths."""
 
 import hashlib
+import json
 import re
 from collections import Counter
 from decimal import Decimal
@@ -44,6 +45,54 @@ _PUBLIC_CAPTIONS = {
         '(invalid: "permission")',
     "Infrastructure.IntegrationTests.AuthenticationStartupTests." + _STARTUP_METHOD: "(unexpectedKey: null)",
 }
+_EXCEPTION_HEADER = re.compile(
+    r"^(?:(?:--->|----)\s+)?(?P<type>[A-Za-z_][A-Za-z0-9_.]+)"
+    r"(?: \((?:0x[0-9A-Fa-f]{8}|[0-9]{1,5})\))?\s*:\s*(?P<message>.*)$"
+)
+_DIAGNOSTIC_TEMPLATES = {
+    "container-exited-before-ready": (
+        "testcontainers", "DotNet.Testcontainers.Containers.ContainerNotRunningException",
+        re.compile(r"Container [0-9a-fA-F]+ exited with code -?[0-9]+\."),
+    ),
+    "docker-api-unreachable": (
+        "testcontainers", "System.ArgumentException",
+        re.compile(r"Docker is either not running or misconfigured\b"),
+    ),
+    "postgres-connect-failed": (
+        "npgsql", "Npgsql.NpgsqlException", re.compile(r"Failed to connect to \S"),
+    ),
+    "postgres-tls-handshake-failed": (
+        "npgsql", "Npgsql.NpgsqlException", re.compile(r"Exception while performing SSL handshake\b"),
+    ),
+    "postgres-authentication-rejected": (
+        "npgsql", "Npgsql.PostgresException", re.compile(r"28P01: password authentication failed\b"),
+    ),
+    "postgres-not-accepting-connections": (
+        "npgsql", "Npgsql.PostgresException", re.compile(r"57P03: the database system is (?:starting up|shutting down)\b"),
+    ),
+    "postgres-connect-timeout": (
+        "npgsql", "System.TimeoutException", re.compile(r"Timeout during connection attempt\.?$"),
+    ),
+    "postgres-connection-refused": (
+        "npgsql", "System.Net.Sockets.SocketException",
+        re.compile(r"(?:Connection refused|No connection could be made because the target machine actively refused it)\.?$"),
+    ),
+    "container-readiness-timeout": (
+        "testcontainers", "System.TimeoutException", re.compile(r"The operation has timed out\.$"),
+    ),
+}
+_TESTCONTAINERS_WAIT_FRAMES = frozenset({
+    "DotNet.Testcontainers.Configurations.WaitStrategy.WaitUntilAsync",
+    "DotNet.Testcontainers.Configurations.WaitStrategy.WaitWhileAsync",
+})
+_POSTGRES_CONNECT_FRAMES = frozenset({
+    "Npgsql.Internal.NpgsqlConnector.Connect",
+    "Npgsql.Internal.NpgsqlConnector.ConnectAsync",
+})
+_AUTH_FIXTURE_PROJECT = "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj"
+_AUTH_FIXTURE_TEST = "Infrastructure.IntegrationTests.WorkerRotationPostgreSqlTests.OwnerAuthorityChangedAfterPrecheckCannotRotateWorkers"
+_AUTH_FIXTURE_FRAME = "Infrastructure.IntegrationTests.WorkerRotationPostgreSqlFixture.InitializeAsync"
+_AUTH_FIXTURE_SOURCE = str(PurePosixPath(_AUTH_FIXTURE_PROJECT).parent / "WorkerRotationPostgreSqlTests.cs")
 _ZERO_COUNTERS = (
     "error", "timeout", "aborted", "inconclusive", "passedButRunAborted",
     "notRunnable", "disconnected", "warning", "completed", "inProgress", "pending",
@@ -235,7 +284,89 @@ def _assertion(message, qualified):
     return "not-emitted", "unrecognized-failure"
 
 
-def _signature(result, project, qualified):
+def _diagnostic_frame(project, identity, frame):
+    # Only an exact test method or a source-pinned fixture symbol can enter a fingerprint.
+    return frame == identity[1] or (
+        str(project) == _AUTH_FIXTURE_PROJECT
+        and identity[1] == _AUTH_FIXTURE_TEST
+        and frame == _AUTH_FIXTURE_FRAME
+    )
+
+
+def _owns_fixture_frame(stack):
+    for value in stack.splitlines():
+        frame = _FRAME.match(value.strip())
+        if not frame or frame["name"] != _AUTH_FIXTURE_FRAME or " in " not in value:
+            continue
+        source = value.split(" in ", 1)[1].replace("\\", "/")
+        path = re.sub(r":line [1-9][0-9]*\s*$", "", source)
+        if ".." not in path.split("/") and ("/" + path).endswith("/" + _AUTH_FIXTURE_SOURCE):
+            return True
+    return False
+
+
+def _fingerprint(project, identity, category, template, frame):
+    # Inputs are the validated public identity and allowlisted classifications, never native text.
+    binding = ["c1-fixture-diagnostic-v1", str(project), list(identity), category, template, frame]
+    canonical = json.dumps(binding, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def _native_diagnostic(message, stack, project, identity, frame):
+    if not _diagnostic_frame(project, identity, frame):
+        return None
+    if frame == _AUTH_FIXTURE_FRAME and not _owns_fixture_frame(stack):
+        return None
+    stack_methods = {
+        match["name"] for line in stack.splitlines() if (match := _FRAME.match(line.strip()))
+    }
+    matches = set()
+    for index, line in enumerate(message.strip().splitlines()):
+        line = line.strip()
+        # Only the top-level header and xUnit's explicit inner-exception headers.
+        if index and not line.startswith(("---- ", "---> ")):
+            continue
+        header = _EXCEPTION_HEADER.fullmatch(line)
+        if header:
+            for template, (_, exception_type, pattern) in _DIAGNOSTIC_TEMPLATES.items():
+                if exception_type == header["type"] and pattern.match(header["message"]):
+                    matches.add(template)
+    if not stack_methods & _TESTCONTAINERS_WAIT_FRAMES:
+        matches.discard("container-readiness-timeout")
+    connection_details = {"postgres-connect-timeout", "postgres-connection-refused"}
+    if "postgres-connect-failed" in matches and matches & connection_details:
+        matches.remove("postgres-connect-failed")
+    elif not stack_methods & _POSTGRES_CONNECT_FRAMES:
+        matches -= connection_details
+    # A generic deadline alone does not identify the stage; conflicting matches remain opaque.
+    if len(matches) != 1:
+        return None
+    template = matches.pop()
+    category = _DIAGNOSTIC_TEMPLATES[template][0]
+    return {
+        "schema": 1,
+        "category": category,
+        "template": template,
+        "frame": frame,
+        "fingerprint": _fingerprint(project, identity, category, template, frame),
+    }
+
+
+def valid_diagnostic(value, project, identity, frame):
+    if not isinstance(value, dict) or value.keys() != {"schema", "category", "template", "frame", "fingerprint"}:
+        return False
+    template = value["template"]
+    rule = _DIAGNOSTIC_TEMPLATES.get(template) if isinstance(template, str) else None
+    return (
+        type(value["schema"]) is int and value["schema"] == 1 and rule is not None
+        and value["category"] == rule[0] and value["frame"] == frame
+        and _diagnostic_frame(project, identity, frame)
+        and value["fingerprint"] == _fingerprint(project, identity, rule[0], template, frame)
+    )
+
+
+def _failure_evidence(result, project, identity):
+    qualified = identity[1]
     output = _one(result, "Output", "TRX_FAILED_OUTPUT_MISSING_OR_AMBIGUOUS")
     info = _one(output, "ErrorInfo", "TRX_FAILURE_DIAGNOSTIC_MISSING_OR_AMBIGUOUS")
     message = _one(info, "Message", "TRX_FAILURE_MESSAGE_MISSING_OR_AMBIGUOUS")
@@ -245,7 +376,9 @@ def _signature(result, project, qualified):
     exception, assertion = _assertion(message.text, qualified)
     frame = _project_frame(stack.text, project, qualified)
     _require(len(frame) <= 420 and not _SECRET_SHAPED.search(frame), "TRX_FRAME_UNSAFE")
-    return {"exception": exception, "assertion": assertion, "frame": frame}
+    signature = {"exception": exception, "assertion": assertion, "frame": frame}
+    diagnostic = _native_diagnostic(message.text, stack.text, project, identity, frame)
+    return signature, diagnostic
 
 
 def _validate_run_infos(summary, failed_displays):
@@ -320,8 +453,8 @@ def load_trx(path, project):
         counts[outcome] += 1
         if outcome == "Failed" and adapter == _XUNIT_V2_ADAPTER:
             failed_displays[display] += 1
-        signature = _signature(result, project, qualified) if outcome == "Failed" else None
-        rows.append({"identity": list(identity), "outcome": outcome, "signature": signature})
+        signature, diagnostic = _failure_evidence(result, project, identity) if outcome == "Failed" else (None, None)
+        rows.append({"identity": list(identity), "outcome": outcome, "signature": signature, "diagnostic": diagnostic})
     _require(not entries and len(used_definitions) == len(definitions), "TRX_INCOMPLETE_RESULT_LINKS")
     summary = _one(root, "ResultSummary", "TRX_RUN_SUMMARY_MISSING_OR_AMBIGUOUS")
     _require(summary.get("outcome") == ("Failed" if counts["Failed"] else "Completed"),

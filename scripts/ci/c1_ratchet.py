@@ -11,7 +11,7 @@ import sys
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
-from c1_ratchet_trx import TrxError, identify_project, load_trx, validate_identity
+from c1_ratchet_trx import TrxError, identify_project, load_trx, valid_diagnostic, validate_identity
 
 ANCHOR = "23ad61e84ae976b6a483d2a859871c3b40d98249"
 AUTHORITY = "https://linear.app/zeka-saas/issue/ZEK-17#comment-0281b80b-a1a6-42d9-b8f8-02bd8d117a05"
@@ -300,8 +300,8 @@ def validate_baseline(value):
     return failures
 
 
-def validate_result(item):
-    shape(item, "identity outcome signature", "INVALID_RESULT")
+def validate_result(item, project):
+    shape(item, "identity outcome signature diagnostic", "INVALID_RESULT")
     case = identity(item["identity"])
     require(item["outcome"] in OUTCOMES, "INVALID_RESULT_OUTCOME")
     if item["outcome"] == "Failed":
@@ -309,7 +309,10 @@ def validate_result(item):
     else:
         require(item["signature"] is None, "UNEXPECTED_RESULT_SIGNATURE")
         sig = None
-    return case, item["outcome"], sig
+    diagnostic = item["diagnostic"]
+    require(diagnostic is None or (sig is not None and valid_diagnostic(diagnostic, project, case, sig[2])),
+            "INVALID_FIXTURE_DIAGNOSTIC")
+    return case, item["outcome"], sig, diagnostic
 
 
 def expected_source(context, role):
@@ -356,8 +359,9 @@ def capture(context, baseline, lane, role, inputs):
         failed = False
         for scope, path in selected:
             require(scope in scopes and scope not in populated, "DUPLICATE_OR_UNEXPECTED_PROJECT")
-            results = load_trx(path, scopes[scope].get("project", scope))
-            unique = {validate_result(item)[0] for item in results}
+            test_project = scopes[scope].get("project", scope)
+            results = load_trx(path, test_project)
+            unique = {validate_result(item, test_project)[0] for item in results}
             require(results and len(unique) == len(results), "ZERO_OR_DUPLICATE_TESTS")
             failed = failed or any(x["outcome"] == "Failed" for x in results)
             populated[scope] = {"results": sorted(results, key=lambda item: item["identity"]),
@@ -395,9 +399,9 @@ def collect(context, baseline, evidence, errors):
                             and group["results"], "INVALID_EVIDENCE_PROJECT")
                     cases = {}
                     for item in group["results"]:
-                        case, outcome, sig = validate_result(item)
+                        case, outcome, sig, diagnostic = validate_result(item, policy.get("project", key))
                         require(case not in cases, "DUPLICATE_TEST_IDENTITY")
-                        cases[case] = (outcome, sig)
+                        cases[case] = (outcome, sig, diagnostic)
                     groups[(role, lane, key)] = cases
                     # A matching invocation inventory and at least one executed
                     # case are both required, even when exact skips are admitted.
@@ -405,7 +409,7 @@ def collect(context, baseline, evidence, errors):
                             "ZERO_TEST_EXECUTION")
                     observed.add((role, lane))
                     allowed_skips = {identity(x["identity"]) for x in policy["allowed_skips"]}
-                    for case, (outcome, _) in cases.items():
+                    for case, (outcome, _, _) in cases.items():
                         if outcome == "NotExecuted" and case not in allowed_skips:
                             errors.append({"reason": "UNEXPECTED_SKIP", "role": role, "lane": lane,
                                            "scope": key, "identity": case})
@@ -444,7 +448,7 @@ def compare(context, proposed, accepted, evidence, initial):
                 if cases is None:
                     continue
                 counts = dict.fromkeys(OUTCOMES, 0)
-                for case, (outcome, sig) in cases.items():
+                for case, (outcome, sig, diagnostic) in cases.items():
                     counts[outcome] += 1
                     if outcome != "Failed":
                         continue
@@ -452,7 +456,7 @@ def compare(context, proposed, accepted, evidence, initial):
                     if sig not in allowed:
                         errors.append({"reason": "REPLACED_FAILURE_SIGNATURE" if allowed else "NEW_FAILURE",
                                        "role": role, "lane": lane, "scope": key,
-                                       "identity": case, "signature": sig})
+                                        "identity": case, "signature": sig, "diagnostic": diagnostic})
                 summary.append({"role": role, "lane": lane, "scope": key, "counts": counts})
     return {"schema": 1, "context": context, "baseline": accepted["id"], "baselineDiff": diff,
             "bootstrapFromPinnedAnchor": initial, "observedJobBindings": sorted(observed),

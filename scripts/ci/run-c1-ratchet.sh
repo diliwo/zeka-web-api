@@ -206,19 +206,35 @@ case $lane in
     ;;
   production-conformance)
     quiet docker docker info
-    status=0
-    cmp -- "$tooling/Deployments/database/production-conformance.targets.json" \
-      Deployments/database/production-conformance.targets.json
-    quiet conformance bash "$tooling/scripts/ci/run-production-conformance.sh" "$raw/conformance" || status=$?
+    conformance_status=0
+    inventory=Deployments/database/production-conformance.targets.json
+    cmp -- "$tooling/$inventory" "$inventory"
+    mkdir "$raw/conformance-status"
+    quiet conformance bash "$tooling/scripts/ci/run-production-conformance.sh" \
+      "$raw/conformance" "$raw/conformance-status" || conformance_status=$?
     for row in "auth|$auth" "adminarea|$admin" "client|$client" "migration|$migrator"; do
       suite=${row%%|*}
       project=${row#*|}
+      status_file="$raw/conformance-status/$suite.exit"
+      trx="$raw/conformance/$suite.trx"
+      [[ -f $status_file && ! -L $status_file && -s $trx && ! -L $trx ]]
+      native_status=$(<"$status_file")
+      [[ $native_status =~ ^(0|[1-9][0-9]{0,2})$ ]]
+      (( native_status <= 255 ))
       mkdir "$raw/result-$suite"
-      if [[ -f $raw/conformance/$suite.trx ]]; then
-        cp "$raw/conformance/$suite.trx" "$raw/result-$suite/$suite.trx"
-      fi
-      report_invocation "$project" "$status" "result-$suite"
+      cp -- "$trx" "$raw/result-$suite/$suite.trx"
+      report_invocation "$project" "$native_status" "result-$suite"
     done
+    # A known native test failure must not mask missing target evidence or a launcher failure.
+    jq -e --slurpfile inventory "$inventory" '
+      .schemaVersion == 1 and
+      ([.targets[].id] | sort) == ([$inventory[0].targets[].id] | sort) and
+      all(.targets[]; .status == "passed")
+    ' "$raw/conformance/target-results.json" >/dev/null
+    if (( conformance_status != failed )); then
+      echo 'Aggregate conformance exit disagrees with the per-project native exits.' >&2
+      exit 1
+    fi
     ;;
   owner-provision)
     quiet docker docker info

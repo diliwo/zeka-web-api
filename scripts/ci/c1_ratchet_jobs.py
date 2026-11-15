@@ -62,6 +62,8 @@ else:
         errors.append("MALFORMED_UPSTREAM_JOB_EVIDENCE")
 if set(selected) != expected:
     errors.append("MISSING_REQUIRED_UPSTREAM_JOB")
+if os.environ.get("FIXTURE_RESULT") != "success":
+    errors.append("RATCHET_FIXTURE_TESTS_FAILED")
 if (os.environ["CONTEXT_RESULT"] != "success" or os.environ["TEST_RESULT"] not in ("success", "failure")
         or os.environ["DOWNLOAD_RESULT"] != "success" or os.environ["COMPARE_EXIT"] != "0"):
     errors.append("INCOMPLETE_OR_REJECTED_RATCHET_EVIDENCE")

@@ -8,6 +8,8 @@ import subprocess
 from unittest.mock import patch
 from tempfile import TemporaryDirectory
 from unittest import TestCase, main
+from uuid import uuid4
+from xml.etree import ElementTree as ET
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -19,6 +21,9 @@ from c1_ratchet import (
 from c1_ratchet_trx import TrxError, identify_project, load_trx
 
 
+NS = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+AUTH_PROJECT = "Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj"
+AUTH_FIXTURE_FRAME = "Infrastructure.IntegrationTests.WorkerRotationPostgreSqlFixture.InitializeAsync"
 TRX = Path(__file__).with_name("c1-ratchet")
 TOOLING = Path(__file__).resolve().parents[1]
 POLICY = TOOLING / "c1-ratchet"
@@ -369,6 +374,120 @@ class RatchetFixtureTests(TestCase):
         self.assertEqual(failure_record["signature"]["assertion"], "unrecognized-failure")
         self.assertNotIn("Unsupported raw diagnostic", str(result))
         self.assert_failed_for(self.compare(), "REPLACED_FAILURE_SIGNATURE")
+
+    def auth_fixture_row(self, message, *, checkout="/home/runner/work/zeka", line=226,
+                         theory_row="prepare", frame_project=None, provider_frame=None):
+        source_dir = AUTH_PROJECT.rsplit("/", 1)[0]
+        trx = self.candidate.replace("/home/runner/work/zeka-web-api/zeka-web-api", checkout)
+        trx = trx.replace(FQN.removesuffix("."), "Infrastructure.IntegrationTests.WorkerRotationPostgreSqlTests")
+        trx = trx.replace(ASSEMBLY, "Infrastructure.IntegrationTests")
+        trx = trx.replace("Services/Synthetic/Tests", source_dir)
+        trx = trx.replace("KnownAuthorityFailure", "OwnerAuthorityChangedAfterPrecheckCannotRotateWorkers")
+        trx = trx.replace("&quot;permission&quot;", "&quot;" + theory_row + "&quot;")
+        root = ET.fromstring(trx)
+        info = root.find(f"{NS}Results/{NS}UnitTestResult/{NS}Output/{NS}ErrorInfo")
+        info.find(NS + "Message").text = message
+        source = f"{checkout}/{frame_project or source_dir}/WorkerRotationPostgreSqlTests.cs"
+        stack = f"at {AUTH_FIXTURE_FRAME}() in {source}:line {line}"
+        if provider_frame:
+            stack = f"at {provider_frame}()\n" + stack
+        info.find(NS + "StackTrace").text = stack
+        path = self.folder / "auth-diagnostic.trx"
+        ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+        return next(row for row in load_trx(path, AUTH_PROJECT) if row["outcome"] == "Failed")
+
+    def test_fixture_diagnostic_excludes_all_private_values_before_hashing(self):
+        first = self.auth_fixture_row("Npgsql.NpgsqlException : Failed to connect to host-a.invalid:5432")
+        self.assertEqual(first["diagnostic"]["template"], "postgres-connect-failed")
+        self.assertEqual(first["signature"]["assertion"], "unrecognized-failure")
+        formats = {
+            "amqp": "amqps://synthetic:{value}@broker.invalid/",
+            "password": 'Host=private.invalid;Username=local;Password="{value}";Database=private',
+            "pwd": "Host=private.invalid;Pwd={value};Pooling=true",
+            "connection-string-fragment": "Host={value}.invalid;Database={value};Username={value}",
+            "bearer": "Authorization: Bearer {value}",
+            "key": "-----BEGIN " + "PRIVATE KEY-----\n{value}\n-----END " + "PRIVATE KEY-----",
+        }
+        for kind, fmt in formats.items():
+            with self.subTest(kind=kind):
+                canary = uuid4().hex
+                raw = fmt.format(value=canary)
+                separator = "\n" if kind == "key" else " "
+                message = "Npgsql.NpgsqlException (0x80004005): Failed to connect to host-b.invalid:6000" + separator + raw
+                from_other_profile = self.auth_fixture_row(message, checkout=r"Q:\build\with-spaces ", line=990)
+                self.assertEqual(first["diagnostic"], from_other_profile["diagnostic"])
+                self.assertNotIn(canary, json.dumps(from_other_profile))
+                self.assertNotIn("host-b.invalid", json.dumps(from_other_profile))
+                self.assertNotIn(sha256(canary.encode()).hexdigest(), json.dumps(from_other_profile))
+                opaque = self.auth_fixture_row("Unsupported exception " + raw)
+                self.assertIsNone(opaque["diagnostic"])
+                self.assertNotIn(canary, json.dumps(opaque))
+
+    def test_fixture_fingerprints_distinguish_native_stage_and_theory_row(self):
+        container = self.auth_fixture_row(
+            "DotNet.Testcontainers.Containers.ContainerNotRunningException : Container ac3ef exited with code 137."
+        )
+        connect = self.auth_fixture_row("Npgsql.NpgsqlException : Failed to connect to [::1]:44321")
+        timeout = self.auth_fixture_row(
+            "Npgsql.NpgsqlException : Failed to connect to host.invalid:6000\n"
+            "---- System.TimeoutException : Timeout during connection attempt"
+        )
+        readiness = self.auth_fixture_row(
+            "System.TimeoutException : The operation has timed out.",
+            provider_frame="DotNet.Testcontainers.Configurations.WaitStrategy.WaitUntilAsync",
+        )
+        self.assertEqual(
+            [row["diagnostic"]["template"] for row in (container, connect, timeout, readiness)],
+            ["container-exited-before-ready", "postgres-connect-failed", "postgres-connect-timeout",
+             "container-readiness-timeout"],
+        )
+        other_row = self.auth_fixture_row("Npgsql.NpgsqlException : Failed to connect to [::1]:44321",
+                                          theory_row="revoke-others")
+        fingerprints = {row["diagnostic"]["fingerprint"] for row in (container, connect, timeout, readiness, other_row)}
+        self.assertEqual(len(fingerprints), 5)
+
+    def test_ambiguous_or_unowned_fixture_evidence_has_no_fingerprint(self):
+        for message in (
+            "System.TimeoutException : The operation has timed out.",
+            "System.Threading.Tasks.TaskCanceledException : A task was canceled.",
+            "Npgsql.NpgsqlException : Error changing the database",
+            "Npgsql.NpgsqlException : Failed to connect to host.invalid:5432\n"
+            "---- DotNet.Testcontainers.Containers.ContainerNotRunningException : Container ac3ef exited with code 1.",
+        ):
+            with self.subTest(message=message):
+                self.assertIsNone(self.auth_fixture_row(message)["diagnostic"])
+        row = self.auth_fixture_row(
+            "Npgsql.NpgsqlException : Failed to connect to host.invalid:5432",
+            frame_project="Services/AuthManager/Tests/Other",
+        )
+        self.assertIsNone(row["diagnostic"])
+
+    def test_fingerprint_does_not_admit_a_failure_and_tampering_is_rejected(self):
+        canary = uuid4().hex
+        candidate = self.candidate.replace(
+            "Assert.Equal() Failure\nExpected: Unavailable\nActual:   Authorized",
+            "Npgsql.NpgsqlException : Failed to connect to host.invalid:5432\nPwd=" + canary,
+        )
+        receipt = self.both(candidate)
+        comparison = self.compare()
+        finding = next(item for item in comparison["errors"] if item["reason"] == "REPLACED_FAILURE_SIGNATURE")
+        diagnostic = finding["diagnostic"]
+        self.assertEqual(diagnostic["category"], "npgsql")
+        self.assertRegex(diagnostic["fingerprint"], r"^[0-9a-f]{64}$")
+        self.assertNotIn(canary, json.dumps(comparison))
+
+        path = self.evidence / f"candidate-{self.lane}.json"
+        for field, value in (("fingerprint", "0" * 64), ("category", "unknown"),
+                             ("template", canary), ("frame", "Another.Module")):
+            with self.subTest(field=field):
+                changed = deepcopy(receipt)
+                failed = next(row for row in changed["projects"][PROJECT]["results"] if row["outcome"] == "Failed")
+                failed["diagnostic"][field] = value
+                path.unlink()
+                save_json(path, changed)
+                rejected = self.compare()
+                self.assert_failed_for(rejected, "INVALID_FIXTURE_DIAGNOSTIC")
+                self.assertNotIn(canary, json.dumps(rejected))
 
     def test_replaced_failure_signature_rejected(self):
         self.both(self.candidate.replace("Expected: Unavailable\nActual:   Authorized", "Expected: 2\nActual:   1"))
