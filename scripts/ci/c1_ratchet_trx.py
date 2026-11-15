@@ -14,6 +14,8 @@ class TrxError(ValueError):
     """A fixed, safe diagnostic for unusable or unsupported test evidence."""
 
 
+TRX_PROJECT_FRAME_MISSING = "TRX_PROJECT_FRAME_MISSING"
+
 _NS = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
 _FQN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*[A-Za-z0-9_.+@`]*")
 _COMPONENT = re.compile(r"[A-Za-z0-9_.-]+")
@@ -227,9 +229,13 @@ def _counter(counters, attribute):
 
 def _project_frame(stack, project, qualified):
     directory = "/".join(project.parent.parts[:2] if project.parts[0] == "Services" else project.parent.parts)
+    has_frame = False
     for line in stack.splitlines():
         frame = _FRAME.match(line.strip())
-        if not frame or " in " not in line:
+        if not frame:
+            continue
+        has_frame = True
+        if " in " not in line:
             continue
         source = line.split(" in ", 1)[1].replace("\\", "/")
         name = frame.group("name")
@@ -241,7 +247,8 @@ def _project_frame(stack, project, qualified):
         frame = _FRAME.match(line.strip())
         if frame and " in " not in line and frame.group("name") in (qualified, _STARTUP_FRAME):
             return frame.group("name")
-    raise TrxError("TRX_PROJECT_FRAME_MISSING")
+    _require(has_frame, "TRX_FAILURE_STACK_INVALID")
+    return None
 
 
 def _assertion(message, qualified):
@@ -375,10 +382,12 @@ def _failure_evidence(result, project, identity):
              "TRX_FAILURE_DIAGNOSTIC_MISSING_OR_AMBIGUOUS")
     exception, assertion = _assertion(message.text, qualified)
     frame = _project_frame(stack.text, project, qualified)
+    if frame is None:
+        return None, None, TRX_PROJECT_FRAME_MISSING
     _require(len(frame) <= 420 and not _SECRET_SHAPED.search(frame), "TRX_FRAME_UNSAFE")
     signature = {"exception": exception, "assertion": assertion, "frame": frame}
     diagnostic = _native_diagnostic(message.text, stack.text, project, identity, frame)
-    return signature, diagnostic
+    return signature, diagnostic, None
 
 
 def _validate_run_infos(summary, failed_displays):
@@ -453,8 +462,13 @@ def load_trx(path, project):
         counts[outcome] += 1
         if outcome == "Failed" and adapter == _XUNIT_V2_ADAPTER:
             failed_displays[display] += 1
-        signature, diagnostic = _failure_evidence(result, project, identity) if outcome == "Failed" else (None, None)
-        rows.append({"identity": list(identity), "outcome": outcome, "signature": signature, "diagnostic": diagnostic})
+        signature, diagnostic, evidence_error = (None, None, None)
+        if outcome == "Failed":
+            signature, diagnostic, evidence_error = _failure_evidence(result, project, identity)
+        row = {"identity": list(identity), "outcome": outcome, "signature": signature, "diagnostic": diagnostic}
+        if evidence_error:
+            row["evidenceError"] = evidence_error
+        rows.append(row)
     _require(not entries and len(used_definitions) == len(definitions), "TRX_INCOMPLETE_RESULT_LINKS")
     summary = _one(root, "ResultSummary", "TRX_RUN_SUMMARY_MISSING_OR_AMBIGUOUS")
     _require(summary.get("outcome") == ("Failed" if counts["Failed"] else "Completed"),
