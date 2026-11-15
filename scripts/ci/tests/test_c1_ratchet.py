@@ -47,7 +47,7 @@ def failure(identifier, method, assertion, row=""):
     }
 
 
-class RatchetFixtureTests(TestCase):
+class RatchetFixture(TestCase):
     def setUp(self):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -124,6 +124,8 @@ class RatchetFixtureTests(TestCase):
         self.capture("base", self.base)
         return self.capture("candidate", self.candidate if text is None else text)
 
+
+class RatchetFixtureTests(RatchetFixture):
     def test_complete_observations_subset_of_admitted_failures_pass(self):
         result = self.both()
         self.assertEqual(result["projects"][PROJECT]["results"][2]["identity"][-1], THEORY_ROW)
@@ -563,6 +565,175 @@ class RatchetFixtureTests(TestCase):
     def test_infrastructure_exit_cannot_be_recognized_as_test_failure(self):
         with self.assertRaisesRegex(RatchetError, "INVALID_INVOCATION"):
             self.capture("candidate", self.candidate, exit_code=2)
+
+
+MARKER = "TRX_PROJECT_FRAME_MISSING"
+MISSING_FRAME_IDENTITY = case("KnownAuthorityFailure", THEORY_ROW)
+EXTERNAL_STACK = (
+    "at Npgsql.Internal.NpgsqlConnector.Open() in /packages/Npgsql/NpgsqlConnector.cs:line 82\n"
+    "at System.Threading.Tasks.Task.InnerInvoke()"
+)
+
+
+class MissingProjectFrameTests(RatchetFixture):
+    def setUp(self):
+        super().setUp()
+        self.trx = ET.fromstring(self.candidate)
+        self.results = self.trx.find(NS + "Results")
+        self.error = self.results[0].find(f"{NS}Output/{NS}ErrorInfo")
+        self.error.find(NS + "StackTrace").text = EXTERNAL_STACK
+        self.counters = self.trx.find(f"{NS}ResultSummary/{NS}Counters")
+
+    def trx_text(self):
+        return ET.tostring(self.trx, encoding="unicode")
+
+    def parse(self, project=PROJECT):
+        path = self.folder / "observed.trx"
+        path.write_text(self.trx_text(), encoding="utf-8")
+        return load_trx(path, project)
+
+    def assert_marked_row(self, row):
+        self.assertEqual(row, {
+            "identity": MISSING_FRAME_IDENTITY,
+            "outcome": "Failed",
+            "signature": None,
+            "diagnostic": None,
+            "evidenceError": MARKER,
+        })
+
+    def test_mixed_profile_keeps_exact_identities_and_rejects_marked_failure(self):
+        evidence = self.both(self.trx_text())
+        rows = evidence["projects"][PROJECT]["results"]
+        expected = {
+            tuple(MISSING_FRAME_IDENTITY): "Failed",
+            tuple(case("Healthy")): "Passed",
+            tuple(case("Companion")): "Passed",
+        }
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({tuple(row["identity"]): row["outcome"] for row in rows}, expected)
+        self.assert_marked_row(next(row for row in rows if row["outcome"] == "Failed"))
+
+        for admitted in True, False:
+            with self.subTest(admitted=admitted):
+                baseline = self.baseline
+                if not admitted:
+                    baseline = deepcopy(baseline)
+                    baseline["failures"] = [row for row in baseline["failures"] if row["id"] != "A1"]
+                report = compare(
+                    self.context, baseline, baseline, self.evidence, initial=True
+                )
+                self.assertEqual(report["status"], "FAIL")
+                marked_errors = [error for error in report["errors"] if error["reason"] == MARKER]
+                self.assertEqual(len(marked_errors), 1)
+                error = marked_errors[0]
+                self.assertEqual(tuple(error["identity"]), tuple(MISSING_FRAME_IDENTITY))
+                self.assertEqual((error["role"], error["lane"], error["scope"]),
+                                 ("candidate", self.lane, PROJECT))
+                self.assertIn(("candidate", self.lane), report["observedJobBindings"])
+
+    def test_wrong_project_still_fails(self):
+        with self.assertRaisesRegex(TrxError, "TRX_PROJECT_BINARY_MISMATCH"):
+            self.parse("Services/Unrelated/Tests/C1.Ratchet.TestFixtures.csproj")
+
+    def test_inconsistent_execution_link_still_fails(self):
+        self.results[0].set("executionId", self.results[1].get("executionId"))
+        with self.assertRaisesRegex(TrxError, "TRX_RESULT_EXECUTION_UNBOUND"):
+            self.parse()
+
+    def test_duplicate_identity_still_fails_even_with_distinct_native_ids(self):
+        definitions = self.trx.find(NS + "TestDefinitions")
+        self.results[2].set("testName", self.results[1].get("testName"))
+        definitions[2].set("name", definitions[1].get("name"))
+        definitions[2].find(NS + "TestMethod").set("name", "Healthy")
+        with self.assertRaisesRegex(TrxError, "TRX_DUPLICATE_CASE_IDENTITY"):
+            self.parse()
+
+    def test_missing_native_result_still_fails_link_validation(self):
+        self.results.remove(self.results[1])
+        with self.assertRaisesRegex(TrxError, "TRX_INCOMPLETE_RESULT_LINKS"):
+            self.parse()
+
+    def test_balanced_trx_with_missing_identity_still_fails_inventory_comparison(self):
+        for tag in ("Results", "TestDefinitions", "TestEntries"):
+            parent = self.trx.find(NS + tag)
+            parent.remove(parent[1])
+        self.counters.attrib.update(total="2", executed="2", passed="1")
+        self.both(self.trx_text())
+        self.assert_failed_for(self.compare(), "MISSING_OR_RENAMED_TEST")
+
+    def test_counter_mismatch_still_fails(self):
+        self.counters.set("failed", "0")
+        with self.assertRaisesRegex(TrxError, "TRX_RUN_COUNTERS_INCONSISTENT"):
+            self.parse()
+
+    def test_missing_stack_element_is_still_a_parser_error(self):
+        self.error.remove(self.error.find(NS + "StackTrace"))
+        with self.assertRaisesRegex(TrxError, "TRX_FAILURE_STACK_MISSING_OR_AMBIGUOUS"):
+            self.parse()
+
+    def test_malformed_nonempty_stack_remains_a_parser_error(self):
+        self.error.find(NS + "StackTrace").text = "captured output without call frames"
+        with self.assertRaisesRegex(TrxError, "TRX_FAILURE_STACK_INVALID"):
+            self.parse()
+
+    def test_inconsistent_assertion_diagnostic_remains_a_parser_error(self):
+        self.error.find(NS + "Message").text = (
+            "Assert.InRange() Failure: Value not in range\nRange: (1.5 - 3)\nActual: 2"
+        )
+        with self.assertRaisesRegex(TrxError, "TRX_ASSERTION_DIAGNOSTIC_INCONSISTENT"):
+            self.parse()
+
+    def test_failed_trx_still_disagrees_with_native_zero(self):
+        with self.assertRaisesRegex(RatchetError, "NATIVE_EXIT_AND_TRX_DISAGREE"):
+            self.capture("candidate", self.trx_text(), exit_code=0)
+
+    def test_tampered_marked_evidence_is_invalid(self):
+        evidence = self.both(self.trx_text())
+        candidates = {
+            "unknown-marker": {"evidenceError": "UNKNOWN_MARKER"},
+            "null-marker": {"evidenceError": None},
+            "disguised-pass": {"outcome": "Passed"},
+            "retained-signature": {"signature": deepcopy(self.baseline["failures"][0]["signatures"][0])},
+            "retained-diagnostic": {"diagnostic": {"fingerprint": "a" * 64}},
+            "unexpected-key": {"extra": None},
+        }
+        path = self.evidence / f"candidate-{self.lane}.json"
+        for label, changes in candidates.items():
+            with self.subTest(label=label):
+                modified = deepcopy(evidence)
+                marked = next(row for row in modified["projects"][PROJECT]["results"] if row["outcome"] == "Failed")
+                marked.update(changes)
+                path.write_text(json.dumps(modified), encoding="utf-8")
+                report = self.compare()
+                self.assertEqual(report["status"], "FAIL")
+                self.assertNotIn(("candidate", self.lane), report["observedJobBindings"])
+                self.assertNotIn(MARKER, {error["reason"] for error in report["errors"]})
+
+        modified = deepcopy(evidence)
+        modified["context"]["runAttempt"] = "2"
+        path.write_text(json.dumps(modified), encoding="utf-8")
+        self.assert_failed_for(self.compare(), "EVIDENCE_BINDING_MISMATCH")
+
+    def test_missing_frame_exports_no_raw_or_hashed_secret_canaries(self):
+        formats = {
+            "amqp": "amqps://synthetic:{value}@broker.invalid/",
+            "pg-password": 'Host=pg.invalid;Username=synthetic;Password="{value}";Database=synthetic',
+            "pg-pwd": "Host=pg.invalid;Pwd={value};Pooling=true",
+            "pg-fragment": "Host={value}.invalid;Database={value};Username={value}",
+            "bearer": "Authorization: Bearer {value}",
+            "key": "-----BEGIN " + "PRIVATE KEY-----\n{value}\n-----END " + "PRIVATE KEY-----",
+        }
+        for kind, template in formats.items():
+            with self.subTest(kind=kind):
+                canary = uuid4().hex
+                detail = template.format(value=canary)
+                self.error.find(NS + "Message").text = "Npgsql.NpgsqlException: Failed to connect to pg.invalid:5432\n" + detail
+                self.error.find(NS + "StackTrace").text = EXTERNAL_STACK + "\n" + detail
+                rows = self.parse()
+                self.assert_marked_row(next(row for row in rows if row["outcome"] == "Failed"))
+                sanitized = json.dumps(rows)
+                self.assertNotIn(canary, sanitized)
+                self.assertNotIn(sha256(canary.encode()).hexdigest(), sanitized)
 
 
 if __name__ == "__main__":
