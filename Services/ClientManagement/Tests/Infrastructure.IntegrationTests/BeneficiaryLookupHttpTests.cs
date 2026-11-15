@@ -155,12 +155,23 @@ public sealed partial class DossierLookupHttpTests
         Assert.Equal(HttpStatusCode.Unauthorized, challenge.StatusCode);
         Assert.Equal(0, access.Calls);
         using var wrong = Client(app, Guid.NewGuid());
+        access.Outcome = TenantAccessOutcome.Denied;
         using var wrongResponse = await wrong.PostAsJsonAsync(LookupRoute, new { searchText = "Synthetic" });
         Assert.Equal(HttpStatusCode.Forbidden, wrongResponse.StatusCode);
+        Assert.Empty(await wrongResponse.Content.ReadAsStringAsync());
+
+        // A success for a different organisation is a contradictory authority response.
+        access.Outcome = TenantAccessOutcome.Authorized;
+        using var contradictory = await wrong.PostAsJsonAsync(LookupRoute, new { searchText = "Synthetic" });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, contradictory.StatusCode);
+        Assert.Empty(await contradictory.Content.ReadAsStringAsync());
+
         access.Permissions = ["Clients.EditAll", "Clients.EditAssigned"];
         using var client = Client(app, access.Organisation);
         using var denied = await client.PostAsJsonAsync(LookupRoute, new { searchText = "Synthetic" });
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        Assert.Empty(await denied.Content.ReadAsStringAsync());
+        Assert.Equal(3, access.Calls);
     }
 
     [Fact]
