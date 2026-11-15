@@ -11,7 +11,9 @@ import sys
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
-from c1_ratchet_trx import TrxError, identify_project, load_trx, valid_diagnostic, validate_identity
+from c1_ratchet_trx import (
+    TRX_PROJECT_FRAME_MISSING, TrxError, identify_project, load_trx, valid_diagnostic, validate_identity,
+)
 
 ANCHOR = "23ad61e84ae976b6a483d2a859871c3b40d98249"
 AUTHORITY = "https://linear.app/zeka-saas/issue/ZEK-17#comment-0281b80b-a1a6-42d9-b8f8-02bd8d117a05"
@@ -301,9 +303,15 @@ def validate_baseline(value):
 
 
 def validate_result(item, project):
-    shape(item, "identity outcome signature diagnostic", "INVALID_RESULT")
+    marked = isinstance(item, dict) and "evidenceError" in item
+    keys = "identity outcome signature diagnostic"
+    shape(item, keys + " evidenceError" if marked else keys, "INVALID_RESULT")
     case = identity(item["identity"])
     require(item["outcome"] in OUTCOMES, "INVALID_RESULT_OUTCOME")
+    if marked:
+        require(item["evidenceError"] == TRX_PROJECT_FRAME_MISSING and item["outcome"] == "Failed"
+                and item["signature"] is None and item["diagnostic"] is None, "INVALID_RESULT_EVIDENCE_ERROR")
+        return case, item["outcome"], None, None, TRX_PROJECT_FRAME_MISSING
     if item["outcome"] == "Failed":
         sig = signature(item["signature"])
     else:
@@ -312,7 +320,7 @@ def validate_result(item, project):
     diagnostic = item["diagnostic"]
     require(diagnostic is None or (sig is not None and valid_diagnostic(diagnostic, project, case, sig[2])),
             "INVALID_FIXTURE_DIAGNOSTIC")
-    return case, item["outcome"], sig, diagnostic
+    return case, item["outcome"], sig, diagnostic, None
 
 
 def expected_source(context, role):
@@ -399,9 +407,9 @@ def collect(context, baseline, evidence, errors):
                             and group["results"], "INVALID_EVIDENCE_PROJECT")
                     cases = {}
                     for item in group["results"]:
-                        case, outcome, sig, diagnostic = validate_result(item, policy.get("project", key))
+                        case, outcome, sig, diagnostic, evidence_error = validate_result(item, policy.get("project", key))
                         require(case not in cases, "DUPLICATE_TEST_IDENTITY")
-                        cases[case] = (outcome, sig, diagnostic)
+                        cases[case] = (outcome, sig, diagnostic, evidence_error)
                     groups[(role, lane, key)] = cases
                     # A matching invocation inventory and at least one executed
                     # case are both required, even when exact skips are admitted.
@@ -409,7 +417,7 @@ def collect(context, baseline, evidence, errors):
                             "ZERO_TEST_EXECUTION")
                     observed.add((role, lane))
                     allowed_skips = {identity(x["identity"]) for x in policy["allowed_skips"]}
-                    for case, (outcome, _, _) in cases.items():
+                    for case, (outcome, _, _, _) in cases.items():
                         if outcome == "NotExecuted" and case not in allowed_skips:
                             errors.append({"reason": "UNEXPECTED_SKIP", "role": role, "lane": lane,
                                            "scope": key, "identity": case})
@@ -448,9 +456,13 @@ def compare(context, proposed, accepted, evidence, initial):
                 if cases is None:
                     continue
                 counts = dict.fromkeys(OUTCOMES, 0)
-                for case, (outcome, sig, diagnostic) in cases.items():
+                for case, (outcome, sig, diagnostic, evidence_error) in cases.items():
                     counts[outcome] += 1
                     if outcome != "Failed":
+                        continue
+                    if evidence_error == TRX_PROJECT_FRAME_MISSING:
+                        errors.append({"reason": TRX_PROJECT_FRAME_MISSING, "role": role, "lane": lane, "scope": key,
+                                       "identity": case, "signature": None, "diagnostic": None})
                         continue
                     allowed = failures.get((project, case), set())
                     if sig not in allowed:
