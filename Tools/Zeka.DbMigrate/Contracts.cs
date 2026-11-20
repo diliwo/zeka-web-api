@@ -71,6 +71,8 @@ internal sealed record MigrationEvidence(
 {
     [JsonPropertyName("postgresDiagnostic"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SafePostgresDiagnostic? PostgresDiagnostic { get; init; }
+    [JsonPropertyName("atomicAuth"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AtomicAuthEvidence? AtomicAuth { get; init; }
 }
 
 internal static class ResultCodes

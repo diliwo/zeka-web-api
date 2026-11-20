@@ -257,7 +257,7 @@ internal static class MigrationEngine
         }
     }
 
-    private static DbContext CreateContext(ServiceDescriptor descriptor, NpgsqlConnection connection, SafePostgresDiagnosticCapture? capture = null) => descriptor.Key switch
+    internal static DbContext CreateContext(ServiceDescriptor descriptor, NpgsqlConnection connection, SafePostgresDiagnosticCapture? capture = null) => descriptor.Key switch
     {
         "adminarea" => new AdminDeploymentDbContext(
             new DbContextOptionsBuilder<AdminDeploymentDbContext>().UseNpgsql(connection).AddInterceptors(capture is null ? [] : new[] { new SafePostgresCommandInterceptor(capture) }).Options),
@@ -268,7 +268,7 @@ internal static class MigrationEngine
         _ => throw new InvalidOperationException()
     };
 
-    private static async Task VerifyManifestAsync(DbContext context, Assembly assembly,
+    internal static async Task VerifyManifestAsync(DbContext context, Assembly assembly,
         CancellationToken cancellationToken)
     {
         var verifier = assembly.GetType("Zeka.PersistenceSecurity.RlsSecurityManifestVerifier", true)!;
@@ -298,7 +298,7 @@ internal static class MigrationEngine
         } while (true);
     }
 
-    private static async Task<(string SessionUser, string CurrentUser, bool Restricted, bool MatchingMembership)>
+    internal static async Task<(string SessionUser, string CurrentUser, bool Restricted, bool MatchingMembership)>
         ReadIdentityAsync(NpgsqlConnection connection, ServiceDescriptor descriptor, CancellationToken cancellationToken)
     {
         await using var role = new NpgsqlCommand("""
@@ -338,7 +338,7 @@ internal static class MigrationEngine
         return (session, current, restricted, matching);
     }
 
-    private static async Task<(string SessionUser, string CurrentUser)> ReadUsersAsync(NpgsqlConnection connection,
+    internal static async Task<(string SessionUser, string CurrentUser)> ReadUsersAsync(NpgsqlConnection connection,
         CancellationToken cancellationToken)
     {
         await using var command = new NpgsqlCommand("SELECT session_user,current_user", connection);

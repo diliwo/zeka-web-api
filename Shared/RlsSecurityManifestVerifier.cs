@@ -75,7 +75,8 @@ public static class RlsSecurityManifestVerifier
             || x.EndsWith("rls-manifest.v16.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v17.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v18.json", StringComparison.Ordinal)
-            || x.EndsWith("rls-manifest.v19.json", StringComparison.Ordinal));
+            || x.EndsWith("rls-manifest.v19.json", StringComparison.Ordinal)
+            || x.EndsWith("rls-manifest.v20.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -94,7 +95,9 @@ public static class RlsSecurityManifestVerifier
     public static async Task VerifyAsync(DbContext database, RlsSecurityManifest manifest,
         CancellationToken cancellationToken = default)
     {
-        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19) || database.GetType().FullName != manifest.ModelContext)
+        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19 or 20)
+            || (manifest.SchemaVersion == 20 && manifest.Service != "AuthManagement")
+            || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         var functionDefinitions = FunctionDefinitions(manifest);
         Equal(manifest.RuntimeFunctions, functionDefinitions.Keys,
@@ -764,6 +767,13 @@ public static class RlsSecurityManifestVerifier
                     $"{ObjectKey("public", "BrowserRefreshCredentials")}|ConsumedAtUtc",
                     $"{ObjectKey("public", "BrowserSessionFamilies")}|IdleExpiresAtUtc",
                     $"{ObjectKey("public", "BrowserSessionFamilies")}|RevokedAtUtc"];
+            if (manifest.SchemaVersion >= 20)
+                expectedColumns = [.. expectedColumns,
+                    .. new[] { "Status", "TransitionedAtUtc", "Version" }
+                        .Select(column => $"{ObjectKey("public", "EmailVerificationChallenges")}|{column}"),
+                    .. new[] { "Attempts", "DeliveredAtUtc", "LeaseExpiresAtUtc", "LeaseId", "NextAttemptAtUtc",
+                        "ObsoleteAtAcceptance", "Outcome", "Status", "Version" }
+                        .Select(column => $"{ObjectKey("public", "VerificationMailOutboxMessages")}|{column}")];
             if (manifest.SchemaVersion >= 15)
                 expectedColumns = expectedColumns.Order(StringComparer.Ordinal).ToArray();
             if (!manifest.ColumnPrivileges.Select(state => $"{ObjectKey(state.Object)}|{state.Column}")
@@ -773,6 +783,18 @@ public static class RlsSecurityManifestVerifier
                         manifest.SchemaVersion >= 18 && state.Object == new ManagedObjectIdentity("public", "Organisations")
                             ? new[] { "INSERT", "UPDATE" } : new[] { "UPDATE" }, StringComparer.Ordinal)))
                 throw new InvalidOperationException("Lifecycle column privilege inventory is invalid.");
+            if (manifest.SchemaVersion >= 20)
+            {
+                foreach (var table in new[] { "EmailVerificationChallenges", "OnboardingGrants",
+                             "OnboardingOperationReceipts", "VerificationMailOutboxMessages" })
+                {
+                    var grants = manifest.TablePrivileges
+                        .Where(state => state.Object == new ManagedObjectIdentity("public", table)).ToArray();
+                    if (grants.Length != 1
+                        || !grants[0].Privileges.SequenceEqual(new[] { "INSERT", "SELECT" }, StringComparer.Ordinal))
+                        throw new InvalidOperationException("Onboarding table privileges are invalid.");
+                }
+            }
             if (manifest.SchemaVersion >= 18)
             {
                 var organisationGrants = manifest.TablePrivileges

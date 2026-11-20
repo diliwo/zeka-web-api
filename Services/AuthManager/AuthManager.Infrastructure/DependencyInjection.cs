@@ -14,6 +14,7 @@ using AuthManager.Application.Common.Outbox;
 using AuthManager.Infrastructure.Outbox;
 using AuthManager.Infrastructure.Persistence.Services;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Zeka.PersistenceSecurity;
 using AuthManager.Application.Lifecycle;
@@ -71,6 +72,36 @@ public static class DependencyInjection
             services.AddHostedService<OutboxBackgroundService>();
     }
 
+    public static IServiceCollection AddVerificationRegistration(this IServiceCollection services,
+        IConfiguration configuration, IHostEnvironment environment)
+    {
+        var options = Onboarding.RegistrationOptions.Read(configuration, environment);
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<Onboarding.RegistrationOptions>(_ => options);
+        services.AddSingleton<Onboarding.VerificationTokenService>();
+        services.AddScoped<AuthManager.Application.Onboarding.IRegistrationService, Onboarding.RegistrationService>();
+        if (options.Enabled)
+        {
+            services.AddSingleton<Onboarding.RegistrationReadiness>();
+            services.AddHostedService(provider => provider.GetRequiredService<Onboarding.RegistrationReadiness>());
+            services.AddHealthChecks().AddCheck<RegistrationReadinessHealth>("onboarding-registration", tags: ["ready"]);
+        }
+        if (options.MailpitEnabled)
+        {
+            services.AddScoped<Onboarding.IVerificationMailDelivery, Onboarding.LocalStackMailpitDelivery>();
+            services.AddScoped<Onboarding.VerificationMailDispatcher>();
+            services.AddHostedService<Onboarding.VerificationMailWorker>();
+        }
+        return services;
+    }
+
+    private sealed class RegistrationReadinessHealth(Onboarding.RegistrationReadiness readiness) : IHealthCheck
+    {
+        public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+            => Task.FromResult(readiness.IsReady ? HealthCheckResult.Healthy()
+                : HealthCheckResult.Unhealthy("Onboarding registration unavailable."));
+    }
+
     public static IServiceCollection AddOnboardingPersistenceFoundations(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -90,6 +121,7 @@ public static class DependencyInjection
 
     public static WebApplicationBuilder ConfigureMicrosoftIdentity(this WebApplicationBuilder builder)
     {
+        builder.Services.TryAddScoped<Onboarding.RegistrationIdentityCancellation>();
         builder.Services.AddIdentity<User, IdentityRole<Guid>>(options =>
         {
             options.Password.RequiredLength = 8;
@@ -103,6 +135,7 @@ public static class DependencyInjection
             options.Lockout.MaxFailedAccessAttempts = 3;
         })
         .AddEntityFrameworkStores<AuthDbContext>()
+        .AddUserManager<Onboarding.RegistrationUserManager>()
         .AddDefaultTokenProviders()
         .AddTokenProvider<EmailConfirmationTokenProvider<User>>("emailconfirmation");
 
