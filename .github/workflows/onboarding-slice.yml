@@ -1,0 +1,216 @@
+name: Onboarding slice
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '.github/workflows/onboarding-slice.yml'
+      - 'ApiGateways/Ocelot.ApiGateway/**'
+      - 'Services/AuthManager/**'
+      - 'Services/AdminAreaManagement/AdminAreaManagement.API/TenantAuthentication.cs'
+      - 'Services/ClientManagement/Client.API/**'
+      - 'Services/ClientManagement/Client.Application/**'
+      - 'Shared/**'
+      - 'Directory.Build.props'
+      - 'global.json'
+      - 'scripts/ci/nuget.strict.config'
+      - 'scripts/local/Start-MailpitVerification.ps1'
+
+# This independent application-test job does not replace any required gate.
+permissions: {}
+
+jobs:
+  onboarding:
+    name: Onboarding slice tests
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out the actual pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Install the existing pinned SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+          cache: false
+
+      - name: Restore locked Auth test dependencies in empty caches
+        shell: bash
+        env:
+          PACKAGE_READ_TOKEN: ${{ github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          NUGET_PACKAGES: ${{ runner.temp }}/zek49-onboarding/packages
+          NUGET_HTTP_CACHE_PATH: ${{ runner.temp }}/zek49-onboarding/http
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(dotnet --version)" = 8.0.129
+          test ! -e "$NUGET_PACKAGES" && test ! -e "$NUGET_HTTP_CACHE_PATH"
+          mkdir -p "$NUGET_PACKAGES" "$NUGET_HTTP_CACHE_PATH"
+          NuGetPackageSourceCredentials_github="Username=$PACKAGE_USERNAME;Password=$PACKAGE_READ_TOKEN;ValidAuthenticationTypes=Basic" \
+            dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
+              --locked-mode --no-cache --configfile scripts/ci/nuget.strict.config \
+              -p:Configuration=Release -p:RestorePackagesWithLockFile=true \
+              -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources= \
+              -p:RestoreAdditionalProjectFallbackFolders=
+          git diff --exit-code -- '*.lock.json'
+
+      - name: Build the newly restored test project
+        shell: bash
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/zek49-onboarding/packages
+          NUGET_HTTP_CACHE_PATH: ${{ runner.temp }}/zek49-onboarding/http
+        run: |
+          set -euo pipefail
+          test -z "${PACKAGE_READ_TOKEN+x}${NuGetPackageSourceCredentials_github+x}"
+          dotnet build Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
+            --configuration Release --no-restore --no-incremental
+
+      - name: Execute the 77 focused tests with the owned PostgreSQL 17 fixtures
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          NUGET_PACKAGES: ${{ runner.temp }}/zek49-onboarding/packages
+          NUGET_HTTP_CACHE_PATH: ${{ runner.temp }}/zek49-onboarding/http
+          RESULTS: ${{ runner.temp }}/zek49-onboarding/results
+        run: |
+          set -euo pipefail
+          umask 077
+          test -z "${PACKAGE_READ_TOKEN+x}${NuGetPackageSourceCredentials_github+x}"
+          # Unset means the fixture creates and removes its own protected synthetic key.
+          test -z "${ZEKA_ZEK27_VERIFICATION_KEY_FILE+x}"
+          docker info --format '{{.ServerVersion}}' > /dev/null
+          mkdir -p "$RESULTS/raw" "$RESULTS/artifact"
+          filter='FullyQualifiedName~GatewayLocalStackHealthTests|FullyQualifiedName~VerificationTokenTests|FullyQualifiedName~RegistrationPostgreSqlTests.Another_users_challenge_cannot_be_substituted_and_valid_exchange_confirms_only_its_owner'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Concurrent_registration_has_one_identity_challenge_mail_and_witness'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Failure_after_Identity_autosave_rolls_back_all_enrollment_writes'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Parallel_exchange_and_replay_produce_exactly_one_restricted_grant'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Exact_expiry_is_denied_and_no_tenant_records_or_grant_are_created'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Revoked_challenge_or_suspended_identity_cannot_exchange'
+          filter+='|FullyQualifiedName~BrowserSessionPostgreSqlTests.Sign_in_is_generic_and_never_creates_a_family_for_rejected_users'
+          filter+='|FullyQualifiedName~RegistrationTransportTests.Untrusted_forwarding_bad_origin_and_bad_antiforgery_never_enter_persistence'
+          filter+='|FullyQualifiedName=Infrastructure.IntegrationTests.GatewayBrowserTransportTests.Exact_route_and_credential_matrix_exposes_only_seven_method_path_pairs'
+          filter+='|FullyQualifiedName=Infrastructure.IntegrationTests.GatewayBrowserTransportTests.Registration_route_forwards_exact_contract_and_keeps_gateway_security_boundaries'
+          set +e
+          dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
+            --configuration Release --no-build --no-restore --filter "$filter" \
+            --logger 'trx;LogFileName=onboarding-slice.trx' --results-directory "$RESULTS/raw" \
+            > "$RESULTS/raw/native-output.log" 2>&1
+          native_status=$?
+          set -e
+          export ONBOARDING_NATIVE_EXIT="$native_status"
+          # Never upload provider exceptions or native output: retain validated identities,
+          # Failed outcomes and counters while excluding secret-bearing diagnostic fields.
+          set +e
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          root = pathlib.Path(os.environ['RESULTS'])
+          native = int(os.environ['ONBOARDING_NATIVE_EXIT'])
+          receipt = {
+              'sourceSha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'expectedHead': os.environ['EXPECTED_HEAD'],
+              'runId': os.environ['GITHUB_RUN_ID'],
+              'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'nativeExit': native, 'expectedTests': 77,
+              'verificationKeyInput': 'UNSET_OWNED_FIXTURE_REQUIRED',
+              'status': 'FAIL', 'reason': 'RESULT_EVIDENCE_NOT_VERIFIED',
+              'nestedChildDiagnosticLimit': 'Only existing fixed Gateway wrapper stages are published; nested provider details remain private.'
+          }
+          gateway_cases = (
+              'Infrastructure.IntegrationTests.GatewayBrowserTransportTests.Exact_route_and_credential_matrix_exposes_only_seven_method_path_pairs',
+              'Infrastructure.IntegrationTests.GatewayBrowserTransportTests.Registration_route_forwards_exact_contract_and_keeps_gateway_security_boundaries',
+          )
+          fixed_child_stages = (
+              'gateway-control-child-exit', 'gateway-control-child-native-accounting',
+              'gateway-control-child-method', 'gateway-control-linux-required',
+              'gateway-control-browser-owned-directory-absence', 'gateway-privacy-violation',
+          )
+          try:
+              tree = ET.parse(root / 'raw/onboarding-slice.trx')
+              ns = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
+              rows = tree.findall('t:Results/t:UnitTestResult', ns)
+              counters = tree.find('t:ResultSummary/t:Counters', ns)
+              if counters is None:
+                  raise ValueError('MISSING_COUNTERS')
+              counts = {key: int(counters.get(key, '-1')) for key in
+                        ('total', 'executed', 'passed', 'failed', 'notExecuted')}
+              receipt['counts'] = counts
+              # The artifact excludes Output, ErrorInfo, attachments, paths and all other
+              # native diagnostic content, even when a synthetic test fails.
+              safe = ET.Element('TestRun')
+              results = ET.SubElement(safe, 'Results')
+              for row in rows:
+                  ET.SubElement(results, 'UnitTestResult', {
+                      key: row.get(key, '') for key in
+                      ('testId', 'executionId', 'testName', 'outcome', 'duration')
+                  })
+              ET.SubElement(ET.SubElement(safe, 'ResultSummary'), 'Counters',
+                            {key: str(value) for key, value in counts.items()})
+              ET.ElementTree(safe).write(root / 'artifact/onboarding-slice.trx',
+                                         encoding='utf-8', xml_declaration=True)
+              identities = [(row.get('testId'), row.get('executionId')) for row in rows]
+              groups = {
+                  'gatewayBrowserTransport': sum('GatewayBrowserTransportTests.' in row.get('testName', '') for row in rows),
+                  'gatewayGuards': sum('GatewayLocalStackHealthTests.' in row.get('testName', '') for row in rows),
+                  'verificationTokens': sum('VerificationTokenTests.' in row.get('testName', '') for row in rows),
+                  'registrationPostgreSql': sum('RegistrationPostgreSqlTests.' in row.get('testName', '') for row in rows),
+                  'browserSessionPostgreSql': sum('BrowserSessionPostgreSqlTests.' in row.get('testName', '') for row in rows),
+                  'registrationTransport': sum('RegistrationTransportTests.' in row.get('testName', '') for row in rows),
+                  'twoUserPostgreSql': sum('Another_users_challenge_cannot_be_substituted_and_valid_exchange_confirms_only_its_owner' in row.get('testName', '') for row in rows)
+              }
+              receipt['groups'] = groups
+              gateway_case_counts = {name: sum(row.get('testName') == name for row in rows)
+                                     for name in gateway_cases}
+              receipt['gatewayBrowserCases'] = gateway_case_counts
+              receipt['gatewayFailureStages'] = {}
+              for row in rows:
+                  if row.get('testName') in gateway_cases and row.get('outcome') == 'Failed':
+                      message = row.findtext('t:Output/t:ErrorInfo/t:Message', default='', namespaces=ns)
+                      receipt['gatewayFailureStages'][row.get('testName')] = [
+                          stage for stage in fixed_child_stages if stage in message
+                      ]
+              valid = (receipt['sourceSha'] == receipt['expectedHead'] and native == 0
+                       and counts == {'total': 77, 'executed': 77, 'passed': 77,
+                                      'failed': 0, 'notExecuted': 0}
+                       and groups == {'gatewayBrowserTransport': 2, 'gatewayGuards': 56, 'verificationTokens': 5,
+                                      'registrationPostgreSql': 7, 'browserSessionPostgreSql': 6,
+                                      'registrationTransport': 1, 'twoUserPostgreSql': 1}
+                       and gateway_case_counts == dict.fromkeys(gateway_cases, 1)
+                       and len(rows) == 77 and len(set(identities)) == 77
+                       and all(all(identity) for identity in identities)
+                       and all(row.get('outcome') == 'Passed' for row in rows))
+              receipt['status'] = 'PASS' if valid else 'FAIL'
+              receipt['reason'] = 'COMPLETE_77_TESTS' if valid else 'NATIVE_OR_INVENTORY_MISMATCH'
+          except (ET.ParseError, OSError, ValueError):
+              receipt['reason'] = 'MISSING_OR_MALFORMED_TRX'
+          (root / 'artifact/receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          print(json.dumps(receipt))
+          raise SystemExit(0 if receipt['status'] == 'PASS' else 1)
+          PY
+          evidence_status=$?
+          set -e
+          if (( native_status != 0 )); then exit "$native_status"; fi
+          exit "$evidence_status"
+
+      - name: Upload only safe synthetic outcomes and completion receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: onboarding-slice-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zek49-onboarding/results/artifact/*
+          if-no-files-found: warn
+          retention-days: 7
