@@ -75,7 +75,7 @@ jobs:
           dotnet build Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
             --configuration Release --no-restore --no-incremental
 
-      - name: Execute the 75 focused tests with the owned PostgreSQL 17 fixtures
+      - name: Execute the 77 focused tests with the owned PostgreSQL 17 fixtures
         shell: bash
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -98,6 +98,8 @@ jobs:
           filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Revoked_challenge_or_suspended_identity_cannot_exchange'
           filter+='|FullyQualifiedName~BrowserSessionPostgreSqlTests.Sign_in_is_generic_and_never_creates_a_family_for_rejected_users'
           filter+='|FullyQualifiedName~RegistrationTransportTests.Untrusted_forwarding_bad_origin_and_bad_antiforgery_never_enter_persistence'
+          filter+='|FullyQualifiedName=Infrastructure.IntegrationTests.GatewayBrowserTransportTests.Exact_route_and_credential_matrix_exposes_only_seven_method_path_pairs'
+          filter+='|FullyQualifiedName=Infrastructure.IntegrationTests.GatewayBrowserTransportTests.Registration_route_forwards_exact_contract_and_keeps_gateway_security_boundaries'
           set +e
           dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
             --configuration Release --no-build --no-restore --filter "$filter" \
@@ -123,10 +125,20 @@ jobs:
               'expectedHead': os.environ['EXPECTED_HEAD'],
               'runId': os.environ['GITHUB_RUN_ID'],
               'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'],
-              'nativeExit': native, 'expectedTests': 75,
+              'nativeExit': native, 'expectedTests': 77,
               'verificationKeyInput': 'UNSET_OWNED_FIXTURE_REQUIRED',
-              'status': 'FAIL', 'reason': 'RESULT_EVIDENCE_NOT_VERIFIED'
+              'status': 'FAIL', 'reason': 'RESULT_EVIDENCE_NOT_VERIFIED',
+              'nestedChildDiagnosticLimit': 'Only existing fixed Gateway wrapper stages are published; nested provider details remain private.'
           }
+          gateway_cases = (
+              'Infrastructure.IntegrationTests.GatewayBrowserTransportTests.Exact_route_and_credential_matrix_exposes_only_seven_method_path_pairs',
+              'Infrastructure.IntegrationTests.GatewayBrowserTransportTests.Registration_route_forwards_exact_contract_and_keeps_gateway_security_boundaries',
+          )
+          fixed_child_stages = (
+              'gateway-control-child-exit', 'gateway-control-child-native-accounting',
+              'gateway-control-child-method', 'gateway-control-linux-required',
+              'gateway-control-browser-owned-directory-absence', 'gateway-privacy-violation',
+          )
           try:
               tree = ET.parse(root / 'raw/onboarding-slice.trx')
               ns = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
@@ -152,6 +164,7 @@ jobs:
                                          encoding='utf-8', xml_declaration=True)
               identities = [(row.get('testId'), row.get('executionId')) for row in rows]
               groups = {
+                  'gatewayBrowserTransport': sum('GatewayBrowserTransportTests.' in row.get('testName', '') for row in rows),
                   'gatewayGuards': sum('GatewayLocalStackHealthTests.' in row.get('testName', '') for row in rows),
                   'verificationTokens': sum('VerificationTokenTests.' in row.get('testName', '') for row in rows),
                   'registrationPostgreSql': sum('RegistrationPostgreSqlTests.' in row.get('testName', '') for row in rows),
@@ -160,17 +173,28 @@ jobs:
                   'twoUserPostgreSql': sum('Another_users_challenge_cannot_be_substituted_and_valid_exchange_confirms_only_its_owner' in row.get('testName', '') for row in rows)
               }
               receipt['groups'] = groups
+              gateway_case_counts = {name: sum(row.get('testName') == name for row in rows)
+                                     for name in gateway_cases}
+              receipt['gatewayBrowserCases'] = gateway_case_counts
+              receipt['gatewayFailureStages'] = {}
+              for row in rows:
+                  if row.get('testName') in gateway_cases and row.get('outcome') == 'Failed':
+                      message = row.findtext('t:Output/t:ErrorInfo/t:Message', default='', namespaces=ns)
+                      receipt['gatewayFailureStages'][row.get('testName')] = [
+                          stage for stage in fixed_child_stages if stage in message
+                      ]
               valid = (receipt['sourceSha'] == receipt['expectedHead'] and native == 0
-                       and counts == {'total': 75, 'executed': 75, 'passed': 75,
+                       and counts == {'total': 77, 'executed': 77, 'passed': 77,
                                       'failed': 0, 'notExecuted': 0}
-                       and groups == {'gatewayGuards': 56, 'verificationTokens': 5,
+                       and groups == {'gatewayBrowserTransport': 2, 'gatewayGuards': 56, 'verificationTokens': 5,
                                       'registrationPostgreSql': 7, 'browserSessionPostgreSql': 6,
                                       'registrationTransport': 1, 'twoUserPostgreSql': 1}
-                       and len(rows) == 75 and len(set(identities)) == 75
+                       and gateway_case_counts == dict.fromkeys(gateway_cases, 1)
+                       and len(rows) == 77 and len(set(identities)) == 77
                        and all(all(identity) for identity in identities)
                        and all(row.get('outcome') == 'Passed' for row in rows))
               receipt['status'] = 'PASS' if valid else 'FAIL'
-              receipt['reason'] = 'COMPLETE_75_TESTS' if valid else 'NATIVE_OR_INVENTORY_MISMATCH'
+              receipt['reason'] = 'COMPLETE_77_TESTS' if valid else 'NATIVE_OR_INVENTORY_MISMATCH'
           except (ET.ParseError, OSError, ValueError):
               receipt['reason'] = 'MISSING_OR_MALFORMED_TRX'
           (root / 'artifact/receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
