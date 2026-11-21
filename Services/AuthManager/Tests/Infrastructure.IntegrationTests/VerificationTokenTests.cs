@@ -71,6 +71,22 @@ public sealed class VerificationTokenTests
     }
 
     [Fact]
+    public void Token_cannot_be_rebound_to_another_Identity_user_even_with_the_original_stored_hash()
+    {
+        using var input = new TokenInputs();
+        using var options = input.Options("v");
+        var tokens = new VerificationTokenService(options);
+        var original = Challenge("v");
+        var token = tokens.Create(original)!;
+        original.TokenHash = VerificationTokenService.TokenHash(token);
+        var otherUser = Challenge("v", userId: Guid.NewGuid());
+        otherUser.TokenHash = original.TokenHash;
+
+        Assert.True(tokens.Matches(original, token));
+        Assert.False(tokens.Matches(otherUser, token));
+    }
+
+    [Fact]
     public void Unknown_active_key_or_production_mailpit_fails_closed()
     {
         using var input = new TokenInputs();
@@ -78,11 +94,11 @@ public sealed class VerificationTokenTests
         Assert.Throws<InvalidOperationException>(() => input.Options("v", environment: "Production", mailpit: true));
     }
 
-    private static EmailVerificationChallenge Challenge(string key, char address = 'A', char stamp = 'B', int expiryOffsetMs = 0)
+    private static EmailVerificationChallenge Challenge(string key, char address = 'A', char stamp = 'B', int expiryOffsetMs = 0, Guid? userId = null)
         => new()
         {
             Id = Guid.Parse("11111111-1111-4111-8111-111111111111"),
-            UserId = Guid.Parse("22222222-2222-4222-8222-222222222222"),
+            UserId = userId ?? Guid.Parse("22222222-2222-4222-8222-222222222222"),
             Generation = 7, KeyId = key, AddressBinding = new(address, 64), StampBinding = new(stamp, 64),
             TokenHash = string.Empty, CreatedAtUtc = DateTimeOffset.UnixEpoch,
             ExpiresAtUtc = DateTimeOffset.UnixEpoch.AddHours(24).AddMilliseconds(expiryOffsetMs)

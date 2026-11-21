@@ -1,5 +1,7 @@
 using System.Data.Common;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using AuthManager.Application.Onboarding;
 using AuthManager.Core.Enums;
@@ -112,6 +114,63 @@ public sealed class RegistrationPostgreSqlTests(RegistrationPostgreSqlFixture fi
             "TenantSession", CancellationToken.None)));
         Assert.Equal(0, await db.BrowserSessionFamilies.CountAsync());
         Assert.Equal(0, await db.OrganisationMemberships.CountAsync());
+    }
+
+    [Fact]
+    public async Task Another_users_challenge_cannot_be_substituted_and_valid_exchange_confirms_only_its_owner()
+    {
+        await using var test = await fixture.PrepareAsync();
+        var firstInput = Input("first-" + Guid.NewGuid().ToString("N") + "@example.invalid");
+        var secondInput = Input("second-" + Guid.NewGuid().ToString("N") + "@example.invalid");
+        Assert.Equal(RegistrationOutcome.Accepted,
+            await test.Run(service => service.RegisterAsync(firstInput, CancellationToken.None)));
+        Assert.Equal(RegistrationOutcome.Accepted,
+            await test.Run(service => service.RegisterAsync(secondInput, CancellationToken.None)));
+
+        await using var db = test.Read();
+        var firstUser = await db.Users.AsNoTracking().SingleAsync(user => user.Email == firstInput.Email);
+        var secondUser = await db.Users.AsNoTracking().SingleAsync(user => user.Email == secondInput.Email);
+        var secondChallenge = await db.EmailVerificationChallenges.AsNoTracking()
+            .SingleAsync(challenge => challenge.UserId == secondUser.Id);
+        var firstToken = await test.CurrentToken(firstUser.Id);
+        var secondToken = await test.CurrentToken(secondUser.Id);
+        var substituted = firstToken.Split('.');
+        Assert.Equal(5, substituted.Length);
+        substituted[2] = secondChallenge.Id.ToString("N");
+
+        var invalid = await test.Run(service => service.ExchangeAsync(string.Join('.', substituted), CancellationToken.None));
+        Assert.Equal(RegistrationOutcome.Invalid, invalid.Outcome);
+        Assert.Null(invalid.Credential);
+        Assert.All(await db.Users.AsNoTracking().ToListAsync(), user =>
+        {
+            Assert.False(user.EmailConfirmed);
+            Assert.Equal(UserStatus.PendingVerification, user.Status);
+        });
+        Assert.Equal(2, await db.EmailVerificationChallenges.CountAsync(challenge => challenge.Status == VerificationChallengeState.Pending));
+        Assert.Equal(0, await db.OnboardingGrants.CountAsync());
+
+        // Exchange is anonymous: a genuine token confirms its own Identity user, not a selected browser user.
+        var confirmed = await test.Run(service => service.ExchangeAsync(secondToken, CancellationToken.None));
+        Assert.Equal(RegistrationOutcome.Accepted, confirmed.Outcome);
+        Assert.NotNull(confirmed.Credential);
+        var untouched = await db.Users.AsNoTracking().SingleAsync(user => user.Id == firstUser.Id);
+        var verified = await db.Users.AsNoTracking().SingleAsync(user => user.Id == secondUser.Id);
+        Assert.False(untouched.EmailConfirmed);
+        Assert.Equal(UserStatus.PendingVerification, untouched.Status);
+        Assert.True(verified.EmailConfirmed);
+        Assert.Equal(UserStatus.Active, verified.Status);
+        var grant = await db.OnboardingGrants.AsNoTracking().SingleAsync();
+        Assert.Equal(secondUser.Id, grant.UserId);
+        Assert.Equal(secondChallenge.Id, grant.ChallengeId);
+        Assert.Equal(VerificationTokenService.GrantHash(confirmed.Credential!), grant.CredentialHash);
+        Assert.Equal(VerificationChallengeState.Pending, (await db.EmailVerificationChallenges.AsNoTracking()
+            .SingleAsync(challenge => challenge.UserId == firstUser.Id)).Status);
+        Assert.Equal(VerificationChallengeState.Consumed, (await db.EmailVerificationChallenges.AsNoTracking()
+            .SingleAsync(challenge => challenge.UserId == secondUser.Id)).Status);
+        Assert.Equal(3, await db.OnboardingOperationReceipts.CountAsync());
+        Assert.Equal(0, await db.OrganisationMemberships.CountAsync());
+        Assert.Equal(0, await db.Organisations.CountAsync());
+        Assert.Equal(0, await db.BrowserSessionFamilies.CountAsync());
     }
 
     [Theory]
@@ -623,11 +682,16 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
     private readonly string runtimeCredential = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private IContainer database = null!;
     private string keyPath = null!;
+    private DirectoryInfo? ownedKeyDirectory;
+    private string? ownedKeyPath;
 
     public async Task InitializeAsync()
     {
+        try
+        {
+        // Hosted/disposable tests own their input when no explicit protected file was supplied.
         keyPath = Environment.GetEnvironmentVariable("ZEKA_ZEK27_VERIFICATION_KEY_FILE")
-            ?? throw new InvalidOperationException("ZEK27_PROTECTED_VERIFICATION_KEY_FILE_REQUIRED");
+            ?? CreateOwnedVerificationKey();
         if (!Path.IsPathFullyQualified(keyPath) || !File.Exists(keyPath))
             throw new InvalidOperationException("ZEK27_VERIFICATION_KEY_PATH_REJECTED");
 
@@ -655,11 +719,105 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
         await connection.OpenAsync(startup.Token);
         await using var version = new NpgsqlCommand("SHOW server_version_num", connection);
         Assert.StartsWith("17", (string)(await version.ExecuteScalarAsync(startup.Token))!);
+        }
+        catch
+        {
+            DeleteOwnedVerificationKey();
+            throw;
+        }
     }
 
     public async Task DisposeAsync()
     {
-        if (database is not null) await database.DisposeAsync();
+        try { if (database is not null) await database.DisposeAsync(); }
+        finally { DeleteOwnedVerificationKey(); }
+    }
+
+    private string CreateOwnedVerificationKey()
+    {
+        ownedKeyDirectory = Directory.CreateTempSubdirectory("zeka-zek49-verification-");
+        ownedKeyPath = Path.Combine(ownedKeyDirectory.FullName, "verification.key");
+        if (OperatingSystem.IsWindows())
+            RestrictWindowsKeyDirectory(ownedKeyDirectory);
+        else if (OperatingSystem.IsLinux())
+        {
+            File.SetUnixFileMode(ownedKeyDirectory.FullName, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                File.GetUnixFileMode(ownedKeyDirectory.FullName));
+        }
+        else throw new InvalidOperationException("VERIFICATION_FIXTURE_KEY_PLATFORM_UNSUPPORTED");
+
+        var file = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+        if (OperatingSystem.IsLinux()) file.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using var stream = new FileStream(ownedKeyPath, file);
+        if (OperatingSystem.IsWindows()) VerifyWindowsKeyAccess(stream.GetAccessControl());
+        else if (OperatingSystem.IsLinux())
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(ownedKeyPath));
+        var material = RandomNumberGenerator.GetBytes(32);
+        try { stream.Write(material); }
+        finally { CryptographicOperations.ZeroMemory(material); }
+        return ownedKeyPath;
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void RestrictWindowsKeyDirectory(DirectoryInfo directory)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var owner = identity.User ?? throw new InvalidOperationException("VERIFICATION_FIXTURE_OWNER_UNAVAILABLE");
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(owner);
+        foreach (var principal in new[] { owner, system })
+            security.AddAccessRule(new FileSystemAccessRule(principal, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        directory.SetAccessControl(security);
+        var actual = directory.GetAccessControl();
+        Assert.True(actual.AreAccessRulesProtected);
+        VerifyWindowsKeyAccess(actual);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void VerifyWindowsKeyAccess(FileSystemSecurity security)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var owner = identity.User ?? throw new InvalidOperationException("VERIFICATION_FIXTURE_OWNER_UNAVAILABLE");
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        Assert.Equal(owner, security.GetOwner(typeof(SecurityIdentifier)));
+        var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
+            .Cast<FileSystemAccessRule>().ToArray();
+        Assert.Equal(2, rules.Length);
+        Assert.All(rules, rule =>
+        {
+            Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+            Assert.Equal(FileSystemRights.FullControl, rule.FileSystemRights);
+            Assert.True(rule.IdentityReference.Equals(owner) || rule.IdentityReference.Equals(system));
+        });
+    }
+
+    private void DeleteOwnedVerificationKey()
+    {
+        if (ownedKeyDirectory is null) return; // Explicit externally supplied keys are never owned or removed.
+        var directory = Path.GetFullPath(ownedKeyDirectory.FullName);
+        var tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!directory.StartsWith(tempRoot + Path.DirectorySeparatorChar, comparison)
+            || Path.GetDirectoryName(ownedKeyPath) != directory)
+            throw new InvalidOperationException("VERIFICATION_FIXTURE_KEY_CLEANUP_BOUNDARY_REJECTED");
+        if (Directory.Exists(directory))
+        {
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("VERIFICATION_FIXTURE_KEY_CLEANUP_REPARSE_REJECTED");
+            if (File.Exists(ownedKeyPath))
+            {
+                if ((File.GetAttributes(ownedKeyPath) & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException("VERIFICATION_FIXTURE_KEY_CLEANUP_REPARSE_REJECTED");
+                File.Delete(ownedKeyPath);
+            }
+            ownedKeyDirectory.Delete(recursive: false);
+        }
+        ownedKeyDirectory = null;
+        ownedKeyPath = null;
     }
 
     internal async Task<string> CreateEmptyDatabaseRuntimeAsync()
@@ -794,11 +952,13 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
             return await operation((RegistrationService)scope.ServiceProvider.GetRequiredService<IRegistrationService>());
         }
 
-        public async Task<string> CurrentToken()
+        public async Task<string> CurrentToken(Guid? userId = null)
         {
             await using var db = Read();
-            var row = await db.EmailVerificationChallenges.AsNoTracking()
-                .SingleAsync(item => item.Status == VerificationChallengeState.Pending);
+            var challenges = db.EmailVerificationChallenges.AsNoTracking()
+                .Where(item => item.Status == VerificationChallengeState.Pending);
+            if (userId is { } selectedUser) challenges = challenges.Where(item => item.UserId == selectedUser);
+            var row = await challenges.SingleAsync();
             return services.GetRequiredService<VerificationTokenService>().Create(row)!;
         }
 
