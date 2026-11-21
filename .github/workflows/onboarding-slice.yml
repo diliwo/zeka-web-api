@@ -75,7 +75,7 @@ jobs:
           dotnet build Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
             --configuration Release --no-restore --no-incremental
 
-      - name: Execute the 62 focused tests with the owned PostgreSQL 17 fixture
+      - name: Execute the 75 focused tests with the owned PostgreSQL 17 fixtures
         shell: bash
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -91,6 +91,13 @@ jobs:
           docker info --format '{{.ServerVersion}}' > /dev/null
           mkdir -p "$RESULTS/raw" "$RESULTS/artifact"
           filter='FullyQualifiedName~GatewayLocalStackHealthTests|FullyQualifiedName~VerificationTokenTests|FullyQualifiedName~RegistrationPostgreSqlTests.Another_users_challenge_cannot_be_substituted_and_valid_exchange_confirms_only_its_owner'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Concurrent_registration_has_one_identity_challenge_mail_and_witness'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Failure_after_Identity_autosave_rolls_back_all_enrollment_writes'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Parallel_exchange_and_replay_produce_exactly_one_restricted_grant'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Exact_expiry_is_denied_and_no_tenant_records_or_grant_are_created'
+          filter+='|FullyQualifiedName~RegistrationPostgreSqlTests.Revoked_challenge_or_suspended_identity_cannot_exchange'
+          filter+='|FullyQualifiedName~BrowserSessionPostgreSqlTests.Sign_in_is_generic_and_never_creates_a_family_for_rejected_users'
+          filter+='|FullyQualifiedName~RegistrationTransportTests.Untrusted_forwarding_bad_origin_and_bad_antiforgery_never_enter_persistence'
           set +e
           dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
             --configuration Release --no-build --no-restore --filter "$filter" \
@@ -116,7 +123,7 @@ jobs:
               'expectedHead': os.environ['EXPECTED_HEAD'],
               'runId': os.environ['GITHUB_RUN_ID'],
               'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'],
-              'nativeExit': native, 'expectedTests': 62,
+              'nativeExit': native, 'expectedTests': 75,
               'verificationKeyInput': 'UNSET_OWNED_FIXTURE_REQUIRED',
               'status': 'FAIL', 'reason': 'RESULT_EVIDENCE_NOT_VERIFIED'
           }
@@ -147,18 +154,23 @@ jobs:
               groups = {
                   'gatewayGuards': sum('GatewayLocalStackHealthTests.' in row.get('testName', '') for row in rows),
                   'verificationTokens': sum('VerificationTokenTests.' in row.get('testName', '') for row in rows),
+                  'registrationPostgreSql': sum('RegistrationPostgreSqlTests.' in row.get('testName', '') for row in rows),
+                  'browserSessionPostgreSql': sum('BrowserSessionPostgreSqlTests.' in row.get('testName', '') for row in rows),
+                  'registrationTransport': sum('RegistrationTransportTests.' in row.get('testName', '') for row in rows),
                   'twoUserPostgreSql': sum('Another_users_challenge_cannot_be_substituted_and_valid_exchange_confirms_only_its_owner' in row.get('testName', '') for row in rows)
               }
               receipt['groups'] = groups
               valid = (receipt['sourceSha'] == receipt['expectedHead'] and native == 0
-                       and counts == {'total': 62, 'executed': 62, 'passed': 62,
+                       and counts == {'total': 75, 'executed': 75, 'passed': 75,
                                       'failed': 0, 'notExecuted': 0}
-                       and groups == {'gatewayGuards': 56, 'verificationTokens': 5, 'twoUserPostgreSql': 1}
-                       and len(rows) == 62 and len(set(identities)) == 62
+                       and groups == {'gatewayGuards': 56, 'verificationTokens': 5,
+                                      'registrationPostgreSql': 7, 'browserSessionPostgreSql': 6,
+                                      'registrationTransport': 1, 'twoUserPostgreSql': 1}
+                       and len(rows) == 75 and len(set(identities)) == 75
                        and all(all(identity) for identity in identities)
                        and all(row.get('outcome') == 'Passed' for row in rows))
               receipt['status'] = 'PASS' if valid else 'FAIL'
-              receipt['reason'] = 'COMPLETE_62_TESTS' if valid else 'NATIVE_OR_INVENTORY_MISMATCH'
+              receipt['reason'] = 'COMPLETE_75_TESTS' if valid else 'NATIVE_OR_INVENTORY_MISMATCH'
           except (ET.ParseError, OSError, ValueError):
               receipt['reason'] = 'MISSING_OR_MALFORMED_TRX'
           (root / 'artifact/receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
