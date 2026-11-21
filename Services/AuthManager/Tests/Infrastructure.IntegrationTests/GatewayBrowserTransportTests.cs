@@ -52,6 +52,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     private const string Origin = "https://browser.example.invalid";
     private const string Session = "/api/v1/browser-session/";
     private const string Eligible = "/api/v1/browser-organisations/eligible";
+    private const string Registration = Session + "onboarding/registrations";
     private const string Password = "Synthetic-Only!89";
 
     [Theory]
@@ -110,15 +111,15 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     }
 
     [Fact]
-    public async Task Exact_route_and_credential_matrix_exposes_only_six_method_path_pairs()
+    public async Task Exact_route_and_credential_matrix_exposes_only_seven_method_path_pairs()
     {
-        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Exact_route_and_credential_matrix_exposes_only_six_method_path_pairs), new object?[] {  }, output)) return;
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Exact_route_and_credential_matrix_exposes_only_seven_method_path_pairs), new object?[] {  }, output)) return;
         await using var host = await StartAsync();
         var token = await host.SignInAsync("ada");
-        var paths = new[] { Session + "csrf", Session + "sign-in", Session + "restore", Session + "logout", Eligible, "/api/v1/tenant-access/" + host.Alpha };
+        var paths = new[] { Session + "csrf", Session + "sign-in", Session + "restore", Session + "logout", Eligible, "/api/v1/tenant-access/" + host.Alpha, Registration };
         for (var index = 0; index < paths.Length; index++)
         {
-            var right = index is 1 or 2 or 3 ? HttpMethod.Post : HttpMethod.Get;
+            var right = index is 1 or 2 or 3 or 6 ? HttpMethod.Post : HttpMethod.Get;
             foreach (var wrong in new[] { HttpMethod.Get, HttpMethod.Post, HttpMethod.Put, HttpMethod.Delete, HttpMethod.Options, HttpMethod.Head }.Where(x => x != right))
             {
                 using var response = await host.ObserveOrdinaryAsync($"method-{index}-{wrong.Method}", paths[index], output, wrong);
@@ -167,7 +168,48 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
         // Existing legacy route templates are untouched and still participate in the actual gateway.
         await host.AssertLegacyForwardingAsync(output);
         Assert.Contains(host.Gateway.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<FileConfiguration>>().Value.Routes, x => x.UpstreamPathTemplate == "/login");
-        output.WriteLine("six_method_path_matrix=true origin_csrf_and_credential_negatives=true internal_routes_closed=true final_assertions=true");
+        output.WriteLine("seven_method_path_matrix=true origin_csrf_and_credential_negatives=true internal_routes_closed=true final_assertions=true");
+    }
+
+    [Fact]
+    public async Task Registration_route_forwards_exact_contract_and_keeps_gateway_security_boundaries()
+    {
+        if (await GatewayLinuxValidation.RunCaseAsync(nameof(Registration_route_forwards_exact_contract_and_keeps_gateway_security_boundaries), new object?[] { }, output)) return;
+        await using var host = await StartAsync();
+        var csrf = await host.CsrfAsync();
+        var body = JsonSerializer.Serialize(new { email = "registration-" + Guid.NewGuid().ToString("N") + "@example.invalid", password = Password, firstName = "Gateway", lastName = "Fictional" });
+        using (var response = await host.PostAsync("onboarding/registrations", csrf, body: body))
+        {
+            // This host intentionally leaves registration readiness unconfigured. A real Auth
+            // refusal proves transport, not successful registration; runtime admission is separate.
+            await Error(response, HttpStatusCode.ServiceUnavailable);
+        }
+        var forwarded = Assert.Single(host.Received.Where(request => request.Path == Registration));
+        Assert.Equal(body, forwarded.Body);
+        Assert.Equal("application/json; charset=utf-8", forwarded.ContentType);
+        Assert.Equal(Origin, forwarded.Origin);
+        Assert.Equal(csrf, forwarded.Csrf);
+        Assert.Contains("__Secure-ZekaCSRF=", forwarded.Cookie);
+        Assert.Equal("127.0.0.2", forwarded.Client);
+
+        using (var denied = await host.PostAsync("onboarding/registrations", csrf, origin: "https://unapproved.example.invalid", body: body))
+            await Error(denied, HttpStatusCode.Forbidden);
+        foreach (var name in new[] { "Forwarded", "X-Forwarded-For", "X-Forwarded-Proto", "X-Original-For" })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, Registration) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            request.Headers.Add("Origin", Origin);
+            request.Headers.Add("X-Zeka-CSRF", csrf);
+            request.Headers.Add(name, "forged");
+            using var denied = await host.Http.SendAsync(request);
+            await Error(denied, HttpStatusCode.ServiceUnavailable);
+        }
+        using (var denied = await host.PostAsync("onboarding/registrations/resend", csrf, body: body))
+            await Error(denied, HttpStatusCode.NotFound);
+        using (var denied = await host.GetAsync(Registration))
+            await Error(denied, HttpStatusCode.NotFound);
+        Assert.Single(host.Received.Where(request => request.Path.StartsWith(Registration, StringComparison.Ordinal)));
+        Assert.NotEmpty(await host.CsrfAsync()); // The existing browser-session route remains available.
+        output.WriteLine("registration_exact_transport=true genuine_auth_readiness_refusal=true registration_success_not_claimed=true origin_forwarding_and_unapproved_routes_rejected=true final_assertions=true");
     }
 
     [Fact]

@@ -93,6 +93,10 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
     public DbSet<BrowserSessionFamily> BrowserSessionFamilies => Set<BrowserSessionFamily>();
     public DbSet<BrowserRefreshCredential> BrowserRefreshCredentials => Set<BrowserRefreshCredential>();
+    public DbSet<EmailVerificationChallenge> EmailVerificationChallenges => Set<EmailVerificationChallenge>();
+    public DbSet<OnboardingGrant> OnboardingGrants => Set<OnboardingGrant>();
+    public DbSet<VerificationMailOutboxMessage> VerificationMailOutboxMessages => Set<VerificationMailOutboxMessage>();
+    public DbSet<OnboardingOperationReceipt> OnboardingOperationReceipts => Set<OnboardingOperationReceipt>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<Organisation> Organisations => Set<Organisation>();
     public DbSet<TimeZoneConfigurationAudit> TimeZoneConfigurationAudits => Set<TimeZoneConfigurationAudit>();
@@ -125,6 +129,11 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
         BrowserSessionConfiguration.Configure(modelBuilder);
         Lifecycle.LifecycleMapping.Configure(modelBuilder, this);
         modelBuilder.ApplyConfiguration(new UserConfiguration());
+        var registration = new OnboardingRegistrationConfiguration();
+        modelBuilder.ApplyConfiguration<EmailVerificationChallenge>(registration);
+        modelBuilder.ApplyConfiguration<VerificationMailOutboxMessage>(registration);
+        modelBuilder.ApplyConfiguration<OnboardingGrant>(registration);
+        modelBuilder.ApplyConfiguration<OnboardingOperationReceipt>(registration);
         modelBuilder.ApplyConfiguration(new IdempotencyRecordConfiguration());
         modelBuilder.ApplyConfiguration(new AuditEntryConfiguration());
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());

@@ -189,6 +189,46 @@ BEGIN
     GRANT UPDATE ("ConsumedAtUtc") ON public."BrowserRefreshCredentials" TO zeka_auth_runtime;
   END IF;
 END $browser_session_runtime$;
+-- Verification enrollment is platform-scoped Auth data. Limit mutable columns explicitly.
+DO $onboarding_registration_runtime$
+DECLARE
+  object_name text;
+  object_id oid;
+  owner_id oid;
+  column_grant record;
+BEGIN
+  FOREACH object_name IN ARRAY ARRAY['EmailVerificationChallenges','VerificationMailOutboxMessages',
+      'OnboardingGrants','OnboardingOperationReceipts']
+  LOOP
+    SELECT c.oid, c.relowner INTO object_id, owner_id
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relname=object_name AND c.relkind='r';
+    IF object_id IS NULL THEN CONTINUE; END IF;
+    -- Table-level REVOKE does not clear a prior column ACL.
+    FOR column_grant IN
+      SELECT DISTINCT a.attname, expanded.grantee
+      FROM pg_catalog.pg_attribute a
+      CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) expanded
+      WHERE a.attrelid=object_id AND NOT a.attisdropped AND expanded.grantee<>owner_id
+    LOOP
+      EXECUTE pg_catalog.format('REVOKE ALL (%I) ON TABLE public.%I FROM %s CASCADE',
+        column_grant.attname, object_name,
+        CASE WHEN column_grant.grantee=0 THEN 'PUBLIC'
+          ELSE pg_catalog.quote_ident(pg_catalog.pg_get_userbyid(column_grant.grantee)) END);
+    END LOOP;
+    EXECUTE pg_catalog.format('GRANT SELECT, INSERT ON TABLE public.%I TO zeka_auth_runtime', object_name);
+  END LOOP;
+  IF pg_catalog.to_regclass('public."EmailVerificationChallenges"') IS NOT NULL THEN
+    GRANT UPDATE ("Status", "TransitionedAtUtc", "Version")
+      ON public."EmailVerificationChallenges" TO zeka_auth_runtime;
+  END IF;
+  IF pg_catalog.to_regclass('public."VerificationMailOutboxMessages"') IS NOT NULL THEN
+    GRANT UPDATE ("Status", "LeaseId", "LeaseExpiresAtUtc", "Attempts", "NextAttemptAtUtc",
+      "DeliveredAtUtc", "ObsoleteAtAcceptance", "Outcome", "Version")
+      ON public."VerificationMailOutboxMessages" TO zeka_auth_runtime;
+  END IF;
+END $onboarding_registration_runtime$;
 -- Organisation configuration is owner-controlled. Reconcile the ordinary runtime to
 -- the pre-timezone column inventory, including after a repeated bootstrap run.
 DO $organisation_runtime_columns$

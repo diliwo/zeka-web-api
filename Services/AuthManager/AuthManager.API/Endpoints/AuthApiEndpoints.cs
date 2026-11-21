@@ -1,44 +1,26 @@
-﻿using AuthManager.API.Filters;
-using AuthManager.Application.Authentication.Models;
-using AuthManager.Application.Common.Interfaces;
-using Microsoft.AspNetCore.Mvc;
-
 namespace AuthManager.API.Endpoints;
 
 public static class AuthApiEndpoints
 {
     public static void RegisterEndpoints(this IEndpointRouteBuilder routeBuilder)
     {
-        // Helpful for the API documentation.
-        var group = routeBuilder.MapGroup("auth")
-        .WithTags("Authentication");
-
-        group.MapPost("register", async (
-            [FromBody] RegisterUserRequest request,
-            [FromServices] IServiceManager serviceManager,
-            CancellationToken cancellationToken) =>
-        {
-            var result = await serviceManager.AuthenticationService
-                .RegisterUserAsync(request, cancellationToken);
-
-            if (!result.Succeeded)
+        routeBuilder.MapGroup("auth").WithTags("Authentication")
+            .MapPost("register", (HttpContext http) =>
             {
-                var errorsDict = new Dictionary<string, string[]>
-                {
-                    {
-                        "user-validation errors",
-                        result.Errors.ToArray()
-                    }
-                };
-
-                return Results.ValidationProblem(errorsDict);
-            }
-
-            return Results.Created();
-        })
-        .AddEndpointFilter<ValidationFilter<RegisterUserRequest>>()
-        .Produces(StatusCodes.Status201Created)
-        .Produces(StatusCodes.Status400BadRequest)
-        .ProducesValidationProblem(StatusCodes.Status422UnprocessableEntity);
+                http.Response.Headers.CacheControl = "no-store";
+                return Results.StatusCode(StatusCodes.Status410Gone);
+            })
+            .WithMetadata(new RetiredRegistration())
+            .AllowAnonymous()
+            .Produces(StatusCodes.Status410Gone);
     }
+
+    public static void UseAuthHttpsRedirection(this WebApplication app)
+    {
+        // Retired registration must never redirect a submitted request body.
+        app.UseWhen(context => context.GetEndpoint()?.Metadata.GetMetadata<RetiredRegistration>() is null,
+            branch => branch.UseHttpsRedirection());
+    }
+
+    private sealed class RetiredRegistration;
 }
