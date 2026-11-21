@@ -91,9 +91,23 @@ $client = [Net.Http.HttpClient]::new($handler)
 $client.Timeout = [TimeSpan]::FromSeconds(10)
 try {
     foreach ($path in '/health/live', '/health/ready') {
-        $response = $client.GetAsync('https://gateway.discovery-4070192a.zeka-m1.test:24446' + $path).GetAwaiter().GetResult()
-        try { if ([int]$response.StatusCode -ne 200) { throw ('GATEWAY_NOT_READY: ' + $path) } }
-        finally { $response.Dispose() }
+        # A recreated Gateway may not yet be listening. Retry only this public,
+        # read-only readiness probe; every connection still validates HTTPS.
+        $ready = $false
+        for ($attempt = 0; $attempt -lt 10; $attempt++) {
+            $response = $null
+            try {
+                $response = $client.GetAsync('https://gateway.discovery-4070192a.zeka-m1.test:24446' + $path).GetAwaiter().GetResult()
+                $ready = [int]$response.StatusCode -eq 200
+            } catch [Net.Http.HttpRequestException] {
+                $ready = $false
+            } finally {
+                if ($null -ne $response) { $response.Dispose() }
+            }
+            if ($ready) { break }
+            if ($attempt -lt 9) { Start-Sleep -Seconds 1 }
+        }
+        if (!$ready) { throw ('GATEWAY_NOT_READY: ' + $path) }
     }
 } finally { $client.Dispose(); $handler.Dispose() }
 
