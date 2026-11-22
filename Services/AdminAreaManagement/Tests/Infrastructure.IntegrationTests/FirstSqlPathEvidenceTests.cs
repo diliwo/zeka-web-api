@@ -99,6 +99,13 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.Empty(evidence.Snapshot());
+
+        var deniedWrite = await client.PostAsJsonAsync("/api/Teams", new { Name = "Authority denial", Acronym = "ADN" });
+
+        Assert.Equal(HttpStatusCode.Forbidden, deniedWrite.StatusCode);
+        Assert.Empty(await deniedWrite.Content.ReadAsStringAsync());
+        Assert.Empty(evidence.Snapshot());
+        Assert.Equal(0, await CountTeamsAsync(organisation, "Authority denial"));
     }
 
     [Fact]
@@ -130,7 +137,8 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
 
         var response = await client.PostAsJsonAsync("/api/Teams", new { Name = "Grant conflict", Acronym = "GRC" });
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Empty(await response.Content.ReadAsStringAsync());
         Assert.Empty(evidence.Snapshot());
         Assert.Equal(0, await CountTeamsAsync(authorizedOrganisation, "Grant conflict"));
         Assert.Equal(0, await CountTeamsAsync(headerOrganisation, "Grant conflict"));

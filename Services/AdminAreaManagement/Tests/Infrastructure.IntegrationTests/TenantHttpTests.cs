@@ -110,10 +110,15 @@ public sealed class TenantHttpTests
                 SubjectId = invalid == "subject" ? "other" : "subject",
                 OrganisationId = invalid == "organisation" ? Guid.NewGuid() : organisation,
                 OrganisationMembershipId = Guid.NewGuid(), DecisionVersion = "1", ObservedAtUtc = DateTimeOffset.UtcNow,
-                EffectivePermissionCodes = new[] { invalid == "permission" ? "unknown" : "ReferenceData.View" } })
+                EffectivePermissionCodes = new[] { invalid == "permission" ? "ReferenceData..View" : "ReferenceData.View" } })
         })) { BaseAddress = new("https://auth.invalid/") };
-        Assert.Equal(TenantAccessOutcome.Unavailable,
-            (await new CurrentTenantAccessClient(http, new Credential()).ResolveAsync("subject", organisation, default)).Outcome);
+        // The permission case tests a malformed identifier. Well-formed unknown extras grant no capability.
+        var decision = await new CurrentTenantAccessClient(http, new Credential()).ResolveAsync("subject", organisation, default);
+        Assert.Equal(TenantAccessOutcome.Unavailable, decision.Outcome);
+        Assert.Equal(invalid is "subject" or "organisation"
+            ? TenantAccessDiagnostics.IntegrityMismatch
+            : TenantAccessDiagnostics.ResponseMalformed, decision.Reason);
+        Assert.Null(decision.Membership);
     }
 
     [Fact]

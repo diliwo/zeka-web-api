@@ -6,17 +6,21 @@ using DotNet.Testcontainers.Networks;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
+using Zeka.Messaging;
 
 namespace Infrastructure.IntegrationTests;
 
 public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealHostStartupTests, IAsyncLifetime
 {
     private const string RuntimePassword = "startup-runtime-password";
+    private const string BrokerAlias = "startup-rabbitmq";
+    private const string BrokerManagementPort = "15672";
+    private const string BrokerUser = "startup-test";
+    private readonly string brokerPassword = Guid.NewGuid().ToString("N");
     private readonly INetwork network = new NetworkBuilder().Build();
     private PostgreSqlContainer? postgres;
     private IContainer? broker;
     private IContainer? host;
-    private string queueName = "";
 
     protected override string ApiDirectory => "Services/ClientManagement/Client.API";
     protected override string AssemblyName => "ClientManagement.API";
@@ -29,11 +33,14 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
             .WithNetwork(network)
             .WithNetworkAliases("startup-postgres")
             .Build();
-        broker = new ContainerBuilder("rabbitmq:3.13.7-alpine")
+        broker = new ContainerBuilder("rabbitmq:3.13.7-management")
             .WithNetwork(network)
-            .WithNetworkAliases("startup-rabbitmq")
+            .WithNetworkAliases(BrokerAlias)
+            .WithEnvironment("RABBITMQ_DEFAULT_USER", BrokerUser)
+            .WithEnvironment("RABBITMQ_DEFAULT_PASS", brokerPassword)
             .WithWaitStrategy(Wait.ForUnixContainer()
                 .UntilMessageIsLogged("Server startup complete")
+                .UntilCommandIsCompleted("rabbitmq-diagnostics", "-q", "check_port_listener", BrokerManagementPort)
                 .UntilCommandIsCompleted("rabbitmq-diagnostics", "-q", "check_port_connectivity"))
             .Build();
         await postgres.StartAsync(timeout.Token);
@@ -49,16 +56,17 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
 
     protected override async Task PrepareHostAsync(ProcessStartInfo start, CancellationToken cancellationToken)
     {
-        // The production adapter accepts a hostname only (AMQP port 5672).
-        // A private network avoids fixed host ports and any developer's broker.
-        // Run the same real API entry point; do not replace its registrations.
+        // Both AMQP and management HTTP stay on the private fixture network.
+        // The real API performs the broker topology verification during startup.
         var assembly = start.ArgumentList[0];
-        queueName = start.Environment["EventBus__QueueName"]!;
         var environment = start.Environment
             .Where(pair => pair.Key.Contains("__", StringComparison.Ordinal)
                 || pair.Key is "ASPNETCORE_ENVIRONMENT" or "DOTNET_ENVIRONMENT")
             .ToDictionary(pair => pair.Key, pair => pair.Value!);
-        environment["RabbitMq__HostName"] = "startup-rabbitmq";
+        environment["RabbitMq__HostName"] = BrokerAlias;
+        environment["RabbitMq__ManagementEndpoint"] = $"http://{BrokerAlias}:{BrokerManagementPort}/";
+        environment["RabbitMq__UserName"] = BrokerUser;
+        environment["RabbitMq__Password"] = brokerPassword;
         environment["ConnectionStrings__ClientApiConnection"] = new NpgsqlConnectionStringBuilder(
             postgres!.GetConnectionString())
         {
@@ -109,7 +117,7 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
         {
             var result = await broker!.ExecAsync(["rabbitmqctl", "list_queues", "--quiet", "name", "consumers"], cancellationToken);
             Assert.Equal(0, result.ExitCode);
-            if (result.Stdout.Split('\n').Any(line => line.Trim() == queueName + "\t1")) return;
+            if (result.Stdout.Split('\n').Any(line => line.Trim() == StaffProjectionTransport.Queue + "\t1")) return;
             await Task.Delay(100, cancellationToken);
         }
     }
