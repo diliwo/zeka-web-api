@@ -245,7 +245,7 @@ public sealed class PostgreSqlMembershipPermissionGrantTests(PostgreSqlFixture f
         {
             await migration.Database.OpenConnectionAsync();
             await migration.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
-            await migration.GetService<IMigrator>().MigrateAsync();
+            await AuthTestMigrationInitializer.MigrateFreshDatabaseAsync(migration);
         }
         await ExecuteAsync(administratorConnection, ReadBootstrapScript());
 

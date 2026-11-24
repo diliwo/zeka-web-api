@@ -381,6 +381,19 @@ public sealed class ManagedMigrationAdapterTests
     [InlineData("apply", "client", AuthTarget)]
     public async Task Atomic_shape_is_never_adopted_for_a_legacy_operation(string operation, string service, string target)
     {
+        if (service != "auth")
+        {
+            // The factory must refuse an Auth-only target for another service.
+            var failure = Assert.Throws<SetupFailure>(() =>
+                ManagedMigrationAdapter.NewOperation(operation, service, SourceCommit, target, FixtureDatabase));
+            Assert.Equal(OperatingSystem.IsLinux()
+                ? "MIGRATION_OPERATION_IDENTITY_REJECTED"
+                : "MIGRATION_LINUX_EVIDENCE_REQUIRED", failure.Code);
+
+            // Exercise envelope rejection with a valid legacy operation on every platform.
+            target = "latest";
+        }
+
         var context = Context(operation, service, target, FixtureDatabase);
         var export = NewRoot();
         await WriteEvidence(context, JsonSerializer.SerializeToUtf8Bytes(AtomicEvidence(context)));

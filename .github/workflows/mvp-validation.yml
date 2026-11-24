@@ -185,7 +185,11 @@ jobs:
               "B"
             ],
             [
-              "Exact_route_and_credential_matrix_exposes_only_six_method_path_pairs",
+              "Exact_route_and_credential_matrix_exposes_only_seven_method_path_pairs",
+              null
+            ],
+            [
+              "Registration_route_forwards_exact_contract_and_keeps_gateway_security_boundaries",
               null
             ],
             [
@@ -322,7 +326,7 @@ jobs:
                 'counts':{'outputLines':0,'listingHeaders':0,'observedEntries':0,'gatewayAttributableEntries':0,
                           'observedGatewayMethods':0,'enumeratedTheoryRows':0,'foldedTheoryMethods':0,'otherQualifiedEntries':0,'unknownEntries':0},
                 'gatewayClass':CLASS,'safeIdentities':[], 'unknownEntries':[], 'unknownRecordsTruncated':False,
-                'expectedCoverage':{'methods':sorted(groups),'executionRows':expected,'methodCount':12,'executionRowCount':21,
+                'expectedCoverage':{'methods':sorted(groups),'executionRows':expected,'methodCount':13,'executionRowCount':22,
                   'originalSeven':{CLASS+'.'+name:target for name,target in rows if target}},
                 'observedMethods':[], 'foldedTheories':[], 'enumeratedTheoryRows':[], 'notEnumeratedByListing':[],
                 'missingMethods':[], 'missingEnumeratedRows':[], 'duplicateEntries':[], 'unexpectedEntries':[]}
@@ -490,7 +494,7 @@ jobs:
                 check(r['mode']==('browser' if r['identity'] in methods else 'transport'), 'child-mode')
                 check(type(r['exitCode']) is int and r['exitCode'] != 0 if killed else r['exitCode'] == 0 and r['executed'] == 1 and r['passed'] == 1 and r['trxPresent'] is True, 'child-native-failure')
               commands = list((raw/'receipts').glob('child-*/command.json'))
-              check(len(commands) == 31, 'child-command-inventory')
+              check(len(commands) == 32, 'child-command-inventory')
               command_ids = []
               for path in commands:
                 r = json.loads(path.read_text()); check(r['source'] == os.environ['ZEKA_GATEWAY_SHA'] and r['identity'] in methods | tls and r['expectedNativeTest'] == CLASS+'.'+umbrella, 'child-command-source')

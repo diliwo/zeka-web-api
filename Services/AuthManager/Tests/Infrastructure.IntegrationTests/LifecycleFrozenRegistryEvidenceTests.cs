@@ -43,7 +43,7 @@ public sealed class LifecycleFrozenRegistryEvidenceTests(ITestOutputHelper outpu
         {
             await migration.Database.OpenConnectionAsync();
             await migration.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
-            await migration.Database.MigrateAsync();
+            await AuthTestMigrationInitializer.MigrateFreshDatabaseAsync(migration);
         }
         await Sql(postgres.GetConnectionString(), Bootstrap());
         await using var verification = Context("zeka_auth_migrator");

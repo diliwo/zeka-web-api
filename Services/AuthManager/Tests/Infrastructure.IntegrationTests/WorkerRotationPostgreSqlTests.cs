@@ -255,7 +255,7 @@ public sealed class WorkerRotationPostgreSqlFixture : IAsyncLifetime
         await using var migrator = new AuthDbContext(new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connection).Options);
         await migrator.Database.OpenConnectionAsync();
         await migrator.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
-        await migrator.Database.MigrateAsync();
+        await AuthTestMigrationInitializer.MigrateFreshDatabaseAsync(migrator);
         return connection;
     }
 

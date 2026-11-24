@@ -623,13 +623,13 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
     private readonly string runtimeCredential = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private IContainer database = null!;
     private string keyPath = null!;
+    private RegistrationVerificationKeyFixture? verificationKey;
 
     public async Task InitializeAsync()
     {
-        keyPath = Environment.GetEnvironmentVariable("ZEKA_ZEK27_VERIFICATION_KEY_FILE")
-            ?? throw new InvalidOperationException("ZEK27_PROTECTED_VERIFICATION_KEY_FILE_REQUIRED");
-        if (!Path.IsPathFullyQualified(keyPath) || !File.Exists(keyPath))
-            throw new InvalidOperationException("ZEK27_VERIFICATION_KEY_PATH_REJECTED");
+        verificationKey = RegistrationVerificationKeyFixture.Create(
+            Environment.GetEnvironmentVariable("ZEKA_ZEK27_VERIFICATION_KEY_FILE"));
+        keyPath = verificationKey.Path;
 
         var identity = Guid.NewGuid().ToString("N");
         database = new ContainerBuilder(Image)
@@ -659,7 +659,8 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (database is not null) await database.DisposeAsync();
+        try { if (database is not null) await database.DisposeAsync(); }
+        finally { verificationKey?.Dispose(); }
     }
 
     internal async Task<string> CreateEmptyDatabaseRuntimeAsync()
@@ -686,7 +687,7 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
         {
             await db.Database.OpenConnectionAsync();
             await db.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
-            await db.Database.MigrateAsync();
+            await AuthTestMigrationInitializer.MigrateFreshDatabaseAsync(db);
         }
         await BootstrapAsync(owner);
         await BootstrapAsync(owner);
