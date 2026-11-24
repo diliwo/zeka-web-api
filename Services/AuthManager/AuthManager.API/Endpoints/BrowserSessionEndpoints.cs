@@ -155,6 +155,7 @@ public static class BrowserSessionEndpoints
             catch (AntiforgeryValidationException) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
             return await next(context);
         });
+        group.MapBrowserRegistrations();
         group.MapGet("/csrf", (HttpContext http, IAntiforgery antiforgery) =>
         {
             try { return Results.Ok(new { ContractVersion = 1, CsrfToken = antiforgery.GetAndStoreTokens(http).RequestToken }); }

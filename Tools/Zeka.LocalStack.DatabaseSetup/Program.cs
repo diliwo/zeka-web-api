@@ -15,6 +15,8 @@ using Zeka.LocalStack.DatabaseSetup;
 
 var stage = "input";
 var postgres = new SafePostgresDiagnosticCapture();
+var bootstrapExecutions = 0;
+var migrationOperations = new List<object>();
 try
 {
     if (args is ["--guard-checks"]) { using var checks = new CancellationTokenSource(TimeSpan.FromMinutes(3)); return await GuardChecks.RunAsync(checks.Token); }
@@ -25,6 +27,9 @@ try
         || request.SourceCommit.Length != 40 || request.SourceCommit.Any(c => !Uri.IsHexDigit(c)))
         throw new InvalidOperationException("REQUEST_IDENTITY_REJECTED");
     var service = Service.For(request.Service);
+    if (request.Completed && (string.IsNullOrEmpty(request.ClusterId) || request.ClusterId.Length > 20
+        || request.ClusterId.Any(c => !char.IsAsciiDigit(c)) || !IsDigest(request.SchemaSha256) || !IsDigest(request.HistorySha256)))
+        throw new InvalidOperationException("ESTABLISHED_REQUEST_BINDING_REJECTED");
     var migratorPassword = ReadPassword("/run/secrets/migrator-password");
     var runtimePassword = ReadPassword("/run/secrets/runtime-password");
     var adminPassword = ReadPassword("/run/secrets/admin-password");
@@ -68,13 +73,35 @@ try
             await Execute(admin, $"COMMENT ON DATABASE {Quote(service.Database)} IS {Literal(databaseComment)}", ct);
         }
     }
+    await using var databaseAdmin = new NpgsqlConnection(Connection(service.Database, "postgres", adminPassword));
+    if (service.Key == "auth")
+    {
+        using var compiledContext = Context(service, databaseAdmin);
+        var compiled = compiledContext.Database.GetMigrations().ToArray();
+        if (compiled.Length < 2 || compiled[^2] != ManagedMigrationAdapter.AuthPredecessor
+            || compiled[^1] != ManagedMigrationAdapter.AuthTarget)
+            throw new InvalidOperationException("AUTH_COMPILED_HISTORY_REJECTED");
+        if (!request.Completed)
+        {
+            stage = "auth-fresh-state";
+            await databaseAdmin.OpenAsync(ct);
+            // A failed/partial earlier initialization is inspection work, not a new fresh run.
+            var empty = await Scalar(databaseAdmin, """
+                SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public')
+                  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public')
+                  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public')
+                  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname NOT IN ('public','pg_catalog','information_schema','pg_toast'))
+                  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_default_acl)
+                """, ct);
+            if (empty is not true) throw new InvalidOperationException("AUTH_FRESH_STATE_REQUIRES_INSPECTION");
+        }
+    }
     stage = "role-identity-and-credentials";
     await VerifyMemberships(admin, service, request.Completed, ct);
     var createdRoles = await RoleRegistry.EnsureAsync(admin, request.InitializationId, request.SourceCommit, service.Key,
         new Dictionary<string,string> { ["migrator"] = migratorPassword, ["runtime"] = runtimePassword }, !request.Completed, ct);
     stage = "database-connection";
-    await using var databaseAdmin = new NpgsqlConnection(Connection(service.Database, "postgres", adminPassword));
-    await databaseAdmin.OpenAsync(ct);
+    if (databaseAdmin.State != System.Data.ConnectionState.Open) await databaseAdmin.OpenAsync(ct);
     // Saved credentials and role edges must match before a reconciler can mutate anything.
     await VerifyMemberships(admin, service, request.Completed, ct);
     await FreshLogin(migrationCs, service.Migrator, false, ct);
@@ -89,21 +116,62 @@ try
     {
         stage = "pre-bootstrap";
         await Execute(databaseAdmin, File.ReadAllText($"/run/source/bootstrap-{service.Key}-roles.sql"), ct, bootstrapService: service.Key);
+        bootstrapExecutions++;
     }
-    stage = "restricted-migrator-plan";
-    var plan = await ManagedMigrationAdapter.RunAsync("plan", service.Key, request.SourceCommit, migrationCs, "/run/results", ct);
-    if (plan.Exit != 0) throw new SetupFailure("MIGRATOR_PLAN_REJECTED", plan.Exit, plan.OperationId, plan.ReceiptFile) { PostgresDiagnostic = plan.PostgresDiagnostic };
-    if (request.Completed && plan.Classification != "ALREADY_CURRENT")
-        throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
-    stage = "restricted-migrator-apply";
-    var apply = await ManagedMigrationAdapter.RunAsync("apply", service.Key, request.SourceCommit, migrationCs, "/run/results", ct);
-    if (apply.Exit != 0) throw new SetupFailure("MIGRATOR_APPLY_REJECTED", apply.Exit, apply.OperationId, apply.ReceiptFile) { PostgresDiagnostic = apply.PostgresDiagnostic };
-    if (request.Completed && apply.Classification != "ALREADY_CURRENT")
-        throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
-    if (!request.Completed)
+
+    async Task<MigrationRun> RunMigration(string operation, string target)
     {
-        stage = "post-bootstrap";
-        await Execute(databaseAdmin, File.ReadAllText($"/run/source/bootstrap-{service.Key}-roles.sql"), ct, bootstrapService: service.Key);
+        stage = "restricted-migrator-" + operation;
+        var run = await ManagedMigrationAdapter.RunAsync(operation, service.Key, request.SourceCommit,
+            migrationCs, "/run/results", ct, requestedTarget: target, expectedDatabase: service.Database);
+        migrationOperations.Add(new { operationId = run.OperationId, operation, service = service.Key,
+            requestedTarget = run.RequestedTarget, classification = run.Classification, resultCode = run.ResultCode,
+            exit = run.Exit, atomicAuth = run.AtomicAuth, observedFinalMigration = run.ObservedFinalMigration,
+            receiptFile = run.ReceiptFile });
+        if (run.Exit != 0) throw new SetupFailure(operation == "plan" ? "MIGRATOR_PLAN_REJECTED" : "MIGRATOR_APPLY_REJECTED",
+            run.Exit, run.OperationId, run.ReceiptFile) { PostgresDiagnostic = run.PostgresDiagnostic };
+        return run;
+    }
+
+    MigrationRun plan;
+    MigrationRun apply;
+    if (service.Key == "auth")
+    {
+        if (!request.Completed)
+        {
+            await RunMigration("plan", ManagedMigrationAdapter.AuthPredecessor);
+            var predecessor = await RunMigration("apply", ManagedMigrationAdapter.AuthPredecessor);
+            if (predecessor.AtomicAuth || predecessor.ObservedFinalMigration != ManagedMigrationAdapter.AuthPredecessor)
+                throw new InvalidOperationException("AUTH_PREDECESSOR_BINDING_REJECTED");
+            stage = "auth-predecessor-bootstrap";
+            await ReconcileAuthPredecessor(databaseAdmin, service, postgres, ct);
+            bootstrapExecutions++;
+        }
+        plan = await RunMigration("plan", ManagedMigrationAdapter.AuthTarget);
+        if (request.Completed && !plan.IsAcknowledgedCurrent)
+            throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
+        if (!request.Completed && plan.Classification != "FORWARD_APPROVED")
+            throw new InvalidOperationException("AUTH_PREDECESSOR_BINDING_REJECTED");
+        apply = await RunMigration("apply", ManagedMigrationAdapter.AuthTarget);
+        if (!apply.AtomicAuth || (request.Completed ? !apply.IsAcknowledgedCurrent : apply.Classification != "ATOMIC_AUTH_APPLIED"))
+            throw new InvalidOperationException("AUTH_ATOMIC_STATE_REJECTED");
+        // No post-target bootstrap: the unchanged atomic executor's v20/grant checks
+        // must stand on their own and may not be repaired before verification.
+    }
+    else
+    {
+        plan = await RunMigration("plan", "latest");
+        if (request.Completed && !plan.IsAcknowledgedCurrent)
+            throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
+        apply = await RunMigration("apply", "latest");
+        if (request.Completed && !apply.IsAcknowledgedCurrent)
+            throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
+        if (!request.Completed)
+        {
+            stage = "post-bootstrap";
+            await Execute(databaseAdmin, File.ReadAllText($"/run/source/bootstrap-{service.Key}-roles.sql"), ct, bootstrapService: service.Key);
+            bootstrapExecutions++;
+        }
     }
     stage = "security-manifest";
     await VerifyManifest(databaseAdmin, service, postgres, ct);
@@ -144,6 +212,41 @@ try
         from pg_policies where schemaname in ('public','zeka')
         order by 1,2,3,4,5,6,7,8
         """, ct);
+    if (service.Key == "auth")
+        catalog.AddRange(await Rows(databaseAdmin, """
+            SELECT 'schema',n.nspname,'','',pg_get_userbyid(n.nspowner),coalesce(n.nspacl::text,''),'',''
+            FROM pg_catalog.pg_namespace n WHERE n.nspname IN ('public','zeka')
+            UNION ALL
+            SELECT 'default-acl',coalesce(n.nspname,''),r.rolname,d.defaclobjtype::text,coalesce(d.defaclacl::text,''),'','',''
+            FROM pg_catalog.pg_default_acl d JOIN pg_catalog.pg_roles r ON r.oid=d.defaclrole
+            LEFT JOIN pg_catalog.pg_namespace n ON n.oid=d.defaclnamespace
+            UNION ALL
+            SELECT 'role','',r.rolname,'',jsonb_build_object('login',r.rolcanlogin,'superuser',r.rolsuper,'bypassrls',r.rolbypassrls,
+                'createdb',r.rolcreatedb,'createrole',r.rolcreaterole,'inherit',r.rolinherit,'replication',r.rolreplication,
+                'connectionLimit',r.rolconnlimit,'validUntil',r.rolvaliduntil,'settings',r.rolconfig)::text,'','',''
+            FROM pg_catalog.pg_roles r WHERE r.rolname IN ('zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime','zeka_auth_closure_recovery')
+            UNION ALL
+            SELECT 'membership','',parent.rolname,member.rolname,m.admin_option::text,m.inherit_option::text,m.set_option::text,pg_get_userbyid(m.grantor)
+            FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles parent ON parent.oid=m.roleid
+            JOIN pg_catalog.pg_roles member ON member.oid=m.member
+            WHERE parent.rolname IN ('zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime','zeka_auth_closure_recovery')
+               OR member.rolname IN ('zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime','zeka_auth_closure_recovery')
+            UNION ALL
+            SELECT 'policy-mode',schemaname,tablename,policyname,permissive,cmd,roles::text,''
+            FROM pg_catalog.pg_policies WHERE schemaname IN ('public','zeka')
+            UNION ALL
+            SELECT 'sequence-definition',n.nspname,c.relname,'',jsonb_build_object('type',q.seqtypid::regtype::text,
+                'start',q.seqstart,'increment',q.seqincrement,'max',q.seqmax,'min',q.seqmin,'cache',q.seqcache,'cycle',q.seqcycle)::text,'','',''
+            FROM pg_catalog.pg_sequence q JOIN pg_catalog.pg_class c ON c.oid=q.seqrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN ('public','zeka')
+            UNION ALL
+            SELECT 'role-setting',coalesce(d.datname,''),coalesce(r.rolname,''),'',s.setconfig::text,'','',''
+            FROM pg_catalog.pg_db_role_setting s LEFT JOIN pg_catalog.pg_database d ON d.oid=s.setdatabase
+            LEFT JOIN pg_catalog.pg_roles r ON r.oid=s.setrole
+            WHERE s.setdatabase=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+               OR r.rolname IN ('zeka_auth_owner','zeka_auth_migrator','zeka_auth_runtime','zeka_auth_closure_recovery')
+            ORDER BY 1,2,3,4,5,6,7,8
+            """, ct));
     var schemaHash = Digest(catalog);
     var historyHash = Digest(history);
     if (request.Completed && (request.SchemaSha256 != schemaHash || request.HistorySha256 != historyHash))
@@ -154,6 +257,7 @@ try
         database = service.Database, createdRoles, planExit = plan.Exit, planClassification = plan.Classification,
         applyExit = apply.Exit, applyClassification = apply.Classification,
 
+        bootstrapExecutions, migrationOperations,
         manifest = "passed", runtimeAuthentication = "passed", wrongPasswordRejected = rejected,
         runtimeIdentity = service.Runtime, migratorIdentity = service.Migrator,
         schemaSha256 = schemaHash, historySha256 = historyHash, migrations = history.Count,
@@ -172,7 +276,7 @@ catch (Exception error)
         "DATABASE_SETUP_REJECTED";
     var safe = new { status="BLOCKED", stage, code=safeCode, sqlState=postgres.Diagnostic?.SqlState, postgresDiagnostic=postgres.Diagnostic,
         nativeExit=(root as SetupFailure)?.NativeExit, operationId=(root as SetupFailure)?.OperationId,
-        receiptFile=(root as SetupFailure)?.ReceiptFile, exceptionType=root.GetType().Name };
+        receiptFile=(root as SetupFailure)?.ReceiptFile, exceptionType=root.GetType().Name, bootstrapExecutions, migrationOperations };
     File.WriteAllText("/run/results/result.json", JsonSerializer.Serialize(safe));
     Console.WriteLine(JsonSerializer.Serialize(safe));
     return 1;
@@ -189,7 +293,54 @@ static bool KnownGuard(string code) => code is
     "ROLE_REGISTRY_ADMIN_CONNECTION_REJECTED" or "ROLE_REGISTRY_INPUT_REJECTED" or
     "ROLE_REGISTRY_LOCK_UNAVAILABLE" or "ROLE_REGISTRY_MISSING_ESTABLISHED_ROLE" or
     "ROLE_REGISTRY_POSTCONDITION_REJECTED" or "ROLE_REGISTRY_FOREIGN_OR_DRIFTED_ROLE" or
-    "ROLE_REGISTRY_OPERATION_REJECTED";
+    "ROLE_REGISTRY_OPERATION_REJECTED" or "ESTABLISHED_REQUEST_BINDING_REJECTED" or
+    "AUTH_COMPILED_HISTORY_REJECTED" or "AUTH_FRESH_STATE_REQUIRES_INSPECTION" or
+    "AUTH_PREDECESSOR_BINDING_REJECTED" or "AUTH_BOOTSTRAP_LOCK_UNAVAILABLE" or
+    "AUTH_BOOTSTRAP_UNLOCK_UNACKNOWLEDGED" or "AUTH_ATOMIC_STATE_REJECTED";
+static bool IsDigest(string? value) => value is { Length: 64 } && value.All(c => char.IsAsciiHexDigit(c));
+static async Task ReconcileAuthPredecessor(NpgsqlConnection database, Service service, SafePostgresDiagnosticCapture diagnostics, CancellationToken ct)
+{
+    // Use the same database-scoped key as both existing migrators. Holding this
+    // session lock prevents a target apply from racing predecessor-only bootstrap.
+    if (await Scalar(database, """
+        SELECT pg_catalog.pg_try_advisory_lock(1515870810,
+          CASE WHEN oid::bigint>2147483647 THEN (oid::bigint-4294967296)::integer ELSE oid::integer END)
+        FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()
+        """, ct) is not true) throw new InvalidOperationException("AUTH_BOOTSTRAP_LOCK_UNAVAILABLE");
+    Exception? primaryFailure = null;
+    try
+    {
+        using var context = Context(service, database);
+        var expected = context.Database.GetMigrations().ToArray();
+        if (expected.Length < 2 || expected[^2] != ManagedMigrationAdapter.AuthPredecessor || expected[^1] != ManagedMigrationAdapter.AuthTarget)
+            throw new InvalidOperationException("AUTH_COMPILED_HISTORY_REJECTED");
+        var before = await Rows(database, """
+            SELECT "MigrationId" FROM public."__EFMigrationsHistory" ORDER BY "MigrationId"
+            """, ct);
+        if (!before.Select(row => row[0]).SequenceEqual(expected[..^1], StringComparer.Ordinal))
+            throw new InvalidOperationException("AUTH_PREDECESSOR_BINDING_REJECTED");
+        await Execute(database, File.ReadAllText("/run/source/bootstrap-auth-roles.sql"), ct, bootstrapService: "auth");
+        var after = await Rows(database, """
+            SELECT "MigrationId" FROM public."__EFMigrationsHistory" ORDER BY "MigrationId"
+            """, ct);
+        if (!after.Select(row => row[0]).SequenceEqual(expected[..^1], StringComparer.Ordinal))
+            throw new InvalidOperationException("AUTH_PREDECESSOR_BINDING_REJECTED");
+    }
+    catch (Exception error) { diagnostics.Capture(error); primaryFailure = error; throw; }
+    finally
+    {
+        try
+        {
+            using var release = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            if (await Scalar(database, """
+                SELECT pg_catalog.pg_advisory_unlock(1515870810,
+                  CASE WHEN oid::bigint>2147483647 THEN (oid::bigint-4294967296)::integer ELSE oid::integer END)
+                FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()
+                """, release.Token) is not true) throw new InvalidOperationException("AUTH_BOOTSTRAP_UNLOCK_UNACKNOWLEDGED");
+        }
+        catch (Exception releaseError) { diagnostics.Capture(releaseError); if (primaryFailure is null) throw; }
+    }
+}
 static async Task VerifyMemberships(NpgsqlConnection admin,Service service,bool completed,CancellationToken ct)
 {
     var roles=new[]{"zeka_"+service.Key+"_owner",service.Migrator,service.Runtime,"zeka_"+service.Key+"_closure_recovery"};

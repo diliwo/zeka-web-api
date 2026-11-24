@@ -7,7 +7,7 @@
       "classification": "bootstrap-batch"
     },
     "Deployments/database/bootstrap-auth-roles.sql": {
-      "sha256": "c1456429e42675bcabcfe06c725f00e96994b46a7f5e3f8e3556f348f359df0b",
+      "sha256": "41e53654e9c5e4b399ab24d7b49533f912d9face8f89784bedb29f301ccedd46",
       "classification": "bootstrap-batch"
     },
     "Deployments/database/bootstrap-client-roles.sql": {
@@ -84,6 +84,14 @@
     },
     "Tools/Zeka.AuthOwnerProvision/Prepare-OwnerHelperBuildContext.ps1": {
       "sha256": "9fbb15ad83f951a0d446a0e650af5ad4dfa64e9b8f400fc6badd28b4b5d97155",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Tools/Zeka.DbMigrate/AuthOnboarding/onboarding-grants.sql": {
+      "sha256": "b897bc6e7f933a538142696b81644d91c4d9439cb5ee7db1933106c52b9ac841",
+      "classification": "reviewed-orchestration-support"
+    },
+    "Tools/Zeka.DbMigrate/AuthOnboarding/onboarding-migration.sql": {
+      "sha256": "b68a058177c27b67e22c81e11cf6ec3c0eedbe69833937b534057bc2af7075e2",
       "classification": "reviewed-orchestration-support"
     }
   }

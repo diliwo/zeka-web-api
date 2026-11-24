@@ -442,7 +442,7 @@ public sealed class PostgreSqlOrganisationProvisioningTests(PostgreSqlFixture fi
         {
             await migration.Database.OpenConnectionAsync();
             await migration.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
-            await migration.GetService<IMigrator>().MigrateAsync();
+            await AuthTestMigrationInitializer.MigrateFreshDatabaseAsync(migration);
         }
         await ExecuteAsync(administrator, ReadBootstrapScript());
         return runtime;

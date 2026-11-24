@@ -20,6 +20,8 @@ builder.Services.AddTenantAuthentication(builder.Configuration);
 builder.Services.AddAssigneeServiceAuthentication(builder.Configuration);
 builder.Services.AddAccessTokenIssuer(builder.Configuration);
 builder.Services.AddBrowserSessionTransport();
+builder.Services.AddSingleton<BrowserRegistrationEndpoints.RegistrationAbuseLimits>();
+builder.Services.AddVerificationRegistration(builder.Configuration, builder.Environment);
 builder.Services.AddM1WorkerRotation(builder.Configuration, builder.Environment);
 LocalStackHealth.Add(builder);
 var app = builder.Build();
@@ -44,7 +46,7 @@ app.MapIssuerEndpoints();
 
 app.RegisterEndpoints();
 
-app.UseHttpsRedirection();
+app.UseAuthHttpsRedirection();
 
 
 app.Run();

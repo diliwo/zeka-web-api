@@ -37,7 +37,7 @@ public sealed class GatewayLocalStackHealthTests
         await AssertHealthAsync(host.Http, "/health/live", HttpStatusCode.OK);
         await AssertHealthAsync(host.Http, "/health/ready", HttpStatusCode.OK);
         Assert.Empty(host.Received);
-        Assert.Equal(6, host.Routes.Routes.Count(route => route.Key!.StartsWith("GatewayBrowserTransport:")));
+        Assert.Equal(7, host.Routes.Routes.Count(route => route.Key!.StartsWith("GatewayBrowserTransport:")));
         Assert.All(host.Routes.Routes.Where(route => route.Key!.StartsWith("GatewayBrowserTransport:")), route =>
         {
             Assert.Equal("https", route.DownstreamScheme);
@@ -369,6 +369,7 @@ public sealed class GatewayLocalStackHealthTests
         {
             ("GET", CsrfPath), ("POST", "/api/v1/browser-session/sign-in"),
             ("POST", "/api/v1/browser-session/restore"), ("POST", "/api/v1/browser-session/logout"),
+            ("POST", "/api/v1/browser-session/onboarding/registrations"),
             ("GET", "/api/v1/browser-organisations/eligible"), ("GET", "/api/v1/tenant-access/{organisationId}")
         };
         for (var index = 0; index < routes.Length; index++)
@@ -385,13 +386,14 @@ public sealed class GatewayLocalStackHealthTests
             values[prefix + "HttpHandlerOptions:UseTracing"] = "false";
             values[prefix + "HttpHandlerOptions:UseProxy"] = "false";
         }
-        values["Routes:6:Key"] = "legacy";
-        values["Routes:6:UpstreamPathTemplate"] = "/legacy";
-        values["Routes:6:DownstreamPathTemplate"] = "/legacy";
-        values["Routes:6:UpstreamHttpMethod:0"] = "GET";
-        values["Routes:6:DownstreamScheme"] = "https";
-        values["Routes:6:DownstreamHostAndPorts:0:Host"] = "legacy.example.invalid";
-        values["Routes:6:DownstreamHostAndPorts:0:Port"] = "443";
+        var legacyPrefix = $"Routes:{routes.Length}:";
+        values[legacyPrefix + "Key"] = "legacy";
+        values[legacyPrefix + "UpstreamPathTemplate"] = "/legacy";
+        values[legacyPrefix + "DownstreamPathTemplate"] = "/legacy";
+        values[legacyPrefix + "UpstreamHttpMethod:0"] = "GET";
+        values[legacyPrefix + "DownstreamScheme"] = "https";
+        values[legacyPrefix + "DownstreamHostAndPorts:0:Host"] = "legacy.example.invalid";
+        values[legacyPrefix + "DownstreamHostAndPorts:0:Port"] = "443";
         return values;
     }
 

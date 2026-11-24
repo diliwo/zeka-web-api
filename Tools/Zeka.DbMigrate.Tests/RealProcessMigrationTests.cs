@@ -39,10 +39,10 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
         Assert.Equal(0, exact.ExitCode);
         Assert.Equal("FORWARD_APPROVED", exact.Classification);
 
-        var latest = await InvokeAsync(database, "auth", "apply", "latest");
-        Assert.Equal(0, latest.ExitCode);
-        Assert.Equal("FORWARD_APPROVED", latest.Classification);
-        Assert.Equal("passed", latest.ManifestStatus);
+        await ApplyAuthPredecessorAsync(database);
+        var onboarding = await InvokeAsync(database, "auth", "apply", AuthTarget);
+        AssertAtomicAuthSuccess(onboarding, database);
+        Assert.Equal(AuthPredecessor, onboarding.StartingMigration);
 
         var beforeInvalid = await DigestAsync(database);
         var invalid = await InvokeAsync(database, "auth", "apply", "20260101000000_UnknownMigration");
@@ -50,11 +50,10 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
         Assert.Equal("TARGET_REJECTED", invalid.ResultCode);
         Assert.Equal(beforeInvalid, await DigestAsync(database));
 
-        var current = await InvokeAsync(database, "auth", "apply", "latest");
-        Assert.Equal(0, current.ExitCode);
-        Assert.Equal("ALREADY_CURRENT", current.Classification);
-        Assert.Equal("not_started", current.MigrationStatus);
-        Assert.Equal("passed", current.ManifestStatus);
+        var current = await InvokeAsync(database, "auth", "apply", AuthTarget);
+        AssertAtomicAuthSuccess(current, database, alreadyCurrent: true);
+        Assert.Equal(AuthTarget, current.StartingMigration);
+        Assert.Equal(beforeInvalid, await DigestAsync(database));
 
         await ExecuteAdminAsync(database, """
             SET ROLE zeka_auth_owner;
@@ -62,9 +61,13 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
               VALUES ('99999999999999_UnknownAppliedMigration','8.0.30');
             RESET ROLE;
             """);
-        var divergent = await InvokeAsync(database, "auth", "apply", "latest");
+        var beforeDivergent = await DigestAsync(database);
+        var divergent = await InvokeAsync(database, "auth", "apply", AuthTarget);
         Assert.Equal(25, divergent.ExitCode);
-        Assert.Equal("MIGRATION_HISTORY_REJECTED", divergent.ResultCode);
+        Assert.Equal("ATOMIC_AUTH_HISTORY_REJECTED", divergent.ResultCode);
+        Assert.Equal("not_started", divergent.MigrationStatus);
+        Assert.Equal("not_started", divergent.BootstrapStatus);
+        Assert.Equal(beforeDivergent, await DigestAsync(database));
 
         var failedDatabase = await CreateDatabaseAsync("auth_failure");
         await BootstrapAsync(failedDatabase, "auth");
@@ -99,23 +102,34 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
     {
         var database = await PrepareLatestAsync("auth", "identity");
         var administrator = AdminConnection(database);
-        var wrong = await InvokeAsync(database, "auth", "apply", "latest", administrator);
+        var beforeWrong = await DigestAsync(database);
+        var wrong = await InvokeAsync(database, "auth", "apply", AuthTarget, administrator);
         Assert.Equal(24, wrong.ExitCode);
-        Assert.Equal("IDENTITY_REJECTED", wrong.ResultCode);
+        Assert.Equal("ATOMIC_AUTH_IDENTITY_REJECTED", wrong.ResultCode);
+        Assert.Equal(beforeWrong, await DigestAsync(database));
 
         await ExecuteAdminAsync(database, "REVOKE zeka_auth_owner FROM zeka_auth_migrator;");
-        var missing = await InvokeAsync(database, "auth", "apply", "latest");
+        var beforeMissing = await DigestAsync(database);
+        var missing = await InvokeAsync(database, "auth", "apply", AuthTarget);
         Assert.Equal(24, missing.ExitCode);
+        Assert.Equal("ATOMIC_AUTH_IDENTITY_REJECTED", missing.ResultCode);
+        Assert.Equal(beforeMissing, await DigestAsync(database));
         await BootstrapAsync(database, "auth");
 
         var clientDatabase = await CreateDatabaseAsync("client_roles");
         await BootstrapAsync(clientDatabase, "client");
         await ExecuteAdminAsync(database, "GRANT zeka_client_owner TO zeka_auth_migrator WITH INHERIT FALSE, SET TRUE;");
-        var extra = await InvokeAsync(database, "auth", "apply", "latest");
+        var beforeExtra = await DigestAsync(database);
+        var extra = await InvokeAsync(database, "auth", "apply", AuthTarget);
         Assert.Equal(24, extra.ExitCode);
+        Assert.Equal("ATOMIC_AUTH_IDENTITY_REJECTED", extra.ResultCode);
+        Assert.Equal(beforeExtra, await DigestAsync(database));
         await ExecuteAdminAsync(database, "REVOKE zeka_client_owner FROM zeka_auth_migrator; REVOKE zeka_auth_owner FROM zeka_auth_migrator; GRANT zeka_client_owner TO zeka_auth_migrator WITH INHERIT FALSE, SET TRUE;");
-        var crossServiceOnly = await InvokeAsync(database, "auth", "apply", "latest");
+        var beforeCrossServiceOnly = await DigestAsync(database);
+        var crossServiceOnly = await InvokeAsync(database, "auth", "apply", AuthTarget);
         Assert.Equal(24, crossServiceOnly.ExitCode);
+        Assert.Equal("ATOMIC_AUTH_IDENTITY_REJECTED", crossServiceOnly.ResultCode);
+        Assert.Equal(beforeCrossServiceOnly, await DigestAsync(database));
         await ExecuteAdminAsync(database, "REVOKE zeka_client_owner FROM zeka_auth_migrator;");
         await BootstrapAsync(database, "auth");
 
@@ -128,9 +142,55 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
             FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()
             """, lockConnection))
             await lockCommand.ExecuteNonQueryAsync();
-        var contention = await InvokeAsync(database, "auth", "apply", "latest", lockTimeoutSeconds: 1);
+        var beforeContention = await DigestAsync(database);
+        // Plan retains the legacy bounded session-lock refusal, distinct from atomic apply.
+        var contention = await InvokeAsync(database, "auth", "plan", AuthTarget, lockTimeoutSeconds: 1);
         Assert.Equal(23, contention.ExitCode);
         Assert.Equal("LOCK_UNAVAILABLE", contention.ResultCode);
+        Assert.Equal("not_started", contention.MigrationStatus);
+        Assert.Equal("not_started", contention.BootstrapStatus);
+        Assert.Equal(beforeContention, await DigestAsync(database));
+    }
+
+    [Fact]
+    public async Task Real_process_rejects_auth_latest_before_connecting_without_state_change()
+    {
+        var database = await PrepareLatestAsync("auth", "latest_alias");
+        var before = await DigestAsync(database);
+        // A live loopback listener detects even a connection to the supplied endpoint.
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var credential = new NpgsqlConnectionStringBuilder(MigratorConnection(database, "auth"))
+            {
+                Host = "127.0.0.1",
+                Port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port,
+                Timeout = 1,
+                Pooling = false
+            }.ConnectionString;
+            var rejected = await InvokeAsync(database, "auth", "apply", "latest", credential);
+            Assert.Equal(20, rejected.ExitCode);
+            Assert.Equal("ATOMIC_AUTH_EXACT_TARGET_REQUIRED", rejected.ResultCode);
+            Assert.Equal("REJECTED", rejected.Classification);
+            Assert.Null(rejected.SessionUser);
+            Assert.Null(rejected.CurrentUser);
+            Assert.False(rejected.OwnerAssumption);
+            Assert.Equal("not_started", rejected.MigrationStatus);
+            Assert.Equal("not_started", rejected.BootstrapStatus);
+            Assert.Equal("not_started", rejected.ManifestStatus);
+            Assert.True(rejected.AtomicAuth.HasValue);
+            var atomic = rejected.AtomicAuth.Value;
+            Assert.Equal(JsonValueKind.Null, atomic.GetProperty("databaseName").ValueKind);
+            Assert.Equal(JsonValueKind.Null, atomic.GetProperty("backendPid").ValueKind);
+            Assert.Equal("ARTIFACT_BINDING", atomic.GetProperty("failedStage").GetString());
+            Assert.False(atomic.GetProperty("commitAttempted").GetBoolean());
+            Assert.False(atomic.GetProperty("commitAcknowledged").GetBoolean());
+            Assert.False(atomic.GetProperty("replayAttempted").GetBoolean());
+            Assert.False(listener.Pending()); // CLI has exited; no deferred connection remains.
+            Assert.Equal(before, await DigestAsync(database));
+        }
+        finally { listener.Stop(); }
     }
 
     [Fact]
@@ -317,10 +377,54 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
                 RESET ROLE;
                 """);
         }
+        if (service == "auth")
+        {
+            await ApplyAuthPredecessorAsync(database);
+            var exact = await InvokeAsync(database, service, "apply", AuthTarget);
+            AssertAtomicAuthSuccess(exact, database);
+            return database;
+        }
         var latest = await InvokeAsync(database, service, "apply", "latest");
         Assert.Equal(0, latest.ExitCode);
         Assert.Equal("passed", latest.ManifestStatus);
         return database;
+    }
+
+    private const string AuthPredecessor = "20261018144506_BrowserSessionSnapshot";
+    private const string AuthTarget = "20261115195218_OnboardingRegistration";
+
+    private async Task ApplyAuthPredecessorAsync(string database)
+    {
+        var predecessor = await InvokeAsync(database, "auth", "apply", AuthPredecessor);
+        Assert.Equal(0, predecessor.ExitCode);
+        Assert.Equal("FORWARD_APPROVED", predecessor.Classification);
+        Assert.Equal("passed", predecessor.MigrationStatus);
+        Assert.Equal("untested", predecessor.ManifestStatus);
+        Assert.Equal(AuthPredecessor, predecessor.FinalMigration);
+        // Reconcile the existing predecessor's runtime ACLs before the atomic v20 step.
+        await BootstrapAsync(database, "auth");
+    }
+
+    private static void AssertAtomicAuthSuccess(CliResult result, string database, bool alreadyCurrent = false)
+    {
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("SUCCESS", result.ResultCode);
+        Assert.Equal(alreadyCurrent ? "ATOMIC_AUTH_ALREADY_CURRENT" : "ATOMIC_AUTH_APPLIED", result.Classification);
+        Assert.Equal(alreadyCurrent ? "not_needed" : "passed", result.MigrationStatus);
+        Assert.Equal(alreadyCurrent ? "not_needed" : "passed", result.BootstrapStatus);
+        Assert.Equal("passed", result.ManifestStatus);
+        Assert.Equal(AuthTarget, result.FinalMigration);
+        Assert.Equal("zeka_auth_migrator", result.SessionUser);
+        Assert.Equal("zeka_auth_owner", result.CurrentUser);
+        Assert.True(result.OwnerAssumption);
+        Assert.True(result.AtomicAuth.HasValue);
+        var atomic = result.AtomicAuth.Value;
+        Assert.Equal(database, atomic.GetProperty("databaseName").GetString());
+        Assert.True(atomic.GetProperty("backendPid").GetInt32() > 0);
+        Assert.True(atomic.GetProperty("commitAttempted").GetBoolean());
+        Assert.True(atomic.GetProperty("commitAcknowledged").GetBoolean());
+        Assert.False(atomic.GetProperty("replayAttempted").GetBoolean());
+        Assert.Equal("COMMITTED_VERIFIED", atomic.GetProperty("durableState").GetString());
     }
 
     private async Task<string> CreateDatabaseAsync(string label)
@@ -519,7 +623,7 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
 
     private sealed record CliResult(int ExitCode, Guid OperationId, string Classification, string ResultCode,
         string? SessionUser, string? CurrentUser, bool OwnerAssumption, string MigrationStatus, string BootstrapStatus,
-        string ManifestStatus)
+        string ManifestStatus, string? StartingMigration, string? FinalMigration, JsonElement? AtomicAuth)
     {
         public static CliResult Read(int exitCode, string path)
         {
@@ -533,7 +637,10 @@ public sealed class RealProcessMigrationTests : IAsyncLifetime
                 roles.GetProperty("ownerAssumption").GetBoolean(),
                 phases.GetProperty("migration").GetProperty("status").GetString()!,
                 phases.GetProperty("bootstrapReconciliation").GetProperty("status").GetString()!,
-                phases.GetProperty("manifestVerification").GetProperty("status").GetString()!);
+                phases.GetProperty("manifestVerification").GetProperty("status").GetString()!,
+                root.GetProperty("startingMigration").GetString(),
+                root.GetProperty("observedFinalMigration").GetString(),
+                root.TryGetProperty("atomicAuth", out var atomic) ? atomic.Clone() : null);
         }
     }
 }
