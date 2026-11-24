@@ -75,7 +75,7 @@ jobs:
           dotnet build Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
             --configuration Release --no-restore --no-incremental
 
-      - name: Execute the 77 focused tests with the owned PostgreSQL 17 fixtures
+      - name: Execute the 85 focused tests with the owned PostgreSQL 17 fixtures
         shell: bash
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -125,7 +125,7 @@ jobs:
               'expectedHead': os.environ['EXPECTED_HEAD'],
               'runId': os.environ['GITHUB_RUN_ID'],
               'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'],
-              'nativeExit': native, 'expectedTests': 77,
+              'nativeExit': native, 'expectedTests': 85,
               'verificationKeyInput': 'UNSET_OWNED_FIXTURE_REQUIRED',
               'status': 'FAIL', 'reason': 'RESULT_EVIDENCE_NOT_VERIFIED',
               'nestedChildDiagnosticLimit': 'Only existing fixed Gateway wrapper stages are published; nested provider details remain private.'
@@ -184,17 +184,17 @@ jobs:
                           stage for stage in fixed_child_stages if stage in message
                       ]
               valid = (receipt['sourceSha'] == receipt['expectedHead'] and native == 0
-                       and counts == {'total': 77, 'executed': 77, 'passed': 77,
+                       and counts == {'total': 85, 'executed': 85, 'passed': 85,
                                       'failed': 0, 'notExecuted': 0}
-                       and groups == {'gatewayBrowserTransport': 2, 'gatewayGuards': 56, 'verificationTokens': 5,
+                       and groups == {'gatewayBrowserTransport': 2, 'gatewayGuards': 64, 'verificationTokens': 5,
                                       'registrationPostgreSql': 7, 'browserSessionPostgreSql': 6,
                                       'registrationTransport': 1, 'twoUserPostgreSql': 1}
                        and gateway_case_counts == dict.fromkeys(gateway_cases, 1)
-                       and len(rows) == 77 and len(set(identities)) == 77
+                       and len(rows) == 85 and len(set(identities)) == 85
                        and all(all(identity) for identity in identities)
                        and all(row.get('outcome') == 'Passed' for row in rows))
               receipt['status'] = 'PASS' if valid else 'FAIL'
-              receipt['reason'] = 'COMPLETE_77_TESTS' if valid else 'NATIVE_OR_INVENTORY_MISMATCH'
+              receipt['reason'] = 'COMPLETE_85_TESTS' if valid else 'NATIVE_OR_INVENTORY_MISMATCH'
           except (ET.ParseError, OSError, ValueError):
               receipt['reason'] = 'MISSING_OR_MALFORMED_TRX'
           (root / 'artifact/receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
