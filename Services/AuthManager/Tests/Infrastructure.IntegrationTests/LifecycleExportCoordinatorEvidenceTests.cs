@@ -446,7 +446,7 @@ public sealed class LifecycleExportCoordinatorEvidenceTests(PostgreSqlFixture fi
         {
             await database.Database.OpenConnectionAsync();
             await database.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
-            await database.GetService<IMigrator>().MigrateAsync();
+            await AuthTestMigrationInitializer.MigrateFreshDatabaseAsync(database);
         }
         await Execute(administrator, Bootstrap());
 

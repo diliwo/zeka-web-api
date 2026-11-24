@@ -1,4 +1,6 @@
 using Npgsql;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -165,6 +167,181 @@ public sealed class AuthOnboardingAtomicMigrationTests(AuthOnboardingAtomicFixtu
             await database.VerifyV20Async(ct);
             output.WriteLine("Commit acknowledgment loss is controlled fault injection after a real commit; no physical network-loss claim.");
         });
+
+    [Fact]
+    public Task Canonical_atomic_and_EF_bootstrap_reference_match_the_full_catalog_at_the_pinned_tool_provider()
+        => fixture.RunAsync(nameof(Canonical_atomic_and_EF_bootstrap_reference_match_the_full_catalog_at_the_pinned_tool_provider), output, async (database, ct) =>
+        {
+            var applied = await database.ExecuteAsync(ct);
+            Assert.Equal(0, applied.ExitCode);
+            Assert.Equal("ATOMIC_AUTH_APPLIED", applied.Evidence.Classification);
+            await database.AssertCommittedAsync(ct);
+            await database.VerifyV20Async(ct); // Before any post-target bootstrap could mask a bad atomic grant.
+            await database.AssertRuntimeDenialsAsync(ct);
+            var canonical = await database.CaptureCatalogAsync(ct);
+            var reference = await fixture.CreateDatabaseAsync(ct);
+            await reference.PrepareEfBootstrapCompatibilityAsync(ct);
+            await reference.AssertCommittedAsync(ct);
+            await reference.AssertRuntimeDenialsAsync(ct);
+            var compatibility = await reference.CaptureCatalogAsync(ct);
+            AssertComparableCatalogs(canonical, compatibility, "8.0.30");
+            output.WriteLine(JsonSerializer.Serialize(new { comparison = "atomic-versus-EF-bootstrap",
+                providerVersion = "8.0.30", schemaSecurityEqual = true, historyProductVersionDifference = "explicitly-verified",
+                canonical.QuerySha256, canonicalRows = canonical.Rows.Length, referenceRows = compatibility.Rows.Length,
+                canonicalFullDigest = canonical.Sha256, referenceFullDigest = compatibility.Sha256 }));
+        });
+
+    [Fact]
+    public Task Predecessor_upgrade_and_acknowledged_second_atomic_execution_preserve_the_complete_catalog()
+        => fixture.RunAsync(nameof(Predecessor_upgrade_and_acknowledged_second_atomic_execution_preserve_the_complete_catalog), output, async (database, ct) =>
+        {
+            await database.AssertTargetAbsentAsync(ct);
+            var first = await database.ExecuteAsync(ct);
+            Assert.Equal(0, first.ExitCode);
+            Assert.Equal("ATOMIC_AUTH_APPLIED", first.Evidence.Classification);
+            await database.VerifyV20Async(ct);
+            await database.AssertCommittedAsync(ct);
+            var committed = await database.CaptureCatalogAsync(ct);
+            AssertCanonicalHistory(committed);
+            var second = await database.ExecuteAsync(ct);
+            Assert.Equal(0, second.ExitCode);
+            Assert.Equal("ATOMIC_AUTH_ALREADY_CURRENT", second.Evidence.Classification);
+            Assert.Equal("not_needed", second.Evidence.Phases.Migration.Status);
+            Assert.Equal("not_needed", second.Evidence.Phases.Bootstrap.Status);
+            Assert.True(second.Evidence.AtomicAuth!.CommitAttempted);
+            Assert.True(second.Evidence.AtomicAuth.CommitAcknowledged);
+            Assert.False(second.Evidence.AtomicAuth.ReplayAttempted);
+            Assert.Equal("COMMITTED_VERIFIED", second.Evidence.AtomicAuth.DurableState);
+            await database.VerifyV20Async(ct);
+            await database.AssertRuntimeDenialsAsync(ct);
+            Assert.Equal(committed.Rows, (await database.CaptureCatalogAsync(ct)).Rows);
+            var upgrade = await fixture.CreateDatabaseAsync(ct);
+            await upgrade.PrepareBaselineAsync(ct); // Persisted exact predecessor before the atomic upgrade.
+            await upgrade.AssertTargetAbsentAsync(ct);
+            var upgraded = await upgrade.ExecuteAsync(ct);
+            Assert.Equal(0, upgraded.ExitCode);
+            Assert.Equal("ATOMIC_AUTH_APPLIED", upgraded.Evidence.Classification);
+            await upgrade.VerifyV20Async(ct);
+            await upgrade.AssertCommittedAsync(ct);
+            await upgrade.AssertRuntimeDenialsAsync(ct);
+            Assert.Equal(committed.Rows, (await upgrade.CaptureCatalogAsync(ct)).Rows);
+        });
+
+    // This operator-orchestrated comparison requires an independently admitted
+    // EF8 snapshot; default CI is NOT_EXECUTED. Build explicitly with
+    // -p:ZekaOperatorWitnesses=true, then select this exact FullyQualifiedName
+    // with dotnet test --no-build --no-restore and the protected snapshot input.
+#if ZEKA_OPERATOR_WITNESSES
+    [Fact]
+    public Task Canonical_atomic_catalog_matches_the_explicit_Auth_EF8_component_reference()
+#else
+    internal Task Canonical_atomic_catalog_matches_the_explicit_Auth_EF8_component_reference()
+#endif
+        => fixture.RunAsync(nameof(Canonical_atomic_catalog_matches_the_explicit_Auth_EF8_component_reference), output, async (database, ct) =>
+        {
+            var path = Environment.GetEnvironmentVariable("ZEKA_AUTH_EF8_CATALOG_SNAPSHOT_FILE");
+            if (path is null || !Path.IsPathFullyQualified(path) || !File.Exists(path)
+                || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0 || new FileInfo(path).Length > 8 * 1024 * 1024)
+                throw new InvalidOperationException("AUTH_EF8_COMPONENT_REFERENCE_REQUIRED");
+            // Producer evidence needs independent source/binary/TRX admission; hashes do not create trust.
+            var bytes = await File.ReadAllBytesAsync(path, ct);
+            using (var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 16 }))
+            {
+                RequireUniqueProperties(document.RootElement);
+                Assert.Equal(7, document.RootElement.EnumerateObject().Count());
+            }
+            var reference = JsonSerializer.Deserialize<AuthCatalogSnapshot>(bytes,
+                new JsonSerializerOptions { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 16 })
+                ?? throw new InvalidOperationException("AUTH_EF8_COMPONENT_REFERENCE_REJECTED");
+            Assert.Equal("Infrastructure.IntegrationTests", reference.ProducerAssembly.Name);
+            Assert.Equal("AuthManager.Infrastructure", reference.AuthInfrastructure.Name);
+            AssertAssemblyIdentity(reference.ProducerAssembly);
+            AssertAssemblyIdentity(reference.AuthInfrastructure);
+            AssertAssemblyIdentity(reference.EntityFramework);
+            Assert.Equal("Microsoft.EntityFrameworkCore", reference.EntityFramework.Name);
+            Assert.InRange(reference.Rows.Length, 1, 20000);
+            Assert.All(reference.Rows, row => Assert.True(row is not null && row.Length <= 65536));
+            Assert.Equal(0, (await database.ExecuteAsync(ct)).ExitCode);
+            await database.VerifyV20Async(ct);
+            await database.AssertCommittedAsync(ct);
+            await database.AssertRuntimeDenialsAsync(ct);
+            var canonical = await database.CaptureCatalogAsync(ct);
+            AssertComparableCatalogs(canonical, reference, "8.0.8");
+            output.WriteLine(JsonSerializer.Serialize(new { comparison = "tool-EF8.0.30-versus-Auth-EF8.0.8",
+                schemaSecurityEqual = true, historyProductVersionDifference = "explicitly-verified",
+                canonical.QuerySha256, canonical.EntityFramework, referenceEntityFramework = reference.EntityFramework,
+                canonical.AuthInfrastructure, referenceAuthInfrastructure = reference.AuthInfrastructure,
+                reference.ProducerAssembly, reference.CapturedAtUtc }));
+        });
+
+    private static void RequireUniqueProperties(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in value.EnumerateObject())
+            {
+                Assert.True(names.Add(property.Name), "Duplicate catalog reference property is not evidence.");
+                RequireUniqueProperties(property.Value);
+            }
+        }
+        else if (value.ValueKind == JsonValueKind.Array)
+            foreach (var item in value.EnumerateArray()) RequireUniqueProperties(item);
+    }
+
+    private static void AssertComparableCatalogs(AuthCatalogSnapshot canonical, AuthCatalogSnapshot reference, string referenceEf)
+    {
+        Assert.Equal("zeka-auth-catalog/v1", canonical.SchemaVersion);
+        Assert.Equal(canonical.SchemaVersion, reference.SchemaVersion);
+        Assert.Equal(canonical.QuerySha256, reference.QuerySha256);
+        Assert.Equal("8.0.30", canonical.EntityFramework.InformationalVersion.Split('+')[0]);
+        Assert.Equal(referenceEf, reference.EntityFramework.InformationalVersion.Split('+')[0]);
+        Assert.NotEmpty(canonical.Rows);
+        Assert.Equal(canonical.Rows.OrderBy(row => row, StringComparer.Ordinal), canonical.Rows);
+        Assert.Equal(reference.Rows.OrderBy(row => row, StringComparer.Ordinal), reference.Rows);
+        AssertCanonicalHistory(canonical);
+        var expectedHistory = History(canonical);
+        var observedHistory = History(reference);
+        Assert.Equal(expectedHistory.Select(row => row.Id), observedHistory.Select(row => row.Id));
+        Assert.All(observedHistory, row => Assert.Equal(referenceEf, row.ProductVersion));
+        // Retain raw history above. ProductVersion is separately verified build provenance;
+        // every non-history schema/security row still has to match byte-for-byte.
+        Assert.Equal(SecurityRows(canonical), SecurityRows(reference));
+    }
+
+    private static void AssertCanonicalHistory(AuthCatalogSnapshot snapshot)
+    {
+        var history = History(snapshot);
+        Assert.True(history.Length >= 2);
+        Assert.Equal(AuthOnboardingMigrationExecutor.FromMigration, history[^2].Id);
+        Assert.Equal(AuthOnboardingMigrationExecutor.TargetMigration, history[^1].Id);
+        Assert.All(history[..^1], row => Assert.Equal("8.0.30", row.ProductVersion));
+        // Exact value in the unchanged, hash-bound target SQL artifact.
+        Assert.Equal("8.0.8", history[^1].ProductVersion);
+    }
+
+    private static (string Id, string ProductVersion)[] History(AuthCatalogSnapshot snapshot)
+        => snapshot.Rows.Select(row =>
+        {
+            using var value = JsonDocument.Parse(row);
+            return value.RootElement[0].GetString() == "history"
+                ? (value.RootElement[1].GetString()!, value.RootElement[2].GetString()!) : ((string, string)?)null;
+        }).OfType<(string Id, string ProductVersion)>().OrderBy(row => row.Id, StringComparer.Ordinal).ToArray();
+
+    private static string[] SecurityRows(AuthCatalogSnapshot snapshot) => snapshot.Rows.Where(row =>
+    {
+        using var value = JsonDocument.Parse(row);
+        return value.RootElement[0].GetString() != "history";
+    }).ToArray();
+
+    private static void AssertAssemblyIdentity(AuthCatalogAssemblyIdentity identity)
+    {
+        Assert.False(string.IsNullOrEmpty(identity.Name));
+        Assert.False(string.IsNullOrEmpty(identity.Version));
+        Assert.True(Guid.TryParseExact(identity.ModuleVersionId, "D", out _));
+        Assert.Equal(64, identity.Sha256.Length);
+        Assert.All(identity.Sha256, character => Assert.True(character is >= '0' and <= '9' or >= 'a' and <= 'f'));
+    }
 
     private static void AssertRolledBack(EngineResult result)
     {

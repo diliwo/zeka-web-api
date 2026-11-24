@@ -354,8 +354,16 @@ public sealed class RegistrationTransportTests(RegistrationPostgreSqlFixture fix
         }
     }
 
+    // These owner-native release witnesses are NOT_EXECUTED in default CI.
+    // Build explicitly with -p:ZekaOperatorWitnesses=true, then select the exact
+    // FullyQualifiedName via dotnet test --no-build --no-restore after admitting
+    // the real owner Mailpit, issuer files, evidence destination and run budget.
+#if ZEKA_OPERATOR_WITNESSES
     [Fact]
     public Task Registration_release_cold_and_warm_account_states_are_observable()
+#else
+    internal Task Registration_release_cold_and_warm_account_states_are_observable()
+#endif
         => RunApprovedCaseAsync(ObserveColdAndWarmStatesAsync);
 
     private async Task ObserveColdAndWarmStatesAsync()
@@ -509,8 +517,13 @@ public sealed class RegistrationTransportTests(RegistrationPostgreSqlFixture fix
         output.WriteLine("ZEK27_SAMPLE " + JsonSerializer.Serialize(record));
     }
 
+    // Owner-native release witness: explicit opt-in and real admitted inputs required.
+#if ZEKA_OPERATOR_WITNESSES
     [Fact]
     public Task Registration_mail_verification_and_restricted_credential_denial_are_composed()
+#else
+    internal Task Registration_mail_verification_and_restricted_credential_denial_are_composed()
+#endif
         => RunApprovedCaseAsync(VerifyComposedMailAndDenialAsync);
 
     private async Task VerifyComposedMailAndDenialAsync()
@@ -613,8 +626,13 @@ public sealed class RegistrationTransportTests(RegistrationPostgreSqlFixture fix
         finally { ClosePostReservation(3); }
     }
 
+    // Owner-native release witness: explicit opt-in and real admitted inputs required.
+#if ZEKA_OPERATOR_WITNESSES
     [Fact]
     public Task Registration_and_issuer_readiness_compose_without_public_details()
+#else
+    internal Task Registration_and_issuer_readiness_compose_without_public_details()
+#endif
         => RunApprovedCaseAsync(VerifyCombinedReadinessAsync);
 
     private async Task VerifyCombinedReadinessAsync()

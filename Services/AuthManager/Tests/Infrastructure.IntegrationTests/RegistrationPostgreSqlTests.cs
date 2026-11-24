@@ -1,7 +1,5 @@
 using System.Data.Common;
-using System.Security.AccessControl;
 using System.Security.Cryptography;
-using System.Security.Principal;
 using System.Text;
 using AuthManager.Application.Onboarding;
 using AuthManager.Core.Enums;
@@ -682,18 +680,15 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
     private readonly string runtimeCredential = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private IContainer database = null!;
     private string keyPath = null!;
-    private DirectoryInfo? ownedKeyDirectory;
-    private string? ownedKeyPath;
+    private RegistrationVerificationKeyFixture? verificationKey;
 
     public async Task InitializeAsync()
     {
         try
         {
-        // Hosted/disposable tests own their input when no explicit protected file was supplied.
-        keyPath = Environment.GetEnvironmentVariable("ZEKA_ZEK27_VERIFICATION_KEY_FILE")
-            ?? CreateOwnedVerificationKey();
-        if (!Path.IsPathFullyQualified(keyPath) || !File.Exists(keyPath))
-            throw new InvalidOperationException("ZEK27_VERIFICATION_KEY_PATH_REJECTED");
+        verificationKey = RegistrationVerificationKeyFixture.Create(
+            Environment.GetEnvironmentVariable("ZEKA_ZEK27_VERIFICATION_KEY_FILE"));
+        keyPath = verificationKey.Path;
 
         var identity = Guid.NewGuid().ToString("N");
         database = new ContainerBuilder(Image)
@@ -722,7 +717,7 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
         }
         catch
         {
-            DeleteOwnedVerificationKey();
+            verificationKey?.Dispose();
             throw;
         }
     }
@@ -730,94 +725,7 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
     public async Task DisposeAsync()
     {
         try { if (database is not null) await database.DisposeAsync(); }
-        finally { DeleteOwnedVerificationKey(); }
-    }
-
-    private string CreateOwnedVerificationKey()
-    {
-        ownedKeyDirectory = Directory.CreateTempSubdirectory("zeka-zek49-verification-");
-        ownedKeyPath = Path.Combine(ownedKeyDirectory.FullName, "verification.key");
-        if (OperatingSystem.IsWindows())
-            RestrictWindowsKeyDirectory(ownedKeyDirectory);
-        else if (OperatingSystem.IsLinux())
-        {
-            File.SetUnixFileMode(ownedKeyDirectory.FullName, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-                File.GetUnixFileMode(ownedKeyDirectory.FullName));
-        }
-        else throw new InvalidOperationException("VERIFICATION_FIXTURE_KEY_PLATFORM_UNSUPPORTED");
-
-        var file = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
-        if (OperatingSystem.IsLinux()) file.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        using var stream = new FileStream(ownedKeyPath, file);
-        if (OperatingSystem.IsWindows()) VerifyWindowsKeyAccess(stream.GetAccessControl());
-        else if (OperatingSystem.IsLinux())
-            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(ownedKeyPath));
-        var material = RandomNumberGenerator.GetBytes(32);
-        try { stream.Write(material); }
-        finally { CryptographicOperations.ZeroMemory(material); }
-        return ownedKeyPath;
-    }
-
-    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static void RestrictWindowsKeyDirectory(DirectoryInfo directory)
-    {
-        using var identity = WindowsIdentity.GetCurrent();
-        var owner = identity.User ?? throw new InvalidOperationException("VERIFICATION_FIXTURE_OWNER_UNAVAILABLE");
-        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-        var security = new DirectorySecurity();
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.SetOwner(owner);
-        foreach (var principal in new[] { owner, system })
-            security.AddAccessRule(new FileSystemAccessRule(principal, FileSystemRights.FullControl,
-                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-        directory.SetAccessControl(security);
-        var actual = directory.GetAccessControl();
-        Assert.True(actual.AreAccessRulesProtected);
-        VerifyWindowsKeyAccess(actual);
-    }
-
-    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static void VerifyWindowsKeyAccess(FileSystemSecurity security)
-    {
-        using var identity = WindowsIdentity.GetCurrent();
-        var owner = identity.User ?? throw new InvalidOperationException("VERIFICATION_FIXTURE_OWNER_UNAVAILABLE");
-        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-        Assert.Equal(owner, security.GetOwner(typeof(SecurityIdentifier)));
-        var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
-            .Cast<FileSystemAccessRule>().ToArray();
-        Assert.Equal(2, rules.Length);
-        Assert.All(rules, rule =>
-        {
-            Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
-            Assert.Equal(FileSystemRights.FullControl, rule.FileSystemRights);
-            Assert.True(rule.IdentityReference.Equals(owner) || rule.IdentityReference.Equals(system));
-        });
-    }
-
-    private void DeleteOwnedVerificationKey()
-    {
-        if (ownedKeyDirectory is null) return; // Explicit externally supplied keys are never owned or removed.
-        var directory = Path.GetFullPath(ownedKeyDirectory.FullName);
-        var tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!directory.StartsWith(tempRoot + Path.DirectorySeparatorChar, comparison)
-            || Path.GetDirectoryName(ownedKeyPath) != directory)
-            throw new InvalidOperationException("VERIFICATION_FIXTURE_KEY_CLEANUP_BOUNDARY_REJECTED");
-        if (Directory.Exists(directory))
-        {
-            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidOperationException("VERIFICATION_FIXTURE_KEY_CLEANUP_REPARSE_REJECTED");
-            if (File.Exists(ownedKeyPath))
-            {
-                if ((File.GetAttributes(ownedKeyPath) & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidOperationException("VERIFICATION_FIXTURE_KEY_CLEANUP_REPARSE_REJECTED");
-                File.Delete(ownedKeyPath);
-            }
-            ownedKeyDirectory.Delete(recursive: false);
-        }
-        ownedKeyDirectory = null;
-        ownedKeyPath = null;
+        finally { verificationKey?.Dispose(); }
     }
 
     internal async Task<string> CreateEmptyDatabaseRuntimeAsync()
@@ -844,7 +752,7 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
         {
             await db.Database.OpenConnectionAsync();
             await db.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
-            await db.Database.MigrateAsync();
+            await AuthTestMigrationInitializer.MigrateFreshDatabaseAsync(db);
         }
         await BootstrapAsync(owner);
         await BootstrapAsync(owner);
