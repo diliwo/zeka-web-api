@@ -78,8 +78,8 @@ try
     {
         using var compiledContext = Context(service, databaseAdmin);
         var compiled = compiledContext.Database.GetMigrations().ToArray();
-        if (compiled.Length < 2 || compiled[^2] != ManagedMigrationAdapter.AuthPredecessor
-            || compiled[^1] != ManagedMigrationAdapter.AuthTarget)
+        if (compiled.Length < 3 || compiled[^3] != ManagedMigrationAdapter.AuthPredecessor
+            || compiled[^2] != ManagedMigrationAdapter.AuthTarget || compiled[^1] != ManagedMigrationAdapter.AuthOwnerIndexTarget)
             throw new InvalidOperationException("AUTH_COMPILED_HISTORY_REJECTED");
         if (!request.Completed)
         {
@@ -147,15 +147,24 @@ try
             await ReconcileAuthPredecessor(databaseAdmin, service, postgres, ct);
             bootstrapExecutions++;
         }
-        plan = await RunMigration("plan", ManagedMigrationAdapter.AuthTarget);
+        if (!request.Completed)
+        {
+            var onboardingPlan = await RunMigration("plan", ManagedMigrationAdapter.AuthTarget);
+            if (onboardingPlan.Classification != "FORWARD_APPROVED")
+                throw new InvalidOperationException("AUTH_PREDECESSOR_BINDING_REJECTED");
+            var onboarding = await RunMigration("apply", ManagedMigrationAdapter.AuthTarget);
+            if (!onboarding.AtomicAuth || onboarding.Classification != "ATOMIC_AUTH_APPLIED")
+                throw new InvalidOperationException("AUTH_ATOMIC_STATE_REJECTED");
+        }
+        plan = await RunMigration("plan", ManagedMigrationAdapter.AuthOwnerIndexTarget);
         if (request.Completed && !plan.IsAcknowledgedCurrent)
             throw new InvalidOperationException("ESTABLISHED_MIGRATION_HISTORY_DRIFT");
         if (!request.Completed && plan.Classification != "FORWARD_APPROVED")
             throw new InvalidOperationException("AUTH_PREDECESSOR_BINDING_REJECTED");
-        apply = await RunMigration("apply", ManagedMigrationAdapter.AuthTarget);
+        apply = await RunMigration("apply", ManagedMigrationAdapter.AuthOwnerIndexTarget);
         if (!apply.AtomicAuth || (request.Completed ? !apply.IsAcknowledgedCurrent : apply.Classification != "ATOMIC_AUTH_APPLIED"))
             throw new InvalidOperationException("AUTH_ATOMIC_STATE_REJECTED");
-        // No post-target bootstrap: the unchanged atomic executor's v20/grant checks
+        // No post-target bootstrap: the exact v20 then v21 executor/grant checks
         // must stand on their own and may not be repaired before verification.
     }
     else
@@ -312,18 +321,19 @@ static async Task ReconcileAuthPredecessor(NpgsqlConnection database, Service se
     {
         using var context = Context(service, database);
         var expected = context.Database.GetMigrations().ToArray();
-        if (expected.Length < 2 || expected[^2] != ManagedMigrationAdapter.AuthPredecessor || expected[^1] != ManagedMigrationAdapter.AuthTarget)
+        if (expected.Length < 3 || expected[^3] != ManagedMigrationAdapter.AuthPredecessor || expected[^2] != ManagedMigrationAdapter.AuthTarget
+            || expected[^1] != ManagedMigrationAdapter.AuthOwnerIndexTarget)
             throw new InvalidOperationException("AUTH_COMPILED_HISTORY_REJECTED");
         var before = await Rows(database, """
             SELECT "MigrationId" FROM public."__EFMigrationsHistory" ORDER BY "MigrationId"
             """, ct);
-        if (!before.Select(row => row[0]).SequenceEqual(expected[..^1], StringComparer.Ordinal))
+        if (!before.Select(row => row[0]).SequenceEqual(expected[..^2], StringComparer.Ordinal))
             throw new InvalidOperationException("AUTH_PREDECESSOR_BINDING_REJECTED");
         await Execute(database, File.ReadAllText("/run/source/bootstrap-auth-roles.sql"), ct, bootstrapService: "auth");
         var after = await Rows(database, """
             SELECT "MigrationId" FROM public."__EFMigrationsHistory" ORDER BY "MigrationId"
             """, ct);
-        if (!after.Select(row => row[0]).SequenceEqual(expected[..^1], StringComparer.Ordinal))
+        if (!after.Select(row => row[0]).SequenceEqual(expected[..^2], StringComparer.Ordinal))
             throw new InvalidOperationException("AUTH_PREDECESSOR_BINDING_REJECTED");
     }
     catch (Exception error) { diagnostics.Capture(error); primaryFailure = error; throw; }

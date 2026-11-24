@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.RateLimiting;
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 
 namespace AuthManager.API.Endpoints;
 
@@ -146,6 +148,9 @@ public static class BrowserSessionEndpoints
             var http = context.HttpContext;
             http.Response.Headers.CacheControl = "no-store";
             if (!HttpMethods.IsPost(http.Request.Method)) return await next(context);
+            if (http.Request.Path == CookiePath + "/organisations"
+                && !BrowserOrganisationEndpoints.TryReadIdentity(http.User, out _, out _))
+                return Results.Unauthorized();
             var expected = app.Configuration["BrowserSession:Origin"];
             if (!ValidOrigin(expected)) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             if (http.Request.Headers.Origin.Count != 1
@@ -156,8 +161,24 @@ public static class BrowserSessionEndpoints
             return await next(context);
         });
         group.MapBrowserRegistrations();
-        group.MapGet("/csrf", (HttpContext http, IAntiforgery antiforgery) =>
+        group.MapBrowserOrganisationCreation();
+        group.MapGet("/csrf", async (HttpContext http, IAntiforgery antiforgery) =>
         {
+            // Identity's cookie default does not authenticate a browser's memory-only bearer.
+            // Bind authenticated mutation tokens to that same validated subject; anonymous
+            // sign-in/restore/logout keep their existing anonymous antiforgery contract.
+            if (http.Request.Headers.ContainsKey("Authorization"))
+            {
+                if (http.Request.Headers.Authorization.Count != 1
+                    || !http.Request.Headers.Authorization[0]!.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                    return Results.Unauthorized();
+                var bearer = await http.AuthenticateAsync(JwtBearerDefaults.AuthenticationScheme);
+                if (!bearer.Succeeded || bearer.Principal is null)
+                    return Results.Challenge(authenticationSchemes: [JwtBearerDefaults.AuthenticationScheme]);
+                if (!BrowserOrganisationEndpoints.TryReadIdentity(bearer.Principal, out _, out _))
+                    return Results.Unauthorized();
+                http.User = bearer.Principal;
+            }
             try { return Results.Ok(new { ContractVersion = 1, CsrfToken = antiforgery.GetAndStoreTokens(http).RequestToken }); }
             catch (System.Security.Cryptography.CryptographicException) { return Results.StatusCode(503); }
         });

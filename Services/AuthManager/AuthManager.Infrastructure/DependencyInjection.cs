@@ -19,6 +19,8 @@ using Microsoft.Extensions.Hosting;
 using Zeka.PersistenceSecurity;
 using AuthManager.Application.Lifecycle;
 using AuthManager.Infrastructure.Lifecycle;
+using AuthManager.Application.Provisioning;
+using AuthManager.Infrastructure.Provisioning;
 
 namespace AuthManager.Infrastructure;
 
@@ -47,7 +49,8 @@ public static class DependencyInjection
 
         services.AddOnboardingPersistenceFoundations(configuration);
         services.AddSingleton(BrowserSessionPolicy.Read(configuration));
-        services.AddScoped<AuthManager.Application.Authentication.IBrowserSessions, BrowserSessions>();
+        services.AddScoped<BrowserSessions>();
+        services.AddScoped<AuthManager.Application.Authentication.IBrowserSessions>(provider => provider.GetRequiredService<BrowserSessions>());
         services.AddScoped<AuthManager.Application.Authorization.ICurrentTenantAccess, CurrentTenantAccessResolver>();
         services.AddScoped<AuthManager.Application.Authorization.IEligibleOrganisations, EligibleOrganisationsResolver>();
         services.AddScoped<AuthManager.Application.Authorization.IAssigneeEligibility, AssigneeEligibilityResolver>();
@@ -92,6 +95,14 @@ public static class DependencyInjection
             services.AddScoped<Onboarding.VerificationMailDispatcher>();
             services.AddHostedService<Onboarding.VerificationMailWorker>();
         }
+        return services;
+    }
+
+    public static IServiceCollection AddBrowserOrganisationCreation(this IServiceCollection services,
+        IConfiguration configuration, IHostEnvironment environment)
+    {
+        services.AddSingleton(BrowserOrganisationCreationPolicy.Read(configuration, environment));
+        services.AddScoped<IBrowserOrganisationCreation, BrowserOrganisationCreationService>();
         return services;
     }
 

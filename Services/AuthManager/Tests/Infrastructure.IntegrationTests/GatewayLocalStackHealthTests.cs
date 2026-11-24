@@ -47,7 +47,7 @@ public sealed class GatewayLocalStackHealthTests
         await using var app = builder.Build();
         var routes = app.Services.GetRequiredService<IOptions<FileConfiguration>>().Value.Routes
             .Where(route => route.Key?.StartsWith("GatewayBrowserTransport:") == true).ToArray();
-        Assert.Equal(9, routes.Length);
+        Assert.Equal(11, routes.Length);
         Assert.All(routes, route => Assert.Equal("https", route.DownstreamScheme));
         foreach (var path in new[]
         {
@@ -72,7 +72,7 @@ public sealed class GatewayLocalStackHealthTests
         await AssertHealthAsync(host.Http, "/health/live", HttpStatusCode.OK);
         await AssertHealthAsync(host.Http, "/health/ready", HttpStatusCode.OK);
         Assert.Empty(host.Received);
-        Assert.Equal(9, host.Routes.Routes.Count(route => route.Key!.StartsWith("GatewayBrowserTransport:")));
+        Assert.Equal(11, host.Routes.Routes.Count(route => route.Key!.StartsWith("GatewayBrowserTransport:")));
         Assert.All(host.Routes.Routes.Where(route => route.Key!.StartsWith("GatewayBrowserTransport:")), route =>
         {
             Assert.Equal("https", route.DownstreamScheme);
@@ -220,6 +220,7 @@ public sealed class GatewayLocalStackHealthTests
     [InlineData(CsrfPath)]
     [InlineData("/api/v1/browser-organisations/eligible")]
     [InlineData("/api/v1/tenant-access/11111111-1111-1111-1111-111111111111")]
+    [InlineData("/api/v1/browser-organisations/11111111-1111-1111-1111-111111111111/access")]
     public async Task Valid_HTTPS_browser_transport_forwards_the_canonical_peer_and_existing_credentials(string path)
     {
         await using var host = await StartAsync(configure: values =>
@@ -237,6 +238,7 @@ public sealed class GatewayLocalStackHealthTests
 
     [Theory]
     [InlineData("/api/v1/browser-session/onboarding/registrations/resend")]
+    [InlineData("/api/v1/browser-session/organisations")]
     [InlineData("/api/v1/browser-session/onboarding/registrations/email-verification/exchange")]
     public async Task Verification_POST_routes_preserve_the_exact_Gateway_transport_boundary(string path)
     {
@@ -303,6 +305,12 @@ public sealed class GatewayLocalStackHealthTests
     [InlineData("GET", "/api/v1/browser-session/onboarding/registrations/email-verification/exchange")]
     [InlineData("HEAD", "/api/v1/browser-session/onboarding/registrations/email-verification/exchange")]
     [InlineData("POST", "/api/v1/browser-session/onboarding/registrations/unapproved")]
+    [InlineData("GET", "/api/v1/browser-session/organisations")]
+    [InlineData("POST", "/api/v1/browser-organisations/11111111-1111-1111-1111-111111111111/access")]
+    [InlineData("GET", "/api/v1/browser-organisations/00000000-0000-0000-0000-000000000000/access")]
+    [InlineData("GET", "/api/v1/browser-organisations/not-a-guid/access")]
+    [InlineData("GET", "/api/v1/browser-organisations/11111111-1111-1111-1111-111111111111/access/extra")]
+    [InlineData("GET", "/api/v1/browser-organisations/11111111-1111-1111-1111-111111111111/access/")]
     public async Task Only_exact_reviewed_browser_method_paths_are_admitted(string method, string path)
     {
         await using var host = await StartAsync();
@@ -443,7 +451,9 @@ public sealed class GatewayLocalStackHealthTests
             ("POST", "/api/v1/browser-session/onboarding/registrations"),
             ("POST", "/api/v1/browser-session/onboarding/registrations/resend"),
             ("POST", "/api/v1/browser-session/onboarding/registrations/email-verification/exchange"),
-            ("GET", "/api/v1/browser-organisations/eligible"), ("GET", "/api/v1/tenant-access/{organisationId}")
+            ("GET", "/api/v1/browser-organisations/eligible"), ("GET", "/api/v1/tenant-access/{organisationId}"),
+            ("POST", "/api/v1/browser-session/organisations"),
+            ("GET", "/api/v1/browser-organisations/{organisationId}/access")
         };
         for (var index = 0; index < routes.Length; index++)
         {

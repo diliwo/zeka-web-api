@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Zeka.DbMigrate;
@@ -30,10 +29,6 @@ internal sealed record AuthOnboardingSqlArtifacts(string MigrationSql, string Gr
         @"\bINSERT\s+INTO\s+(?:(?:""public""|public)\s*\.\s*)?""__EFMigrationsHistory""\s*\(\s*""MigrationId""\s*,\s*""ProductVersion""\s*\)\s*VALUES\s*\(\s*'"
         + Regex.Escape(TargetMigration) + @"'\s*,\s*'[^'\r\n]+'\s*\)\s*;",
         SqlPatternOptions, PatternTimeout);
-    private static readonly Regex ManifestResourceName = new(
-        @"(?:^|\.)rls-manifest\.v[0-9]+\.json\z",
-        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, PatternTimeout);
-
     internal static AuthOnboardingSqlArtifacts Load()
     {
         try
@@ -53,26 +48,8 @@ internal sealed record AuthOnboardingSqlArtifacts(string MigrationSql, string Gr
         }
     }
 
-    internal static void VerifyManifestBinding(Assembly authAssembly)
-    {
-        try
-        {
-            ArgumentNullException.ThrowIfNull(authAssembly);
-            var resources = authAssembly.GetManifestResourceNames()
-                .Where(name => ManifestResourceName.IsMatch(name)).ToArray();
-            if (resources.Length != 1 || !resources[0].EndsWith("rls-manifest.v20.json", StringComparison.Ordinal))
-                throw new InvalidDataException();
-            var bytes = ReadBoundResource(authAssembly, resources[0], ManifestSha256);
-            using var manifest = JsonDocument.Parse(DecodeStrictUtf8(bytes));
-            if (manifest.RootElement.GetProperty("schemaVersion").GetInt32() != 20
-                || manifest.RootElement.GetProperty("service").GetString() != "AuthManagement")
-                throw new InvalidDataException();
-        }
-        catch
-        {
-            throw new InvalidOperationException("AUTH_ONBOARDING_MANIFEST_BINDING_REJECTED");
-        }
-    }
+    internal static void VerifyManifestBinding(Assembly authAssembly) =>
+        AuthExactMigrationStep.VerifyActiveManifestBinding(authAssembly);
 
     private static byte[] ReadBoundResource(Assembly assembly, string name, string expectedSha256)
     {

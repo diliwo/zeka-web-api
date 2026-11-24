@@ -32,7 +32,9 @@ public sealed class CurrentTenantAccessTests : IAsyncLifetime
         database.Entry(user).Property(x => x.Status).CurrentValue = UserStatus.Active;
         var organisation = Organisation.Create(Guid.NewGuid(), "Synthetic", user.Id, now);
         organisation.Activate(now);
-        var membership = OrganisationMembership.CreateOwner(Guid.NewGuid(), organisation.Id, user.Id, now);
+        var membership = revoked == "membership"
+            ? OrganisationMembership.Create(Guid.NewGuid(), organisation.Id, user.Id, PermissionSet.OrganisationAdministratorId, now)
+            : OrganisationMembership.CreateOwner(Guid.NewGuid(), organisation.Id, user.Id, now);
         database.AddRange(organisation, membership); await database.SaveChangesAsync();
         var resolver = new CurrentTenantAccessResolver(database, TimeProvider.System);
         var links = new ActiveOrganisationMembership(database);

@@ -1231,6 +1231,10 @@ namespace AuthManager.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex(new[] { "OrganisationId" }, "UX_OrganisationMemberships_ActiveOwner")
+                        .IsUnique()
+                        .HasFilter("\"PermissionSetId\" = 'D8ECEEEB-B796-4D77-92A5-6A11FAB10A01' AND \"Status\" = 1");
+
                     b.HasIndex("OrganisationId");
 
                     b.HasIndex("PermissionSetId");

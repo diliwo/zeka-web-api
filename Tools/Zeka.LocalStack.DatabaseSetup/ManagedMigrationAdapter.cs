@@ -14,6 +14,10 @@ internal static class ManagedMigrationAdapter
     private static readonly TimeSpan DrainLimit = TimeSpan.FromSeconds(5);
     internal const string AuthPredecessor = "20261018144506_BrowserSessionSnapshot";
     internal const string AuthTarget = "20261115195218_OnboardingRegistration";
+    internal const string AuthOwnerIndexTarget = "20261124170000_OrganisationSingleActiveOwner";
+    private const string AuthOwnerIndexMigrationHash = "8b2b5ad1ac51c7d0038e127b75791324c11bf4a76c699524b31feee084249400";
+    private const string AuthOwnerIndexManifestHash = "93157072e70a23718e7f943f9e4340970e638da8347b06b4d672a47555e2baa0";
+    private const string NoGrantHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     private const string AuthMigrationHash = "b68a058177c27b67e22c81e11cf6ec3c0eedbe69833937b534057bc2af7075e2";
     private const string AuthGrantHash = "b897bc6e7f933a538142696b81644d91c4d9439cb5ee7db1933106c52b9ac841";
     private const string AuthManifestHash = "6eca66966a8957a7dfc558d308992c2a92e9dd324ae3bcf2b232f583f314b944";
@@ -85,9 +89,9 @@ internal static class ManagedMigrationAdapter
         if (!OperatingSystem.IsLinux()) throw new SetupFailure("MIGRATION_LINUX_EVIDENCE_REQUIRED", null);
         if (operation is not ("plan" or "apply") || service is not ("auth" or "adminarea" or "client")
             || sourceCommit.Length != 40 || sourceCommit.Any(c => !Uri.IsHexDigit(c))
-            || (requestedTarget != "latest" && (service != "auth" || requestedTarget is not (AuthPredecessor or AuthTarget)))
+            || (requestedTarget != "latest" && (service != "auth" || requestedTarget is not (AuthPredecessor or AuthTarget or AuthOwnerIndexTarget)))
             || (expectedDatabase is not null && !SafeIdentifier(expectedDatabase, 63))
-            || (service == "auth" && operation == "apply" && requestedTarget == AuthTarget && expectedDatabase is null))
+            || (service == "auth" && operation == "apply" && requestedTarget is (AuthTarget or AuthOwnerIndexTarget) && expectedDatabase is null))
             throw new SetupFailure("MIGRATION_OPERATION_IDENTITY_REJECTED", null);
         var id = Guid.NewGuid();
         var path = Path.Combine("/tmp", "zeka-m1-migration-" + id.ToString("N"));
@@ -217,7 +221,7 @@ internal static class ManagedMigrationAdapter
     }
 
     private static bool IsAtomicContext(MigrationOperationContext context) => context.Service == "auth"
-        && context.Operation == "apply" && context.RequestedTarget == AuthTarget;
+        && context.Operation == "apply" && context.RequestedTarget is (AuthTarget or AuthOwnerIndexTarget);
 
     private static void ValidateEnvelope(JsonElement root, MigrationOperationContext context, int exit)
     {
@@ -301,6 +305,9 @@ internal static class ManagedMigrationAdapter
 
     private static void ValidateAtomicEnvelope(JsonElement root, MigrationOperationContext context, int exit)
     {
+        var ownerIndex = context.RequestedTarget == AuthOwnerIndexTarget;
+        var target = context.RequestedTarget;
+        var predecessor = ownerIndex ? AuthTarget : AuthPredecessor;
         var hasDiagnostic = root.TryGetProperty("postgresDiagnostic", out var diagnostic);
         if (hasDiagnostic) _ = SafePostgresDiagnostic.Parse(diagnostic);
         if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != (hasDiagnostic ? 21 : 20)
@@ -311,8 +318,8 @@ internal static class ManagedMigrationAdapter
             || root.GetProperty("operation").GetString() != "apply"
             || root.GetProperty("service").GetString() != "auth"
             || root.GetProperty("logicalDatabase").GetString() != "AuthManagement"
-            || root.GetProperty("requestedTarget").GetString() != AuthTarget
-            || root.GetProperty("resolvedTarget").GetString() != AuthTarget
+            || root.GetProperty("requestedTarget").GetString() != target
+            || root.GetProperty("resolvedTarget").GetString() != target
             || !SafeIdentifier(context.ExpectedDatabase, 63)
             || root.GetProperty("endedAt").GetDateTimeOffset() < root.GetProperty("startedAt").GetDateTimeOffset())
             throw new InvalidDataException();
@@ -349,9 +356,9 @@ internal static class ManagedMigrationAdapter
         var atomic = root.GetProperty("atomicAuth");
         ExactProperties(atomic, "migrationSqlSha256", "grantSqlSha256", "manifestSha256", "commitAttempted",
             "commitAcknowledged", "rollbackConfirmed", "durableState", "replayAttempted", "databaseName", "backendPid", "failedStage");
-        if (atomic.GetProperty("migrationSqlSha256").GetString() != AuthMigrationHash
-            || atomic.GetProperty("grantSqlSha256").GetString() != AuthGrantHash
-            || atomic.GetProperty("manifestSha256").GetString() != AuthManifestHash
+        if (atomic.GetProperty("migrationSqlSha256").GetString() != (ownerIndex ? AuthOwnerIndexMigrationHash : AuthMigrationHash)
+            || atomic.GetProperty("grantSqlSha256").GetString() != (ownerIndex ? NoGrantHash : AuthGrantHash)
+            || atomic.GetProperty("manifestSha256").GetString() != (ownerIndex ? AuthOwnerIndexManifestHash : AuthManifestHash)
             || atomic.GetProperty("replayAttempted").GetBoolean()) throw new InvalidDataException();
         var attempted = atomic.GetProperty("commitAttempted").GetBoolean();
         var acknowledged = atomic.GetProperty("commitAcknowledged").GetBoolean();
@@ -367,7 +374,9 @@ internal static class ManagedMigrationAdapter
         if (stage.ValueKind != JsonValueKind.Null && stage.GetString() is not (
             "ARTIFACT_BINDING" or "CONNECTION" or "TRANSACTION" or "ADVISORY_TRANSACTION_LOCK" or "ROLE_IDENTITY"
             or "HISTORY_AND_SCHEMA_RECHECK" or "MIGRATION_SQL" or "APPROVED_GRANTS" or "EXACT_SCHEMA_VERIFICATION"
-            or "FULL_V20_VERIFICATION" or "COMMIT")) throw new InvalidDataException();
+            or "FULL_V20_VERIFICATION" or "FULL_V21_VERIFICATION" or "COMMIT")) throw new InvalidDataException();
+        if ((stage.GetString() == "FULL_V21_VERIFICATION" && !ownerIndex)
+            || (stage.GetString() == "FULL_V20_VERIFICATION" && ownerIndex)) throw new InvalidDataException();
         var durable = atomic.GetProperty("durableState").GetString();
         if (durable is not ("NOT_CHECKED" or "ROLLED_BACK" or "INCONCLUSIVE" or "COMMITTED_VERIFIED" or "BASELINE_VERIFIED"))
             throw new InvalidDataException();
@@ -388,7 +397,7 @@ internal static class ManagedMigrationAdapter
                 throw new InvalidDataException();
         if (exit != 0)
         {
-            ValidateFailedAtomic(root, exit);
+            ValidateFailedAtomic(root, context, exit);
             return; // A correlated native failure is exported, never upgraded to success.
         }
         ValidateSuccessfulIdentity(root);
@@ -396,17 +405,17 @@ internal static class ManagedMigrationAdapter
             || !attempted || !acknowledged || rollback.ValueKind != JsonValueKind.Null
             || durable != "COMMITTED_VERIFIED" || database.GetString() != context.ExpectedDatabase
             || pid.ValueKind != JsonValueKind.Number || stage.ValueKind != JsonValueKind.Null
-            || root.GetProperty("observedFinalMigration").GetString() != AuthTarget
+            || root.GetProperty("observedFinalMigration").GetString() != target
             || phases.GetProperty("manifestVerification").GetProperty("status").GetString() != "passed")
             throw new InvalidDataException();
         var current = classification == "ATOMIC_AUTH_ALREADY_CURRENT";
-        if (root.GetProperty("startingMigration").GetString() != (current ? AuthTarget : AuthPredecessor)
+        if (root.GetProperty("startingMigration").GetString() != (current ? target : predecessor)
             || phases.GetProperty("migration").GetProperty("status").GetString() != (current ? "not_needed" : "passed")
-            || phases.GetProperty("bootstrapReconciliation").GetProperty("status").GetString() != (current ? "not_needed" : "passed"))
+            || phases.GetProperty("bootstrapReconciliation").GetProperty("status").GetString() != (current || ownerIndex ? "not_needed" : "passed"))
             throw new InvalidDataException();
     }
 
-    private static void ValidateFailedAtomic(JsonElement root, int exit)
+    private static void ValidateFailedAtomic(JsonElement root, MigrationOperationContext context, int exit)
     {
         var atomic = root.GetProperty("atomicAuth");
         var stage = atomic.GetProperty("failedStage").GetString();
@@ -416,7 +425,7 @@ internal static class ManagedMigrationAdapter
             "ADVISORY_TRANSACTION_LOCK" => 3, "ROLE_IDENTITY" => 4,
             "HISTORY_AND_SCHEMA_RECHECK" => 5, "MIGRATION_SQL" => 6,
             "APPROVED_GRANTS" => 7, "EXACT_SCHEMA_VERIFICATION" => 8,
-            "FULL_V20_VERIFICATION" => 9, "COMMIT" => 10,
+            "FULL_V20_VERIFICATION" or "FULL_V21_VERIFICATION" => 9, "COMMIT" => 10,
             _ => throw new InvalidDataException()
         };
         var classification = root.GetProperty("classification").GetString();
@@ -496,11 +505,14 @@ internal static class ManagedMigrationAdapter
                 || (session == "zeka_auth_migrator" && current == "zeka_auth_owner"))))
             throw new InvalidDataException();
 
-        ValidateFailedAtomicPhases(root, step, rollback == JsonValueKind.True);
+        ValidateFailedAtomicPhases(root, context, step, rollback == JsonValueKind.True);
     }
 
-    private static void ValidateFailedAtomicPhases(JsonElement root, int step, bool rolledBack)
+    private static void ValidateFailedAtomicPhases(JsonElement root, MigrationOperationContext context, int step, bool rolledBack)
     {
+        var ownerIndex = context.RequestedTarget == AuthOwnerIndexTarget;
+        var target = context.RequestedTarget;
+        var predecessor = ownerIndex ? AuthTarget : AuthPredecessor;
         var phases = root.GetProperty("phases");
         var migration = phases.GetProperty("migration").GetProperty("status").GetString();
         var grants = phases.GetProperty("bootstrapReconciliation").GetProperty("status").GetString();
@@ -510,25 +522,25 @@ internal static class ManagedMigrationAdapter
         var starting = root.GetProperty("startingMigration").GetString();
         var final = root.GetProperty("observedFinalMigration").GetString();
         var code = root.GetProperty("resultCode").GetString();
-        var completed = (migration == passed && grants == passed && starting == AuthPredecessor)
-            || (migration == "not_needed" && grants == "not_needed" && starting == AuthTarget);
+        var completed = (migration == passed && grants == (ownerIndex ? "not_needed" : passed) && starting == predecessor)
+            || (migration == "not_needed" && grants == "not_needed" && starting == target);
         var valid = step switch
         {
             <= 5 => migration == "not_started" && grants == "not_started" && manifest == "not_started"
                 && final is null && (step == 5 || starting is null),
             6 => migration == started && grants == "not_started" && manifest == "not_started"
-                && starting == AuthPredecessor && final is null,
-            7 => migration == passed && (grants == started || grants == passed) && manifest == "not_started"
-                && starting == AuthPredecessor && final is null,
+                && starting == predecessor && final is null,
+            7 => migration == passed && (ownerIndex ? grants == "not_needed" : grants == started || grants == passed) && manifest == "not_started"
+                && starting == predecessor && final is null,
             8 => completed && manifest == "not_started" && final is null,
-            9 => completed && (manifest is "failed" or "passed") && final == AuthTarget,
-            10 => completed && manifest == "passed" && final == AuthTarget,
+            9 => completed && (manifest is "failed" or "passed") && final == target,
+            10 => completed && manifest == "passed" && final == target,
             _ => false
         };
         if (!valid
             || (code == "ATOMIC_AUTH_COMPILED_HISTORY_REJECTED" && starting is not null)
             || (code is "ATOMIC_AUTH_BASELINE_SCHEMA_REJECTED" or "ATOMIC_AUTH_DEFAULT_PRIVILEGES_REJECTED"
-                && starting is not (AuthPredecessor or AuthTarget))) throw new InvalidDataException();
+                && starting != predecessor && starting != target)) throw new InvalidDataException();
     }
 
     private static void ExactProperties(JsonElement value, params string[] expected)

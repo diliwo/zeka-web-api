@@ -8,13 +8,16 @@ using Microsoft.EntityFrameworkCore.Storage;
 namespace AuthManager.Infrastructure.Provisioning;
 
 // This adapter never retries business work or commits a caller-owned transaction.
-public sealed class OrganisationProvisioningTransaction(AuthDbContext database) : IProvisioningTransaction
+public sealed class OrganisationProvisioningTransaction(AuthDbContext database,
+    IsolationLevel isolationLevel = IsolationLevel.Serializable) : IProvisioningTransaction
 {
     public async Task<OrganisationProvisioningResult> ExecuteAsync(
         Func<CancellationToken, Task<OrganisationProvisioningResult>> operation,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operation);
+        if (isolationLevel is not (IsolationLevel.Serializable or IsolationLevel.ReadCommitted))
+            throw new OrganisationProvisioningPersistenceException("PROVISIONING_ISOLATION_REJECTED");
         if (database.Database.CurrentTransaction is not null)
             throw new OrganisationProvisioningPersistenceException("PROVISIONING_CALLER_TRANSACTION_REJECTED");
         var attempted = false;
@@ -28,7 +31,7 @@ public sealed class OrganisationProvisioningTransaction(AuthDbContext database) 
             var committed = false;
             try
             {
-                transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, attemptToken);
+                transaction = await database.Database.BeginTransactionAsync(isolationLevel, attemptToken);
                 var result = await operation(attemptToken);
                 await database.SaveChangesAsync(attemptToken);
                 commitStarted = true;
@@ -71,8 +74,27 @@ public sealed class OrganisationProvisioningTransaction(AuthDbContext database) 
     }
 }
 
-public sealed class OrganisationProvisioningRepository(AuthDbContext database) : IOrganisationProvisioningRepository
+public sealed class OrganisationProvisioningRepository(AuthDbContext database)
+    : IOrganisationProvisioningRepository, IOrganisationOwnershipPolicy
 {
+    public async Task ValidateCreationCatalogueAsync(CancellationToken cancellationToken = default)
+    {
+        if (database.Database.CurrentTransaction is null)
+            throw new OrganisationProvisioningPersistenceException("PROVISIONING_TRANSACTION_REQUIRED");
+        await ValidateOwnerCatalogueAsync(cancellationToken);
+        if (!await OrganisationOwnerIndexContract.IsInstalledAsync(database, cancellationToken))
+            throw new OrganisationProvisioningException(BrowserOrganisationCreationCodes.Unavailable);
+    }
+
+    public Task<int> CountOwnedAsync(Guid subjectId, CancellationToken cancellationToken = default)
+    {
+        if (subjectId == Guid.Empty || database.Database.CurrentTransaction is null)
+            throw new OrganisationProvisioningPersistenceException("PROVISIONING_TRANSACTION_REQUIRED");
+        // Business ownership is deliberately independent of membership in other organisations.
+        // Future ownership transfer must acquire this same creator/user lock before changing it.
+        return database.Organisations.AsNoTracking().CountAsync(value => value.OwnerUserId == subjectId, cancellationToken);
+    }
+
     public async Task ValidateOwnerCatalogueAsync(CancellationToken cancellationToken = default)
     {
         var owner = await database.PermissionSets.AsNoTracking()

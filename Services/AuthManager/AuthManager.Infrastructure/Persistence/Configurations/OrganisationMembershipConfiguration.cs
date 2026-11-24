@@ -20,6 +20,10 @@ public sealed class OrganisationMembershipConfiguration : IEntityTypeConfigurati
         builder.Property(membership => membership.ConcurrencyVersion).IsConcurrencyToken().IsRequired();
 
         builder.HasIndex(membership => new { membership.UserId, membership.OrganisationId }).IsUnique();
+        // Preserve the unrestricted lookup index and add a separate named owner index.
+        builder.HasIndex(membership => membership.OrganisationId);
+        builder.HasIndex(membership => membership.OrganisationId, OrganisationOwnerIndexContract.Name)
+            .IsUnique().HasFilter(OrganisationOwnerIndexContract.Filter);
         builder.HasOne<Organisation>().WithMany().HasForeignKey(membership => membership.OrganisationId)
             .OnDelete(DeleteBehavior.Cascade);
         builder.HasOne<User>().WithMany().HasForeignKey(membership => membership.UserId)
