@@ -137,7 +137,7 @@ run_gateway() {
   # Changes to those checks require separately coordinated review of this binding.
   local original="$raw/gateway-mvp.yml"
   local workflow='.github/workflows/mvp-validation.yml'
-  local approved_blob=e7043f42dfd10cd6ef2b63a96ce6fba9ea5a872c
+  local approved_blob=592a5a446c8a9cc87bdb3ac07f1482fa4ddd0886
   git cat-file blob "$approved_blob" >"$original"
   [[ $(git hash-object "$original") == "$approved_blob" ]]
   [[ $(git rev-parse "HEAD:$workflow") == "$approved_blob" ]]

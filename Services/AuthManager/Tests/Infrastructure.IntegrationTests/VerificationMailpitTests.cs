@@ -31,9 +31,8 @@ public sealed class VerificationMailpitTests(ITestOutputHelper output)
             return;
         }
 
-        var keyFile = Environment.GetEnvironmentVariable(KeyLocator);
-        if (keyFile is null || !Path.IsPathFullyQualified(keyFile) || !File.Exists(keyFile))
-            throw new InvalidOperationException("ZEK27_PROTECTED_VERIFICATION_KEY_FILE_REQUIRED");
+        using var key = RegistrationVerificationKeyFixture.Create(Environment.GetEnvironmentVariable(KeyLocator));
+        var keyFile = key.Path;
 
         var id = Guid.NewGuid().ToString("N");
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(110));
