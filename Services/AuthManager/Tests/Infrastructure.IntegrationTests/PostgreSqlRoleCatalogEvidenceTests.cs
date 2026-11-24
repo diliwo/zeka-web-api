@@ -855,16 +855,21 @@ public sealed class PostgreSqlAuthRoleCatalogEvidenceTests(Xunit.Abstractions.IT
             await migration.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
             const string predecessor = "20261018144506_BrowserSessionSnapshot";
             const string onboardingTarget = "20261115195218_OnboardingRegistration";
+            const string ownerIndexTarget = "20261124170000_OrganisationSingleActiveOwner";
             var migrations = migration.Database.GetMigrations().ToArray();
-            Assert.True(migrations.Length > 1);
-            Assert.Equal(predecessor, migrations[^2]);
-            Assert.Equal(onboardingTarget, migrations[^1]);
+            Assert.True(migrations.Length > 2);
+            Assert.Equal(predecessor, migrations[^3]);
+            Assert.Equal(onboardingTarget, migrations[^2]);
+            Assert.Equal(ownerIndexTarget, migrations[^1]);
             await migration.GetService<IMigrator>().MigrateAsync(predecessor);
-            Assert.Equal([migrations[^1]], await migration.Database.GetPendingMigrationsAsync());
+            Assert.Equal([onboardingTarget, ownerIndexTarget], await migration.Database.GetPendingMigrationsAsync());
             // Historical migrations reset the session role. Re-enter the existing owner
             // only at this known boundary before the exact EF target.
             await migration.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
             await migration.GetService<IMigrator>().MigrateAsync(onboardingTarget);
+            Assert.Equal([ownerIndexTarget], await migration.Database.GetPendingMigrationsAsync());
+            await migration.Database.ExecuteSqlRawAsync("SET ROLE zeka_auth_owner");
+            await migration.GetService<IMigrator>().MigrateAsync(ownerIndexTarget);
             Assert.Empty(await migration.Database.GetPendingMigrationsAsync());
         }
 
