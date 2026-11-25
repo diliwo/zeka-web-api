@@ -1,5 +1,3 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Assessments.Common;
 using ClientManagement.Core.Interfaces;
 using MediatR;
@@ -15,12 +13,10 @@ namespace ClientManagement.Application.Assessments.Queries.GetLastBilan
         public class GetLastAssessmentHandler : IRequestHandler<GetLastAssessmentQuery, AssessmentDto>
         {
             private readonly IRepositoryManager _repository;
-            private readonly IMapper _mapper;
 
-            public GetLastAssessmentHandler(IRepositoryManager repository, IMapper mapper)
+            public GetLastAssessmentHandler(IRepositoryManager repository)
             {
                 _repository = repository;
-                _mapper = mapper;
             }
 
             public async Task<AssessmentDto> Handle(GetLastAssessmentQuery request, CancellationToken cancellationToken)
@@ -29,7 +25,7 @@ namespace ClientManagement.Application.Assessments.Queries.GetLastBilan
                     .Where(b => b.Softdelete != true && b.IsFinalized == true)
                     .OrderBy(b => b.Id)
                     .AsNoTracking()
-                    .ProjectTo<AssessmentDto>(_mapper.ConfigurationProvider)
+                    .ProjectAssessmentDtos()
                     .LastOrDefaultAsync(cancellationToken);
                 return vm;
             }

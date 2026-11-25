@@ -32,6 +32,7 @@ using Xunit;
 using Zeka.Contracts.Staff.V1;
 using Zeka.Extensions.EventBus;
 using Zeka.Extensions.EventBus.Abstractions;
+using Zeka.Extensions.EventBus.RabbitMq;
 using Zeka.Extensions.MultiTenancy.Abstractions;
 using Zeka.Extensions.MultiTenancy.AspNetCore;
 using Zeka.PersistenceSecurity;
@@ -574,7 +575,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
     private sealed class Access(Guid organisation, bool allow) : ICurrentTenantAccess
     {
         public Task<TenantAccessDecision> ResolveAsync(string authenticatedSubjectId, Guid selectedOrganisationId,
-            CancellationToken cancellationToken) => Task.FromResult(allow
+            CancellationToken cancellationToken) => Task.FromResult(allow && selectedOrganisationId == organisation
             ? new TenantAccessDecision(TenantAccessOutcome.Authorized, new(organisation, Guid.NewGuid(),
                 ["TeamConfiguration.View", "TeamConfiguration.ManageTeams"], "test", DateTimeOffset.UtcNow))
             : new TenantAccessDecision(TenantAccessOutcome.Denied));
@@ -634,14 +635,18 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
             });
     }
 
-    private sealed class Publisher : IEventBus
+    private sealed class Publisher : IOwnedEventBus
     {
+        private readonly PublicationLifecycle lifecycle = new(new PublisherFailStopOptions());
         public List<StaffProjectionChangedV1> Messages { get; } = [];
-        public Task PublishAsync(Event message)
+        public bool ProcessFailStopEnabled => true; // Controlled fixture capability; no process FailFast.
+        public IPublicationAttempt BeginPublication(Event message) => lifecycle.Begin(attempt =>
         {
+            attempt.CommitSend();
             Messages.Add((StaffProjectionChangedV1)message);
             return Task.CompletedTask;
-        }
+        });
+        public Task PublishAsync(Event message) => BeginPublication(message).Completion;
     }
 
     private sealed class ThrowingObserver : ITenantAttemptOrderObserver

@@ -1,7 +1,6 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.Common.Models;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
@@ -20,18 +19,16 @@ namespace ClientManagement.Application.Supports.Queries
         public class GetTracksListByClientQueryHandler : IRequestHandler<GetSupportsListByClientQuery, PaginatedList<SupportDto>>
         {
             private readonly IRepositoryManager _repository;
-            private readonly IMapper _mapper;
 
-            public GetTracksListByClientQueryHandler(IRepositoryManager repository, IMapper mapper)
+            public GetTracksListByClientQueryHandler(IRepositoryManager repository)
             {
                 _repository = repository;
-                _mapper = mapper;
             }
 
             public async Task<PaginatedList<SupportDto>> Handle(GetSupportsListByClientQuery request, CancellationToken cancellationToken)
             {
-                var supports = await _repository.Support.GetSupportsByClientId(request.ClientId)
-                    .ProjectTo<SupportDto>(_mapper.ConfigurationProvider)
+                var cases = (IQueryable<SocialCase>)_repository.Support.GetSupportsByClientId(request.ClientId);
+                var supports = await cases.ProjectSupports()
                     .OrderBy(s => s.StartDate)
                     .PaginatedListAsync(request.PageNumber, request.PageSize);
 

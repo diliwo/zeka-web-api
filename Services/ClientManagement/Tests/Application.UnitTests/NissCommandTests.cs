@@ -35,7 +35,7 @@ public sealed class NissCommandTests
     [Fact]
     public async Task Patch_lookup_rejects_noncanonical_input_before_repository_access()
     {
-        var handler = new UpSertIbisNumberCommand.UpSertIbisNumberCommandHandler(null!, null!);
+        var handler = new UpSertIbisNumberCommand.UpSertIbisNumberCommandHandler(null!);
         await Assert.ThrowsAsync<InvalidNissFormatException>(() => handler.Handle(
             new UpSertIbisNumberCommand
             {

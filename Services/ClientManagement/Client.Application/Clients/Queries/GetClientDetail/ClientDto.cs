@@ -1,13 +1,10 @@
-﻿using AutoMapper;
-using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.Supports.Queries;
-using ClientManagement.Core.Entities;
 using ClientManagement.Core.Enums;
 using ClientManagement.Core.ValueObjects;
 
 namespace ClientManagement.Application.Clients.Queries.GetClientDetail
 {
-    public class ClientDto : IMapFrom<Client>
+    public class ClientDto
     {
         public int ClientId { get; set; }
         public string ReferenceNumber { get; set; }
@@ -43,65 +40,5 @@ namespace ClientManagement.Application.Clients.Queries.GetClientDetail
         public string? LastJobExperienceFunction { get; set; }
         public DateTime? LastJobExperienceStartDate { get; set; }
         public DateTime? LastJobExperienceEndDate { get; set; }
-
-        public void Mapping(Profile profile)
-        {
-            profile.CreateMap<Client, ClientDto>()
-                .ForMember(b => b.CivilStatus, opt => opt.MapFrom(s => (int)s.CivilStatus))
-                .ForMember(b => b.Gender, opt => opt.MapFrom(e => (int)e.Gender))
-                .ForMember(b => b.ClientId, opt => opt.MapFrom(e => e.Id))
-                .ForMember(b => b.NativeLanguage, opt => opt.MapFrom(e => e.NativeLanguage.SpokenLanguage))
-                .ForMember(b => b.ContactLanguage, opt => opt.MapFrom(e => e.ContactLanguage.SpokenLanguage))
-                .ForMember(b => b.SupportStaffMemberName,
-                    opt => opt.MapFrom(e =>
-                        e.SocialCases.Where(b => b.Softdelete != true).Count() > 0
-                            ? e.SocialCases.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().SocialWorker
-                                .FullName
-                            : string.Empty))
-                .ForMember(b => b.SupportStaffMemberService,
-                    opt => opt.MapFrom(e =>
-                        e.SocialCases.Where(b => b.Softdelete != true).Count() > 0
-                            ? ("(" + e.SocialCases.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().SocialWorker
-                                .TeamAcronym + ")")
-                            : string.Empty))
-                .ForMember(b => b.SupportStartDate,
-                    opt => opt.MapFrom(
-                        e => e.SocialCases.Where(b => b.Softdelete != true).OrderBy(d => d.Created).First().StartDate))
-                .ForMember(b => b.SupportEndDate,
-                    opt => opt.MapFrom(e =>
-                        e.SocialCases.Where(b => b.Softdelete != true).OrderBy(d => d.Created).Last().EndDate))
-                //.ForMember(c => c.Candidacies,
-                //    opt => opt.MapFrom(e => e.Candidacies.Where(c => c.Softdelete != true)))
-                .ForMember(b => b.Phone,
-                    opt => opt.MapFrom(e => e.Phone.PhoneNumber))
-                .ForMember(b => b.MobilePhone,
-                    opt => opt.MapFrom(e => e.MobilePhone.PhoneNumber))
-                .ForMember(b => b.Email, opt => opt.MapFrom(e => e.Email.EmailAddress))
-                .ForMember(b => b.LastTrainingName,
-                    opt =>
-                        opt.MapFrom(e =>
-                            e.SchoolRegistrations.Where(s => s.Softdelete != true).Where(s => s.Softdelete != true)
-                                .OrderBy(e => e.Created).Last().Training.Name))
-                .ForMember(b => b.LastTrainingNote,
-                    opt =>
-                        opt.MapFrom(e =>
-                            e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last().Note))
-                .ForMember(b => b.LastTrainingResult,
-                    opt =>
-                        opt.MapFrom(e =>
-                            (int)e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last()
-                                .Result))
-                .ForMember(b => b.LastTrainingStartDate,
-                    opt =>
-                        opt.MapFrom(e =>
-                            e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last()
-                                .StartDate))
-                .ForMember(b => b.LastTrainingEndDate,
-                    opt =>
-                        opt.MapFrom(e =>
-                            e.SchoolRegistrations.Where(s => s.Softdelete != true).OrderBy(e => e.Created).Last()
-                                .EnDate));
-
-        }
     }
 }

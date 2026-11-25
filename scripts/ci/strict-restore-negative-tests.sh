@@ -132,7 +132,10 @@ grep -q 'inventory differs' "$run_dir/result"
 
     git commit -qm 'Fixture base' --allow-empty
     fixture_base=$(git rev-parse HEAD)
-    git switch -qc accepted
+    git switch -qc mapperly-source
+    git commit -qm 'Fixture accepted Mapperly source' --allow-empty
+    fixture_mapperly=$(git rev-parse HEAD)
+    git switch -qc accepted "$fixture_base"
     mapfile -t preserved_locks < <(
         git -C "$root" ls-tree -r --name-only "$ACCEPTED_SOURCE" |
             awk -F / '$NF == "packages.lock.json"'
@@ -144,11 +147,11 @@ grep -q 'inventory differs' "$run_dir/result"
     fixture_source=$(git rev-parse HEAD)
 
     mapfile -t graph_files < <(
-        git -C "$root" ls-tree -r --name-only "$ACCEPTED_FINAL" |
+        git -C "$root" ls-tree -r --name-only HEAD |
             awk -F / '$NF ~ /[.]csproj$/ || $NF ~ /^packages.*[.]lock[.]json$/'
     )
     [[ ${#graph_files[@]} == 78 ]]
-    git -C "$root" archive "$ACCEPTED_FINAL" -- "${graph_files[@]}" "$PROJECT_MANIFEST" \
+    git -C "$root" archive HEAD -- "${graph_files[@]}" "$PROJECT_MANIFEST" \
         "$LOCK_MANIFEST" "$STRICT_CONFIG" scripts/ci/strict-restore-graph.py zeka-web-api.sln | tar -xf -
     git add --all
     git commit -qm 'Fixture accepted overlay'
@@ -162,6 +165,7 @@ grep -q 'inventory differs' "$run_dir/result"
         -e "s/^readonly ACCEPTED_OVERLAY_COMMIT=.*/readonly ACCEPTED_OVERLAY_COMMIT=$fixture_overlay/" \
         -e "s/^readonly ACCEPTED_OVERLAY=.*/readonly ACCEPTED_OVERLAY=$fixture_tree/" \
         -e "s/^readonly ACCEPTED_FINAL=.*/readonly ACCEPTED_FINAL=$fixture_final/" \
+        -e "s/^readonly ACCEPTED_MAPPERLY_SOURCE=.*/readonly ACCEPTED_MAPPERLY_SOURCE=$fixture_mapperly/" \
         "$contract" > "$fixture_contract"
 
     verify_fixture() {
@@ -170,7 +174,13 @@ grep -q 'inventory differs' "$run_dir/result"
         EXPECTED_HEAD=$fixture_head GITHUB_ACTIONS=true bash "$fixture_contract" verify "$fixture_head"
     }
 
+    # A reviewed lock manifest cannot substitute for required source ancestry.
+    git switch -q --detach "$fixture_final"
+    must_fail verify_fixture
+    grep -Fxq 'strict-restore: accepted Mapperly source lineage is absent from checkout history' "$run_dir/result"
+
     git switch -q c1
+    git merge -q --no-ff --no-edit mapperly-source
     git commit -qm 'Independent C1 work' --allow-empty
     c1_before=$(git rev-parse HEAD)
     git merge -q --no-ff --no-edit accepted
@@ -188,6 +198,17 @@ grep -q 'inventory differs' "$run_dir/result"
     [[ $(git rev-parse HEAD^2) == "$develop_head" ]]
     git switch -q --detach HEAD
     verify_fixture
+
+    # All four explicitly admitted successors and an unchanged original remain exact.
+    admitted_head=$(git rev-parse HEAD)
+    for legacy_lock in "${!ACCEPTED_LOCK_SUCCESSORS[@]}" Services/ClientManagement/Client.Core/packages.lock.json; do
+        printf '\n' >> "$legacy_lock"
+        git add -- "$legacy_lock"
+        git commit -qm 'Unapproved original or successor lock change'
+        must_fail verify_fixture
+        grep -Fxq "strict-restore: lock hash mismatch: $legacy_lock" "$run_dir/result"
+        git switch -q --detach "$admitted_head"
+    done
 
     newer_lock=Tools/Zeka.AuthOwnerProvision/packages.linux-x64.lock.json
     if git cat-file -e "$fixture_source:$newer_lock" 2>/dev/null; then

@@ -1,4 +1,3 @@
-using AutoMapper;
 using ClientManagement.Application.Clients.Commands.Exceptions;
 using ClientManagement.Application.Clients.Model;
 using ClientManagement.Application.Common.Exceptions;
@@ -16,12 +15,10 @@ namespace ClientManagement.Application.Clients.Commands.UpSertIbisNumber
         public class UpSertIbisNumberCommandHandler : IRequestHandler<UpSertIbisNumberCommand, UpdateClientDto>
         {
             private readonly IRepositoryManager _repository;
-            private readonly IMapper _mapper;
 
-            public UpSertIbisNumberCommandHandler(IRepositoryManager repository, IMapper mapper)
+            public UpSertIbisNumberCommandHandler(IRepositoryManager repository)
             {
                 _repository = repository;
-                _mapper = mapper;
             }
 
             public async Task<UpdateClientDto> Handle(UpSertIbisNumberCommand request, CancellationToken cancellationToken)
@@ -39,17 +36,16 @@ namespace ClientManagement.Application.Clients.Commands.UpSertIbisNumber
                     throw new NotFoundException(nameof(entity));
                 }
 
-                var beneficaryToPatch = _mapper.Map<UpdateClientDto>(entity);
+                var beneficiaryToPatch = new UpdateClientDto();
 
-                request.PatchDoc.ApplyTo(beneficaryToPatch);
+                request.PatchDoc.ApplyTo(beneficiaryToPatch);
 
-                _mapper.Map(beneficaryToPatch, entity);
-
+                // Client has no mapped IBIS member. Preserve the existing persistence calls.
                 _repository.Client.Persist(entity);
 
                 _repository.Save();
 
-                return beneficaryToPatch;
+                return beneficiaryToPatch;
             }
         }
     }

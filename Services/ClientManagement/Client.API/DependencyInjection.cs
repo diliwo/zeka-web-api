@@ -1,4 +1,4 @@
-﻿using System.Configuration;
+using System.Configuration;
 using ClientManagement.API.Infrastructure;
 using ClientManagement.API.Services;
 using ClientManagement.Application;
@@ -45,8 +45,6 @@ public static class DependencyInjection
 
         services.AddSwaggerGen(c => { c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "Client.API", Version = "v1" }); });
 
-        //Register AutoMapper
-        services.AddAutoMapper(typeof(Program).Assembly);
 
         //Add Cors
         services.AddCors(options =>

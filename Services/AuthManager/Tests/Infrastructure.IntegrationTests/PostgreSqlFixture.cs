@@ -3,7 +3,7 @@ using Testcontainers.PostgreSql;
 
 namespace Infrastructure.IntegrationTests;
 
-[CollectionDefinition(CollectionName)]
+[CollectionDefinition(CollectionName, DisableParallelization = true)]
 public sealed class PostgreSqlCollection : ICollectionFixture<PostgreSqlFixture>
 {
     public const string CollectionName = "AuthManager PostgreSQL";

@@ -17,6 +17,8 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
     private IContainer? broker;
     private IContainer? host;
     private string queueName = "";
+    private readonly string brokerUser = "startup-" + Guid.NewGuid().ToString("N");
+    private readonly string brokerPassword = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
 
     protected override string ApiDirectory => "Services/ClientManagement/Client.API";
     protected override string AssemblyName => "ClientManagement.API";
@@ -29,7 +31,9 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
             .WithNetwork(network)
             .WithNetworkAliases("startup-postgres")
             .Build();
-        broker = new ContainerBuilder("rabbitmq:3.13.7-alpine")
+        broker = new ContainerBuilder("rabbitmq:3.13.7-management-alpine")
+            .WithEnvironment("RABBITMQ_DEFAULT_USER", brokerUser)
+            .WithEnvironment("RABBITMQ_DEFAULT_PASS", brokerPassword)
             .WithNetwork(network)
             .WithNetworkAliases("startup-rabbitmq")
             .WithWaitStrategy(Wait.ForUnixContainer()
@@ -53,12 +57,16 @@ public sealed class AuthenticationStartupTests : Zeka.Authentication.Tests.RealH
         // A private network avoids fixed host ports and any developer's broker.
         // Run the same real API entry point; do not replace its registrations.
         var assembly = start.ArgumentList[0];
-        queueName = start.Environment["EventBus__QueueName"]!;
+        // The production composition fixes this queue name; the dedicated broker provides isolation.
+        queueName = Zeka.Messaging.StaffProjectionTransport.Queue;
         var environment = start.Environment
             .Where(pair => pair.Key.Contains("__", StringComparison.Ordinal)
                 || pair.Key is "ASPNETCORE_ENVIRONMENT" or "DOTNET_ENVIRONMENT")
             .ToDictionary(pair => pair.Key, pair => pair.Value!);
         environment["RabbitMq__HostName"] = "startup-rabbitmq";
+        environment["RabbitMq__ManagementEndpoint"] = "http://startup-rabbitmq:15672/";
+        environment["RabbitMq__UserName"] = brokerUser;
+        environment["RabbitMq__Password"] = brokerPassword;
         environment["ConnectionStrings__ClientApiConnection"] = new NpgsqlConnectionStringBuilder(
             postgres!.GetConnectionString())
         {

@@ -1,9 +1,8 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
 using ClientManagement.Application.Common.Exceptions;
 using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.Common.Models;
 using ClientManagement.Application.SchoolRegistations.Common;
+using ClientManagement.Core.Entities;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 
@@ -22,13 +21,11 @@ namespace ClientManagement.Application.SchoolRegistations.Queries.GetSchoolList
         {
             private readonly IRepositoryManager _repository;
             private ISortHelper<SchoolRegistrationDto> _sort;
-            private readonly IMapper _mapper;
 
-            public GetSchoolRegistrationsListQueryHandler(IRepositoryManager repository, IMapper mapper, ISortHelper<SchoolRegistrationDto> sort)
+            public GetSchoolRegistrationsListQueryHandler(IRepositoryManager repository, ISortHelper<SchoolRegistrationDto> sort)
             {
                 _repository = repository;
                 _sort = sort;
-                _mapper = mapper;
             }
 
             public async Task<PaginatedList<SchoolRegistrationDto>> Handle(GetSchoolRegistrationsListQuery request, CancellationToken cancellationToken)
@@ -41,10 +38,30 @@ namespace ClientManagement.Application.SchoolRegistations.Queries.GetSchoolList
                 var resgistrations = _sort.ApplySort(
                     _repository.SchoolRegistration
                         .GetResgistrationsByClientId(request.ClientId, request.Filter)
-                        .ProjectTo<SchoolRegistrationDto>(_mapper.ConfigurationProvider), request.Orderby);
+                        .Cast<SchoolRegistration>()
+                        .Select(registration => new SchoolRegistrationDto
+                        {
+                            SchoolRegistrationId = registration.Id,
+                            TrainingId = registration.TrainingId,
+                            TrainingName = registration.Training.Name,
+                            SchoolId = registration.SchoolId,
+                            SchoolName = registration.School.Name,
+                            TrainingTypeId = registration.TrainingTypeId,
+                            TrainingTypeName = registration.TrainingType.Name,
+                            ClientId = registration.ClientId,
+                            BenficiaryName = FormatClientName(registration.Client.LastName, registration.Client.FirstName),
+                            StartDate = registration.StartDate,
+                            EnDate = registration.EnDate,
+                            CourseLevel = registration.CourseLevel,
+                            Result = registration.Result,
+                            Note = registration.Note
+                        }), request.Orderby);
 
-                return await resgistrations.PaginatedListAsync(request.PageNumber, request.PageSize); ;
+                return await resgistrations.PaginatedListAsync(request.PageNumber, request.PageSize);
             }
+
+            // The legacy display name is final-projection formatting. It was not a translatable sort key.
+            private static string FormatClientName(string lastName, string firstName) => $"{lastName} {firstName}";
         }
     }
 }

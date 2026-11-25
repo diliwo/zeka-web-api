@@ -12,6 +12,7 @@ using Zeka.WorkerCredentials.Testing;
 
 namespace Infrastructure.IntegrationTests;
 
+[Collection(ClientAuthorityTimingCollection.Name)]
 public sealed class WorkerAuthorizationRetryTests
 {
     private const string Profile = WorkerCredentialEncoding.ClientProfile;

@@ -1,5 +1,3 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
 using ClientManagement.Core.Interfaces;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -12,18 +10,16 @@ namespace ClientManagement.Application.Clients.Queries.GetClients
         public class GetClientsQueryHandler : IRequestHandler<GetClientsQuery, ClientsDto>
         {
             private readonly IRepositoryManager _repository;
-            private readonly IMapper _mapper;
 
-            public GetClientsQueryHandler(IRepositoryManager repository, IMapper mapper)
+            public GetClientsQueryHandler(IRepositoryManager repository)
             {
                 _repository = repository;
-                _mapper = mapper;
             }
 
             public async Task<ClientsDto> Handle(GetClientsQuery query, CancellationToken cancellationToken)
             {
                 var Clients = await _repository.Client.GetClients()
-                    .ProjectTo<ClientLookUpDto>(_mapper.ConfigurationProvider)
+                    .ProjectLookup()
                     .OrderBy(b => b.Name)
                     .ToListAsync(cancellationToken);
 
@@ -35,6 +31,5 @@ namespace ClientManagement.Application.Clients.Queries.GetClients
                 return vm;
             }
         }
-
     }
 }

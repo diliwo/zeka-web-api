@@ -1,5 +1,4 @@
-using AutoMapper;
-using AutoMapper.QueryableExtensions;
+using ClientManagement.Application.Common.Mappings;
 using ClientManagement.Application.MonitoringActions.Common;
 using ClientManagement.Core.Interfaces;
 using MediatR;
@@ -20,17 +19,16 @@ namespace ClientManagement.Application.MonitoringActions.Queries.GetById
     public class GetMonitoringActionByIdHandler : IRequestHandler<GetMonitoringActionById, MonitoringActionDto>
     {
         private readonly IMonitoringActionRepository _monitoringActionRepository;
-        private readonly IMapper _mapper;
-        public GetMonitoringActionByIdHandler(IMonitoringActionRepository monitoringActionRepository, IMapper mapper)
+
+        public GetMonitoringActionByIdHandler(IMonitoringActionRepository monitoringActionRepository)
         {
             _monitoringActionRepository = monitoringActionRepository;
-            _mapper = mapper;
         }
 
         public async Task<MonitoringActionDto> Handle(GetMonitoringActionById request, CancellationToken cancellationToken)
         {
             return await _monitoringActionRepository.GetMonitoringActionById(request.ActionId)
-                .ProjectTo<MonitoringActionDto>(_mapper.ConfigurationProvider)
+                .ProjectActions()
                 .SingleOrDefaultAsync(cancellationToken);
         }
     }
