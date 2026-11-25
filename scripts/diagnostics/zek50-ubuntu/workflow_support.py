@@ -59,17 +59,93 @@ OUTCOMES = {"Passed", "Failed", "NotExecuted", "Inconclusive", "Timeout", "Abort
 GUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 
+SAFE_REFUSALS = frozenset((
+    'ADMISSION_OUTPUT_LIMIT',
+    'DIAGNOSTIC_SOURCE_MISSING',
+    'DUPLICATE_JSON_KEY',
+    'EVENT_NOT_ADMITTED',
+    'HOSTED_IMAGE_ADMISSION_REQUIRED',
+    'IMAGE_DIGEST_MISSING',
+    'IMAGE_ID_MISSING',
+    'INVOCATION_NATIVE_INVALID',
+    'INVOCATION_ORDER_OR_PATH_INVALID',
+    'JSON_INPUT_MISSING_OR_OVERSIZED',
+    'LOCK_BYTES_CHANGED',
+    'LOCK_INVENTORY_DRIFT',
+    'LOCK_NOT_REGULAR',
+    'LOCK_SOURCE_DRIFT',
+    'MANAGED_BINDING_INVALID',
+    'MANAGED_CATEGORY_INVALID',
+    'MANAGED_ERROR_INVALID',
+    'MANAGED_FILE_INVALID',
+    'MANAGED_PHASE_INVALID',
+    'MULTIPLE_TRX_FILES',
+    'NATIVE_ADMISSION_COMMAND_FAILED',
+    'NATIVE_OBSERVER_NOT_COMPLETE',
+    'NATIVE_SUCCESS_TRX_DISAGREEMENT',
+    'OBSERVED_NATIVE_DISAGREEMENT',
+    'OBSERVED_NATIVE_MISSING',
+    'OBSERVER_BINDING_INVALID',
+    'OBSERVER_CATEGORY_INVALID',
+    'OBSERVER_ENUM_INVALID',
+    'OBSERVER_FILE_INVALID',
+    'OBSERVER_NATIVE_INVALID',
+    'OBSERVER_NATIVE_OUTCOME_DUPLICATED',
+    'OBSERVER_PHASE_INVALID',
+    'OBSERVER_SIGNAL_INVALID',
+    'OUTPUT_TEMP_EXISTS',
+    'PG_BINARY_VERSION_MISMATCH',
+    'PG_TAG_NOT_ALLOWED',
+    'POLICY_ENTRY_INVALID',
+    'PROFILE_BINDING_INVALID',
+    'PROFILE_INVOCATION_LIMIT',
+    'PROTECTED_BUNDLE_DRIFT',
+    'REF_NOT_ADMITTED',
+    'REVISION_DRIFT',
+    'SDK_VERSION_MISMATCH',
+    'SYMLINK_DIRECTORY_REFUSED',
+    'SYMLINK_OUTPUT_REFUSED',
+    'TRACKED_SOURCE_DRIFT',
+    'TREE_DRIFT',
+    'TRX_COUNTERS_MISSING',
+    'TRX_COUNTER_INVALID',
+    'TRX_COUNTER_MISMATCH',
+    'TRX_DEFINITION_EXECUTION_MISMATCH',
+    'TRX_DIRECTORY_SYMLINK',
+    'TRX_DTD_REFUSED',
+    'TRX_DUPLICATE_DEFINITION',
+    'TRX_DUPLICATE_ENTRY',
+    'TRX_EXECUTED_MISMATCH',
+    'TRX_FILE_INVALID',
+    'TRX_ID_INVALID',
+    'TRX_INVENTORY_LINK_COUNT_MISMATCH',
+    'TRX_LINK_INVALID',
+    'TRX_METHOD_MISSING',
+    'TRX_ROWS_MISSING',
+    'TRX_TEST_LIST_MISMATCH',
+    'TRX_UNKNOWN_OUTCOME',
+    'UBUNTU_VERSION_MISMATCH',
+))
+
+class DiagnosticRefusal(ValueError):
+    pass
+
+def safe_refusal(error):
+    if isinstance(error, DiagnosticRefusal) and len(error.args) == 1 and type(error.args[0]) is str and error.args[0] in SAFE_REFUSALS:
+        return error.args[0]
+    return "ADMISSION_OR_COLLECTION_FAILED"
+
 def require(condition, code):
     if not condition:
-        raise ValueError(code)
+        raise DiagnosticRefusal(code)
 
 
 def utc():
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-def command(args, timeout=60):
-    value = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=False)
+def command(args, timeout=60, cwd=None):
+    value = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=False, cwd=cwd)
     require(value.returncode == 0, "NATIVE_ADMISSION_COMMAND_FAILED")
     require(len(value.stdout) <= 16 * 1024 * 1024, "ADMISSION_OUTPUT_LIMIT")
     return value.stdout
@@ -151,7 +227,7 @@ def admit(args):
     require(os.environ.get("GITHUB_REPOSITORY") == "diliwo/zeka-web-api" and
             os.environ.get("GITHUB_EVENT_NAME") == "push" and os.environ.get("GITHUB_RUN_ATTEMPT") == "1",
             "EVENT_NOT_ADMITTED")
-    require(os.environ.get("GITHUB_REF") == "refs/heads/codex/zek50-ubuntu-profile-diagnostic-20261125", "REF_NOT_ADMITTED")
+    require(os.environ.get("GITHUB_REF") == "refs/heads/codex/zek50-ubuntu-profile-diagnostic-20261125-v2", "REF_NOT_ADMITTED")
     diagnostic = os.environ.get("GITHUB_SHA", "")
     require(re.fullmatch(r"[0-9a-f]{40}", diagnostic), "DIAGNOSTIC_SOURCE_MISSING")
     source_identity(source, tooling)
@@ -161,7 +237,7 @@ def admit(args):
         if key in ("ID", "VERSION_ID"):
             os_values[key] = value.strip('"')
     require(platform.system() == "Linux" and os_values == {"ID": "ubuntu", "VERSION_ID": "24.04"}, "UBUNTU_VERSION_MISMATCH")
-    sdk = command(("dotnet", "--version")).decode().strip()
+    sdk = command(("dotnet", "--version"), cwd=source).decode().strip()
     require(sdk == "8.0.129", "SDK_VERSION_MISMATCH")
     before = locks(source)
     write(raw / "locks-before.json", before)
@@ -408,13 +484,22 @@ def finalize(args):
             row["collectionStatus"] = "INCOMPLETE"
         reports.append(row)
     source_preserved = None
+    postcheck_status, postcheck_reason = "NOT_VERIFIED", None
     try:
         source_identity(Path(args.source), Path(args.tooling))
         require(locks(Path(args.source)) == load(raw / "locks-before.json"), "LOCK_BYTES_CHANGED")
         source_preserved = True
-    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
-        errors.append("SOURCE_OR_LOCK_POSTCHECK_NOT_VERIFIED")
-        source_preserved = False
+        postcheck_status = "PASS"
+    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as error:
+        postcheck_reason = safe_refusal(error)
+        drift_codes = {"REVISION_DRIFT", "TREE_DRIFT", "TRACKED_SOURCE_DRIFT", "PROTECTED_BUNDLE_DRIFT",
+                       "LOCK_SOURCE_DRIFT", "LOCK_BYTES_CHANGED", "LOCK_INVENTORY_DRIFT", "LOCK_NOT_REGULAR"}
+        if isinstance(error, DiagnosticRefusal) and postcheck_reason in drift_codes:
+            source_preserved, postcheck_status = False, "DRIFT_OBSERVED"
+            errors.append("SOURCE_OR_LOCK_DRIFT_OBSERVED")
+        else:
+            source_preserved, postcheck_status = None, "NOT_VERIFIED"
+            errors.append("SOURCE_OR_LOCK_POSTCHECK_NOT_VERIFIED")
     attempted = sum(row["attempted"] for row in reports)
     execution_observed = attempted > 0 or any(row["observer"] and row["observer"].get("processLaunched") for row in reports)
     complete_inventory = attempted == 5 and all(row["trx"].get("valid") for row in reports)
@@ -426,7 +511,9 @@ def finalize(args):
               "profileExecutionObserved": execution_observed,
               "testHostStartupObserved": host_startup, "testFailureObserved": test_failure,
               "observerFailureObserved": bool(errors),
-              "sourceAnd42LocksPreserved": source_preserved, "projects": reports,
+              "sourceAnd42LocksPreserved": source_preserved,
+              "sourceAnd42LocksPostcheck": {"status": postcheck_status, "reasonCode": postcheck_reason},
+              "projects": reports,
               "collectionStatus": "PASS" if not errors else "INCOMPLETE", "collectionErrors": errors,
               "nativeOutcome": "NOT_OBSERVED" if native_profile is None else "SUCCESS" if native_profile == 0 else "FAILURE",
               "testOutcome": "NOT_RUN" if not execution_observed else "PASS" if complete_inventory and native_profile == 0 and not errors else "FAIL" if test_failure else "NOT_VERIFIED",
@@ -454,15 +541,16 @@ def main():
     args = parser.parse_args()
     try:
         return {"admit": admit, "image": image, "finalize": finalize}[args.operation](args) or 0
-    except (OSError, ValueError, TypeError, KeyError, ET.ParseError, subprocess.SubprocessError):
+    except (OSError, ValueError, TypeError, KeyError, ET.ParseError, subprocess.SubprocessError) as error:
+        category = safe_refusal(error)
         if args.operation == "finalize":
             try:
                 write(directory(args.safe) / "profile-result.json", {"schema": 1, "sourceSha": SOURCE,
-                      "collectionStatus": "FAIL", "collectionErrors": ["FINALIZER_FAILED"],
+                      "collectionStatus": "FAIL", "collectionErrors": ["FINALIZER_FAILED", category],
                       "testOutcome": "NOT_VERIFIED", "causeEstablished": False})
             except (OSError, ValueError):
                 pass
-        print(json.dumps({"operation": args.operation, "observerStatus": "FAIL", "category": "ADMISSION_OR_COLLECTION_FAILED"}))
+        print(json.dumps({"operation": args.operation, "observerStatus": "FAIL", "category": category}))
         return 2
 
 

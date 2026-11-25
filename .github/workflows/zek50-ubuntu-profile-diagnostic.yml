@@ -2,7 +2,7 @@ name: ZEK50 single Ubuntu profile diagnostic
 
 on:
   push:
-    branches: [codex/zek50-ubuntu-profile-diagnostic-20261125]
+    branches: [codex/zek50-ubuntu-profile-diagnostic-20261125-v2]
 
 permissions: {}
 
@@ -72,9 +72,10 @@ jobs:
 
       - name: Admit exact Ubuntu source and tooling identities
         shell: bash
+        working-directory: source
         run: |
           set -euo pipefail
-          python3 -I diagnostic/scripts/diagnostics/zek50-ubuntu/workflow_support.py admit \
+          python3 -I "$GITHUB_WORKSPACE/diagnostic/scripts/diagnostics/zek50-ubuntu/workflow_support.py" admit \
             --source "$GITHUB_WORKSPACE/source" --tooling "$GITHUB_WORKSPACE/tooling" \
             --raw "$RATCHET_RAW" --safe "$RATCHET_SAFE"
 
@@ -116,6 +117,7 @@ jobs:
 
       - name: Compile the isolated observer with SDK framework references only
         shell: bash
+        working-directory: source
         run: |
           set -euo pipefail
           umask 077
@@ -146,7 +148,7 @@ jobs:
               "managedHookLoaded": True, "applicationProfileExecuted": False}) + "\n")
           PY
           mkdir -m 0700 "$RATCHET_RAW/bin"
-          cp diagnostic/scripts/diagnostics/zek50-ubuntu/observer.py "$RATCHET_RAW/bin/dotnet"
+          cp "$GITHUB_WORKSPACE/diagnostic/scripts/diagnostics/zek50-ubuntu/observer.py" "$RATCHET_RAW/bin/dotnet"
           chmod 0700 "$RATCHET_RAW/bin/dotnet"
           printf 'ZEKA_DIAG_REAL_DOTNET=%s\n' "$(command -v dotnet)" >>"$GITHUB_ENV"
           printf 'ZEKA_DIAG_HOOK=%s\n' "$RATCHET_RAW/hook/Zeka.UbuntuDiagnostic.StartupHook.dll" >>"$GITHUB_ENV"
