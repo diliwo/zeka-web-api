@@ -1248,7 +1248,7 @@ jobs:
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /d:sonar.python.coverage.reportPaths="TestResults/python-coverage/coverage.xml" \
             /d:sonar.coverageReportPaths="TestResults/powershell-coverage/powershell-coverage.xml" \
-            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellCoverageChild.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1,Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1,Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerHelperBuildContext.ps1,Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerImageContainment.py" \
+            /d:sonar.test.inclusions="scripts/ci/tests/test_application_conformance.py,scripts/ci/tests/test_c1_ratchet.py,scripts/ci/tests/test_c1_ratchet_context.py,Tools/Shared/Test-OwnerSqlInventory.py,Services/AuthManager/Tests/Infrastructure.IntegrationTests/Configuration/Test-Configuration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-DatabaseBootstrap.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3NativeDiagnostics.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-W3AtomicWrite.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellLineCoverage.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/PowerShellCoverageChild.ps1,Tools/Zeka.DbMigrate.Tests/LocalStackConfiguration/Test-PowerShellCoverageChild.ps1,Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1,Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerHelperBuildContext.ps1,Tools/Zeka.AuthOwnerProvision.Tests/BuildContext/Test-OwnerImageContainment.py" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
             /d:sonar.token="${SONAR_TOKEN}"
@@ -1300,24 +1300,29 @@ jobs:
           print(f"{len(script_projects)} assertion sources are owned by their exact TEST projects; production classification is unchanged.")
           PY
 
-      - name: Run Python accounting regressions and collect coverage for analysis
+      - name: Run existing Python regressions and collect coverage for analysis
         shell: bash
         run: |
           set -euo pipefail
           coverage_dir="TestResults/python-coverage"
           coverage_file="${coverage_dir}/coverage.xml"
-          test_log="${coverage_dir}/tests.log"
           mkdir -p "${coverage_dir}"
           export COVERAGE_FILE="${coverage_dir}/.coverage"
+          measured_sources='scripts/ci/reconcile_application_conformance.py,scripts/ci/c1_ratchet.py,scripts/ci/c1_ratchet_context.py,scripts/ci/c1_ratchet_trx.py,Tools/Shared/OwnerSqlInventory.py'
           python -m coverage erase
-          python -m coverage run --branch \
-            --include='scripts/ci/reconcile_application_conformance.py' \
-            -m unittest discover -s scripts/ci/tests -p 'test_application_conformance.py' -v \
-            2>&1 | tee "${test_log}"
-          if grep -Eq '^OK \(skipped=[1-9][0-9]*\)$' "${test_log}" || ! grep -Eq '^OK$' "${test_log}"; then
-            echo "Python accounting regressions did not complete without skips." >&2
-            exit 1
-          fi
+          run_python_fixture() {
+            local name="$1"
+            shift
+            local test_log="${coverage_dir}/${name}.log"
+            python -m coverage run --append --branch --include="${measured_sources}" "$@" 2>&1 | tee "${test_log}"
+            if grep -Eq '^OK \(skipped=[1-9][0-9]*\)$' "${test_log}" || ! grep -Eq '^OK$' "${test_log}"; then
+              echo "Python fixture ${name} did not complete without skips." >&2
+              exit 1
+            fi
+          }
+          run_python_fixture accounting -m unittest discover -s scripts/ci/tests -p 'test_application_conformance.py' -v
+          run_python_fixture ratchet -m unittest discover -s scripts/ci/tests -p 'test_c1_ratchet*.py' -v
+          run_python_fixture owner-sql Tools/Shared/Test-OwnerSqlInventory.py -v
           python -m coverage xml -o "${coverage_file}"
           COVERAGE_FILE="${coverage_file}" python - <<'PY'
           import os
@@ -1327,20 +1332,33 @@ jobs:
           coverage_file = Path(os.environ["COVERAGE_FILE"])
           root = ET.parse(coverage_file).getroot()
           classes = root.findall("./packages/package/classes/class")
-          expected_file = "scripts/ci/reconcile_application_conformance.py"
-          measured = [item for item in classes if item.get("filename") == expected_file]
+          expected_files = {
+              "scripts/ci/reconcile_application_conformance.py",
+              "scripts/ci/c1_ratchet.py",
+              "scripts/ci/c1_ratchet_context.py",
+              "scripts/ci/c1_ratchet_trx.py",
+              "Tools/Shared/OwnerSqlInventory.py",
+          }
+          by_file = {item.get("filename"): item for item in classes}
+          all_lines = [line for item in classes for line in item.findall("./lines/line")]
           try:
-              lines_valid = int(root.attrib["lines-valid"])
-              lines_covered = int(root.attrib["lines-covered"])
+              reported_valid = int(root.attrib["lines-valid"])
+              reported_covered = int(root.attrib["lines-covered"])
+              actual_covered = sum(int(line.attrib["hits"]) > 0 for line in all_lines)
           except (KeyError, TypeError, ValueError) as error:
               raise SystemExit("Python coverage report has invalid line counters.") from error
+          if reported_valid != len(all_lines) or reported_covered != actual_covered:
+              raise SystemExit("Python coverage report line counters disagree with its source rows.")
           if (root.tag != "coverage" or root.get("version") != "7.16.1"
-                  or len(classes) != 1 or len(measured) != 1
-                  or not measured[0].findall("./lines/line") or lines_valid <= 0):
-              raise SystemExit("Python coverage report is malformed or missing the reconciler.")
+                  or len(classes) != len(expected_files) or set(by_file) != expected_files
+                  or any(not item.findall("./lines/line") for item in classes)):
+              raise SystemExit("Python coverage report is malformed or misses the exact exercised source closure.")
+          measured = by_file["scripts/ci/reconcile_application_conformance.py"].findall("./lines/line")
+          lines_valid = len(measured)
+          lines_covered = sum(int(line.attrib["hits"]) > 0 for line in measured)
           if lines_covered * 100 <= lines_valid * 80:
               raise SystemExit("Python reconciler line coverage is not strictly above 80%.")
-          print(f"Verified Python reconciler line coverage: {lines_covered}/{lines_valid}")
+          print(f"Verified Python reconciler line coverage: {lines_covered}/{lines_valid}; imported {len(classes)} exercised source files")
           PY
 
       - name: Install pinned standalone Sonar CLI
