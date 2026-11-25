@@ -47,14 +47,15 @@ public sealed class RegistrationOptionsBoundaryTests
     [InlineData("Deployment", null)]
     [InlineData("Deployment", "")]
     [InlineData("Deployment", "tenant/name")]
-    [InlineData("Deployment", "déployment")]
+    [InlineData("Deployment", "unicode-deployment")]
     [InlineData("ActiveKeyId", null)]
     [InlineData("ActiveKeyId", "")]
     [InlineData("ActiveKeyId", "key.name")]
     public void Missing_or_unsafe_authority_identifiers_are_refused(string name, string? value)
     {
         using var input = new RegistrationOptionInputs();
-        input.Values["OnboardingRegistration:" + name] = value;
+        // Keep discovery metadata ASCII; the admitted negative still receives the same Unicode input.
+        input.Values["OnboardingRegistration:" + name] = value == "unicode-deployment" ? "d\u00e9ployment" : value;
         AssertRejected(input);
     }
 
