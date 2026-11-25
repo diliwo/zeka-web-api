@@ -35,14 +35,6 @@
         "resolved": "2.4.5",
         "contentHash": "OwHamvBdUKgqsXfBzWiCW/O98BTx81UKzx2bieIOQI7CZFE5NEQZGi8PBQGIKawDW96xeRffiNf20SjfC0x9hw=="
       },
-      "AutoMapper": {
-        "type": "Transitive",
-        "resolved": "13.0.1",
-        "contentHash": "/Fx1SbJ16qS7dU4i604Sle+U9VLX+WSNVJggk6MupKVkYvvBm4XqYaeFuf67diHefHKHs50uQIS2YEDFhPCakQ==",
-        "dependencies": {
-          "Microsoft.Extensions.Options": "6.0.0"
-        }
-      },
       "DinkToPdf": {
         "type": "Transitive",
         "resolved": "1.0.8",
@@ -1375,7 +1367,6 @@
       "clientmanagement.application": {
         "type": "Project",
         "dependencies": {
-          "AutoMapper": "[13.0.1, )",
           "ClientManagement.Core": "[1.0.0, )",
           "DinkToPdf": "[1.0.8, )",
           "DinkToPdfCopyDependencies": "[1.0.8, )",

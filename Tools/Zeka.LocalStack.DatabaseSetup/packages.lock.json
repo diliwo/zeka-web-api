@@ -1519,7 +1519,6 @@
       "clientmanagement.application": {
         "type": "Project",
         "dependencies": {
-          "AutoMapper": "[13.0.1, )",
           "ClientManagement.Core": "[1.0.0, )",
           "DinkToPdf": "[1.0.8, )",
           "DinkToPdfCopyDependencies": "[1.0.8, )",

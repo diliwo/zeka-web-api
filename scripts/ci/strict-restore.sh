@@ -4,8 +4,8 @@ export LC_ALL=C GIT_NO_REPLACE_OBJECTS=1
 
 readonly PROJECT_MANIFEST=scripts/ci/strict-restore-projects.tsv
 readonly LOCK_MANIFEST=scripts/ci/strict-restore-locks.sha256
-# SHA-256 of the reviewed 42-lock manifest in ACCEPTED_FINAL.
-readonly LOCK_MANIFEST_HASH=f5b5b74741c5f200e229100ed5cc74304bfd6fe97116d10abd755c15299765de
+# SHA-256 of the reviewed current 42-lock manifest; original lineage is checked separately.
+readonly LOCK_MANIFEST_HASH=04d5fcbee0abb3c08f206b671689a968b103a5c5c5eb2818438aba3d6c45e456
 readonly STRICT_CONFIG=scripts/ci/nuget.strict.config
 readonly CONFIG_HASH=840677413139f10e5591265935471a49c33b8862e1b05f608d5e689964d2f917
 readonly ACCEPTED_BASE=97a133bca86cb86cd9cb0e04a9b29e55331beb02
@@ -13,6 +13,14 @@ readonly ACCEPTED_SOURCE=07e7c8c5f253eddecc538ca1e64062cb2972d633
 readonly ACCEPTED_OVERLAY_COMMIT=ae8fc9a8f80a483dc5775ab85cdf6752a996549a
 readonly ACCEPTED_OVERLAY=2623b4f697ad64c5ee6ac59493b6b4ab0d3b1d10
 readonly ACCEPTED_FINAL=5ca8d97db7c7ca72161c1cb6bda8635c56cccf15
+# Exact accepted Mapperly source and four reviewed successors of original locks.
+readonly ACCEPTED_MAPPERLY_SOURCE=9c1cbc4c1ae634d12ec00edcc2e41a81d04ef225
+declare -Ar ACCEPTED_LOCK_SUCCESSORS=(
+    [Services/ClientManagement/Client.API/packages.lock.json]=c188e2c88896728b0074c26dc04c76ee55b96ba4fbad7b016bf66d12e2ccb6f6
+    [Services/ClientManagement/Client.Application/packages.lock.json]=282307fa9d5a2567639668fb5bc4dcd91b4e4c8d8fda35c7d22673a5ba4e9573
+    [Services/ClientManagement/Client.Infrastructure/packages.lock.json]=69f077b93c8a570c913bd3d8fd0655fbd157d7e17c8f0bb198ec343c203c25bf
+    [Services/ClientManagement/Tests/Infrastructure.IntegrationTests/packages.lock.json]=d2305b71529640fb8759fc2078d196dc44070551b2a6c438bbf2d161eebbeaf3
+)
 readonly SDK_VERSION=8.0.129
 readonly GITHUB_FEED=https://nuget.pkg.github.com/diliwo/index.json
 readonly PUBLIC_FEED=https://api.nuget.org/v3/index.json
@@ -145,6 +153,8 @@ verify_identity() {
     git merge-base --is-ancestor "$ACCEPTED_OVERLAY_COMMIT" "$ACCEPTED_FINAL" &&
         git merge-base --is-ancestor "$ACCEPTED_FINAL" "$head" ||
         fail 'accepted final lineage is absent from checkout history'
+    git merge-base --is-ancestor "$ACCEPTED_MAPPERLY_SOURCE" "$head" ||
+        fail 'accepted Mapperly source lineage is absent from checkout history'
     if [[ ${GITHUB_ACTIONS:-} == true ]] && git symbolic-ref --quiet HEAD >/dev/null; then
         fail 'hosted proof requires a detached head checkout'
     fi
@@ -165,6 +175,7 @@ verify_all() {
     [[ $(wc -l <<< "$preserved") == 12 ]] || fail 'accepted 12-lock inventory differs'
     while IFS= read -r lock; do
         prior=$(git show "$ACCEPTED_SOURCE:$lock" | sha256sum | cut -c1-64)
+        prior=${ACCEPTED_LOCK_SUCCESSORS[$lock]:-$prior}
         [[ ${LOCK_HASH[$lock]-} == "$prior" ]] || fail "accepted lock changed: $lock"
     done <<< "$preserved"
 }

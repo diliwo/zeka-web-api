@@ -138,14 +138,6 @@
           "Zeka.Extensions.MultiTenancy.Abstractions": "2.0.0-preview.1"
         }
       },
-      "AutoMapper": {
-        "type": "Transitive",
-        "resolved": "13.0.1",
-        "contentHash": "/Fx1SbJ16qS7dU4i604Sle+U9VLX+WSNVJggk6MupKVkYvvBm4XqYaeFuf67diHefHKHs50uQIS2YEDFhPCakQ==",
-        "dependencies": {
-          "Microsoft.Extensions.Options": "6.0.0"
-        }
-      },
       "DinkToPdf": {
         "type": "Transitive",
         "resolved": "1.0.8",
@@ -1595,7 +1587,6 @@
       "clientmanagement.application": {
         "type": "Project",
         "dependencies": {
-          "AutoMapper": "[13.0.1, )",
           "ClientManagement.Core": "[1.0.0, )",
           "DinkToPdf": "[1.0.8, )",
           "DinkToPdfCopyDependencies": "[1.0.8, )",
