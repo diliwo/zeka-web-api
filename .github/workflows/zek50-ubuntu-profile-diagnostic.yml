@@ -1,0 +1,190 @@
+name: ZEK50 single Ubuntu profile diagnostic
+
+on:
+  push:
+    branches: [codex/zek50-ubuntu-profile-diagnostic-20261125]
+
+permissions: {}
+
+env:
+  GIT_NO_REPLACE_OBJECTS: "1"
+  GIT_NO_LAZY_FETCH: "1"
+  SOURCE_SHA: e87f5e125566e3a03874aef601feb0da82861c06
+  LANE: postgresql
+  ROLE: candidate
+
+jobs:
+  diagnostic:
+    name: ZEK50 non-required Ubuntu PostgreSQL diagnostic
+    if: ${{ github.event_name == 'push' && github.event.created == true && github.run_attempt == '1' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out this diagnostic preparation only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          path: diagnostic
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out unchanged published test source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: e87f5e125566e3a03874aef601feb0da82861c06
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out unchanged protected execution script
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: b119bb4e45d95b26959b91fac201dbc049b82c20
+          path: tooling
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the original pinned SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+
+      - id: paths
+        name: Start independent diagnostics before any test host
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          raw=$(mktemp -d "$RUNNER_TEMP/zek50-profile-private.XXXXXX")
+          safe=$(mktemp -d "$RUNNER_TEMP/zek50-profile-safe.XXXXXX")
+          printf 'RATCHET_RAW=%s\nRATCHET_SAFE=%s\nZEKA_DIAG_SAFE_DIR=%s\n' "$raw" "$safe" "$safe" >>"$GITHUB_ENV"
+          python3 -I - "$safe" <<'PY'
+          import json, pathlib, sys
+          path = pathlib.Path(sys.argv[1]) / "execution-boundary.json"
+          path.write_text(json.dumps({"schema": 1, "mode": "NON_REQUIRED_DIAGNOSTIC", "recordKind": "PRE_EXECUTION_BOUNDARY",
+              "source": "e87f5e125566e3a03874aef601feb0da82861c06",
+              "profileStarted": False, "nativeOutcome": "NOT_RUN",
+              "originalRun": 45624605180, "originalJob": 139241519519}) + "\n")
+          PY
+
+      - name: Admit exact Ubuntu source and tooling identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I diagnostic/scripts/diagnostics/zek50-ubuntu/workflow_support.py admit \
+            --source "$GITHUB_WORKSPACE/source" --tooling "$GITHUB_WORKSPACE/tooling" \
+            --raw "$RATCHET_RAW" --safe "$RATCHET_SAFE"
+
+      - name: Bind PostgreSQL 17.11 without touching owner-local images
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          alpine=postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+          docker pull "$alpine" >"$RATCHET_RAW/pg-alpine-admission.private.log" 2>&1
+          docker tag "$alpine" postgres:17-alpine
+          docker tag "$alpine" postgres:17.11-alpine
+          docker pull postgres:17.11 >"$RATCHET_RAW/pg-debian-admission.private.log" 2>&1
+          docker tag postgres:17.11 postgres:17
+          for tag in postgres:17-alpine postgres:17; do
+            python3 -I diagnostic/scripts/diagnostics/zek50-ubuntu/workflow_support.py image \
+              --tag "$tag" --safe "$RATCHET_SAFE"
+          done
+
+      - name: Reject tracked credentials before package credential delivery
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          cmp -- scripts/security/check-nuget-credentials.sh \
+            "$GITHUB_WORKSPACE/tooling/scripts/security/check-nuget-credentials.sh"
+          bash scripts/security/check-nuget-credentials.sh
+
+      - name: Restore the original five-project profile without running tests
+        shell: bash
+        working-directory: source
+        env:
+          PACKAGE_READ_TOKEN: ${{ secrets.ZEKA_PACKAGES_READ_TOKEN || github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/tooling/scripts/ci/run-c1-ratchet.sh" prepare \
+            "$RATCHET_RAW/context.json" postgresql candidate "$RATCHET_RAW"
+
+      - name: Compile the isolated observer with SDK framework references only
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' '<configuration><packageSources><clear /></packageSources></configuration>' \
+            >"$RATCHET_RAW/hook.nuget.config"
+          project="$GITHUB_WORKSPACE/diagnostic/scripts/diagnostics/zek50-ubuntu/StartupHook.csproj"
+          dotnet restore "$project" --configfile "$RATCHET_RAW/hook.nuget.config" \
+            -p:ImportDirectoryBuildProps=false -p:ImportDirectoryBuildTargets=false \
+            >"$RATCHET_RAW/hook-restore.private.log" 2>&1
+          dotnet build "$project" --configuration Release --no-restore --output "$RATCHET_RAW/hook" \
+            -p:ImportDirectoryBuildProps=false -p:ImportDirectoryBuildTargets=false \
+            >"$RATCHET_RAW/hook-build.private.log" 2>&1
+          real=$(readlink -f "$(command -v dotnet)")
+          mkdir -m 0700 "$RATCHET_RAW/hook-smoke"
+          ZEKA_DIAG_SAFE_DIR="$RATCHET_RAW/hook-smoke" ZEKA_DIAG_INVOCATION=1 \
+            DOTNET_STARTUP_HOOKS="$RATCHET_RAW/hook/Zeka.UbuntuDiagnostic.StartupHook.dll" \
+            "$real" "$(dirname "$real")/sdk/8.0.129/MSBuild.dll" -version -nologo \
+            >"$RATCHET_RAW/hook-smoke.private.log" 2>&1
+          python3 -I - "$RATCHET_RAW/hook-smoke" "$RATCHET_SAFE" <<'PY'
+          import json, pathlib, sys
+          rows = [json.loads(line) for path in pathlib.Path(sys.argv[1]).glob("managed-1-*.jsonl")
+                  for line in path.read_text().splitlines()]
+          phases = {row.get("phase") for row in rows}
+          if not {"CLR_STARTED", "MANAGED_PROCESS_EXIT"}.issubset(phases):
+              raise SystemExit("Managed observer admission failed before profile execution.")
+          (pathlib.Path(sys.argv[2]) / "observer-smoke.json").write_text(json.dumps({
+              "schema": 1, "kind": "DIAGNOSTIC_TOOL_PREPARATION_ONLY", "probe": "SDK_MSBUILD_VERSION",
+              "managedHookLoaded": True, "applicationProfileExecuted": False}) + "\n")
+          PY
+          mkdir -m 0700 "$RATCHET_RAW/bin"
+          cp diagnostic/scripts/diagnostics/zek50-ubuntu/observer.py "$RATCHET_RAW/bin/dotnet"
+          chmod 0700 "$RATCHET_RAW/bin/dotnet"
+          printf 'ZEKA_DIAG_REAL_DOTNET=%s\n' "$(command -v dotnet)" >>"$GITHUB_ENV"
+          printf 'ZEKA_DIAG_HOOK=%s\n' "$RATCHET_RAW/hook/Zeka.UbuntuDiagnostic.StartupHook.dll" >>"$GITHUB_ENV"
+
+      - name: Execute exactly one unchanged PostgreSQL profile
+        shell: bash
+        working-directory: source
+        env:
+          SONARQUBE_CLI_SERVER: https://sonarcloud.io
+          SONARQUBE_CLI_ORG: ""
+          SONARQUBE_CLI_TOKEN: ""
+        run: |
+          set -euo pipefail
+          umask 077
+          export PATH="$RATCHET_RAW/bin:$PATH"
+          status=0
+          bash "$GITHUB_WORKSPACE/tooling/scripts/ci/run-c1-ratchet.sh" execute \
+            "$RATCHET_RAW/context.json" postgresql candidate "$RATCHET_RAW" \
+            >"$RATCHET_RAW/profile-wrapper.private.log" 2>&1 || status=$?
+          printf '%s\n' "$status" >"$RATCHET_RAW/profile.exit"
+          exit "$status"
+
+      - name: Finalize safe diagnostics even when no TRX exists
+        if: ${{ always() && steps.paths.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I diagnostic/scripts/diagnostics/zek50-ubuntu/workflow_support.py finalize \
+            --source "$GITHUB_WORKSPACE/source" --tooling "$GITHUB_WORKSPACE/tooling" \
+            --raw "$RATCHET_RAW" --safe "$RATCHET_SAFE"
+
+      - name: Retain only sanitized diagnostic and test summaries
+        if: ${{ always() && steps.paths.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zek50-ubuntu-profile-first-error-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.RATCHET_SAFE }}/*.json
+            ${{ env.RATCHET_SAFE }}/*.jsonl
+          if-no-files-found: error
+          retention-days: 14
