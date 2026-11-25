@@ -237,7 +237,11 @@ public sealed partial class DossierLookupHttpTests(PostgreSqlClientRuntimeDataba
         public Task<TenantAccessDecision> ResolveAsync(string subject, Guid selected, CancellationToken token)
         {
             Calls++;
-            return Task.FromResult(new TenantAccessDecision(Outcome, Outcome == TenantAccessOutcome.Authorized
+            // A current Auth decision denies missing membership for the selected organisation.
+            // Returning an authorized foreign grant instead would model a distinct integrity failure (503).
+            var outcome = Outcome == TenantAccessOutcome.Authorized && selected != Organisation
+                ? TenantAccessOutcome.Denied : Outcome;
+            return Task.FromResult(new TenantAccessDecision(outcome, outcome == TenantAccessOutcome.Authorized
                 ? new(Organisation, Membership, Permissions, "test", DateTimeOffset.UtcNow) : null));
         }
     }
