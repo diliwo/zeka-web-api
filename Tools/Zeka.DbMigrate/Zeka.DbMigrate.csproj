@@ -23,5 +23,7 @@
   <ItemGroup>
     <EmbeddedResource Include="AuthOnboarding/onboarding-migration.sql" LogicalName="Zeka.DbMigrate.AuthOnboarding.onboarding-migration.sql" />
     <EmbeddedResource Include="AuthOnboarding/onboarding-grants.sql" LogicalName="Zeka.DbMigrate.AuthOnboarding.onboarding-grants.sql" />
+    <EmbeddedResource Include="../../Services/AuthManager/AuthManager.Infrastructure/Security/rls-manifest.v20.json" LogicalName="Zeka.DbMigrate.AuthOnboarding.historical-v20.json" />
+    <EmbeddedResource Include="AuthOnboarding/organisation-owner-index-migration.sql" LogicalName="Zeka.DbMigrate.AuthOnboarding.organisation-owner-index-migration.sql" />
   </ItemGroup>
 </Project>

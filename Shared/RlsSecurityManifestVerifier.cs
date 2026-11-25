@@ -76,7 +76,8 @@ public static class RlsSecurityManifestVerifier
             || x.EndsWith("rls-manifest.v17.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v18.json", StringComparison.Ordinal)
             || x.EndsWith("rls-manifest.v19.json", StringComparison.Ordinal)
-            || x.EndsWith("rls-manifest.v20.json", StringComparison.Ordinal));
+            || x.EndsWith("rls-manifest.v20.json", StringComparison.Ordinal)
+            || x.EndsWith("rls-manifest.v21.json", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException("RLS manifest resource is missing.");
         return JsonSerializer.Deserialize<RlsSecurityManifest>(stream, new JsonSerializerOptions
@@ -95,8 +96,8 @@ public static class RlsSecurityManifestVerifier
     public static async Task VerifyAsync(DbContext database, RlsSecurityManifest manifest,
         CancellationToken cancellationToken = default)
     {
-        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19 or 20)
-            || (manifest.SchemaVersion == 20 && manifest.Service != "AuthManagement")
+        if (manifest.SchemaVersion is not (10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19 or 20 or 21)
+            || ((manifest.SchemaVersion is 20 or 21) && manifest.Service != "AuthManagement")
             || database.GetType().FullName != manifest.ModelContext)
             throw new InvalidOperationException("Manifest identity does not match the deployment model.");
         var functionDefinitions = FunctionDefinitions(manifest);

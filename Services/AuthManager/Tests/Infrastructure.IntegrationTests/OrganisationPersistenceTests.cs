@@ -64,6 +64,26 @@ public sealed class OrganisationPersistenceTests
     }
 
     [Fact]
+    [Trait("Issue", "ZEK-50")]
+    public async Task SQLite_rejects_a_second_active_owner_with_a_distinct_user()
+    {
+        await using var context = await IdentityTestContext.CreateAsync();
+        await using var scope = context.Services.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var first = CreateUser("first-owner@example.invalid", "first-owner");
+        var second = CreateUser("second-owner@example.invalid", "second-owner");
+        var organisation = Organisation.Create(Guid.NewGuid(), "Synthetic owner uniqueness", first.Id, Now);
+        database.AddRange(first, second, organisation);
+        database.OrganisationMemberships.Add(OrganisationMembership.CreateOwner(Guid.NewGuid(), organisation.Id, first.Id, Now));
+        await database.SaveChangesAsync();
+        database.OrganisationMemberships.Add(OrganisationMembership.CreateOwner(Guid.NewGuid(), organisation.Id, second.Id, Now));
+        var error = await Assert.ThrowsAsync<DbUpdateException>(() => database.SaveChangesAsync());
+        var sqlite = Assert.IsType<Microsoft.Data.Sqlite.SqliteException>(error.InnerException);
+        Assert.Equal(19, sqlite.SqliteErrorCode);
+        Assert.Equal(2067, sqlite.SqliteExtendedErrorCode);
+        Assert.Equal(1, await database.OrganisationMemberships.CountAsync());
+    }
+    [Fact]
     public async Task One_user_can_have_memberships_in_multiple_organisations()
     {
         await using var context = await IdentityTestContext.CreateAsync();
@@ -95,7 +115,7 @@ public sealed class OrganisationPersistenceTests
             var organisation = Organisation.Create(Guid.NewGuid(), "Example", owner.Id, Now);
             dbContext.AddRange(owner, organisation);
             dbContext.OrganisationMemberships.Add(
-                OrganisationMembership.CreateOwner(membershipId, organisation.Id, owner.Id, Now));
+                OrganisationMembership.Create(membershipId, organisation.Id, owner.Id, PermissionSet.ViewerId, Now));
             await dbContext.SaveChangesAsync();
         }
 

@@ -152,6 +152,36 @@
       "DangerousAcceptAnyServerCertificateValidator": false
     },
     {
+      "Key": "GatewayBrowserTransport:9",
+      "FileCacheOptions": { "TtlSeconds": 0 },
+      "UpstreamPathTemplate": "/api/v1/browser-session/organisations",
+      "UpstreamHttpMethod": [ "POST" ],
+      "DownstreamPathTemplate": "/api/v1/browser-session/organisations",
+      "RouteIsCaseSensitive": true,
+      "HttpHandlerOptions": {
+        "AllowAutoRedirect": false,
+        "UseCookieContainer": false,
+        "UseTracing": false,
+        "UseProxy": false
+      },
+      "DangerousAcceptAnyServerCertificateValidator": false
+    },
+    {
+      "Key": "GatewayBrowserTransport:10",
+      "FileCacheOptions": { "TtlSeconds": 0 },
+      "UpstreamPathTemplate": "/api/v1/browser-organisations/{organisationId}/access",
+      "UpstreamHttpMethod": [ "GET" ],
+      "DownstreamPathTemplate": "/api/v1/browser-organisations/{organisationId}/access",
+      "RouteIsCaseSensitive": true,
+      "HttpHandlerOptions": {
+        "AllowAutoRedirect": false,
+        "UseCookieContainer": false,
+        "UseTracing": false,
+        "UseProxy": false
+      },
+      "DangerousAcceptAnyServerCertificateValidator": false
+    },
+    {
       //Authentication
       "UpstreamPathTemplate": "/login",
       "UpstreamHttpMethod": [ "Post" ],

@@ -21,7 +21,7 @@ namespace Zeka.AuthOwnerProvision.Tests;
 [Trait("Evidence", "SourceOnly")]
 public sealed class OnboardingRegistrationManifestSourceTests
 {
-    private const string Migration = "20261115195218_OnboardingRegistration";
+    private const string Migration = "20261124170000_OrganisationSingleActiveOwner";
     private const string PreviousManifestHash = "6543c54a1d7ab5539ef321af8e81c0a5a0692f3378912a5926fd159432e68ad6";
     private static readonly string[] EnrollmentTables =
     [
@@ -49,7 +49,7 @@ public sealed class OnboardingRegistrationManifestSourceTests
             .Distinct().OrderBy(Key, StringComparer.Ordinal).ToArray();
         var classified = manifest.ProtectedTables.Concat(manifest.ExcludedTables).OrderBy(Key, StringComparer.Ordinal).ToArray();
 
-        Assert.Equal(20, manifest.SchemaVersion);
+        Assert.Equal(21, manifest.SchemaVersion);
         Assert.Equal(Migration, manifest.MigrationId);
         Assert.Equal(Migration, database.Database.GetMigrations().Last());
         Assert.Equal(45, mapped.Length);
@@ -99,8 +99,29 @@ public sealed class OnboardingRegistrationManifestSourceTests
         Validate("ValidateParameterPrivilegeManifest", previous);
     }
 
+    [Fact]
+    [Trait("Issue", "ZEK-50")]
+    public void Active_owner_index_manifest_changes_only_the_approved_version_and_history_identity()
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(SourceRoot(), "Services/AuthManager/AuthManager.Infrastructure/Security/rls-manifest.v20.json"));
+        Assert.Equal("6eca66966a8957a7dfc558d308992c2a92e9dd324ae3bcf2b232f583f314b944",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
+        var previous = JsonNode.Parse(bytes)!.AsObject();
+        var current = JsonNode.Parse(File.ReadAllBytes(Path.Combine(SourceRoot(),
+            "Services/AuthManager/AuthManager.Infrastructure/Security/rls-manifest.v21.json")))!.AsObject();
+        Assert.Equal(20, previous["schemaVersion"]!.GetValue<int>());
+        Assert.Equal("20261115195218_OnboardingRegistration", previous["migrationId"]!.GetValue<string>());
+        Assert.Equal(21, current["schemaVersion"]!.GetValue<int>());
+        Assert.Equal(Migration, current["migrationId"]!.GetValue<string>());
+        foreach (var field in new[] { "schemaVersion", "migrationId" })
+        { previous.Remove(field); current.Remove(field); }
+        Assert.True(JsonNode.DeepEquals(previous, current), "A privilege, role, classification or policy changed.");
+    }
+
     [Theory]
-    [InlineData(21, "AuthManagement")]
+    [InlineData(22, "AuthManagement")]
+    [InlineData(21, "AdminAreaManagement")]
+    [InlineData(21, "ClientManagement")]
     [InlineData(20, "ClientManagement")]
     public async Task Unknown_schema_and_non_Auth_v20_remain_rejected_before_any_connection(int schema, string service)
     {

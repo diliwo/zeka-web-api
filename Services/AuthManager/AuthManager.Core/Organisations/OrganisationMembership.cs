@@ -57,7 +57,10 @@ public sealed class OrganisationMembership
 
     public bool Suspend(DateTimeOffset suspendedAtUtc)
     {
-        if (Status != MembershipStatus.Active || suspendedAtUtc < JoinedAtUtc)
+        // Ownership transfer is not implemented. An individual Owner membership cannot
+        // suspend or depart independently and leave its organisation ownerless.
+        if (PermissionSetId == PermissionSet.OrganisationOwnerId
+            || Status != MembershipStatus.Active || suspendedAtUtc < JoinedAtUtc)
         {
             return false;
         }
@@ -84,7 +87,8 @@ public sealed class OrganisationMembership
     public bool Leave(DateTimeOffset endedAtUtc)
     {
         var lastTransitionAtUtc = SuspendedAtUtc ?? JoinedAtUtc;
-        if (Status == MembershipStatus.Left || endedAtUtc < lastTransitionAtUtc)
+        if (PermissionSetId == PermissionSet.OrganisationOwnerId
+            || Status == MembershipStatus.Left || endedAtUtc < lastTransitionAtUtc)
         {
             return false;
         }

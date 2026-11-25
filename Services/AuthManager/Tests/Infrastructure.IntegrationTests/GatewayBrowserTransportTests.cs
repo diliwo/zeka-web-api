@@ -111,7 +111,7 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
     }
 
     [Fact]
-    // Preserve the existing discovery identity while extending its approved matrix to nine pairs.
+    // Preserve the installed discovery identity while extending its matrix to the current slice routes.
     public async Task Exact_route_and_credential_matrix_exposes_only_seven_method_path_pairs()
     {
         if (await GatewayLinuxValidation.RunCaseAsync(nameof(Exact_route_and_credential_matrix_exposes_only_seven_method_path_pairs), new object?[] {  }, output)) return;
@@ -123,7 +123,9 @@ public sealed class GatewayBrowserTransportTests(PostgreSqlFixture postgres, ITe
             (HttpMethod.Post, Session + "restore"), (HttpMethod.Post, Session + "logout"),
             (HttpMethod.Get, Eligible), (HttpMethod.Get, "/api/v1/tenant-access/" + host.Alpha),
             (HttpMethod.Post, Registration), (HttpMethod.Post, Registration + "/resend"),
-            (HttpMethod.Post, Registration + "/email-verification/exchange")
+            (HttpMethod.Post, Registration + "/email-verification/exchange"),
+            (HttpMethod.Post, Session + "organisations"),
+            (HttpMethod.Get, "/api/v1/browser-organisations/" + host.Alpha + "/access")
         };
         for (var index = 0; index < routes.Length; index++)
         {

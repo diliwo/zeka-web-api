@@ -5,6 +5,7 @@ using AuthManager.Application.Authentication;
 using AuthManager.Application.Common.Auditing;
 using AuthManager.Application.Common.Idempotency;
 using AuthManager.Application.Workers;
+using AuthManager.Core.Enums;
 using AuthManager.Core.Organisations;
 using AuthManager.Infrastructure.Authentication;
 using AuthManager.Infrastructure.Identity.Models;
@@ -173,9 +174,17 @@ public sealed class WorkerRotationPersistenceTests
         if (change == "replacement-revoked") (await fixture.Database.BrowserSessionFamilies.SingleAsync(x => x.Id == worker.SessionId)).RevokedAtUtc = fixture.Clock.Now;
         if (change == "replacement-stamp") (await fixture.Database.Users.SingleAsync(x => x.Id == worker.SubjectId)).SecurityStamp = Guid.NewGuid().ToString("N");
         if (change == "worker-membership") (await fixture.Database.OrganisationMemberships.SingleAsync(x => x.Id == worker.MembershipId)).Suspend(fixture.Clock.Now);
-        if (change == "owner-membership") (await fixture.Database.OrganisationMemberships.SingleAsync(x => x.UserId == fixture.Caller.SubjectId)).Suspend(fixture.Clock.Now);
+        if (change == "owner-membership")
+        {
+            var membership = await fixture.Database.OrganisationMemberships.SingleAsync(x => x.UserId == fixture.Caller.SubjectId);
+            // Deliberate persisted legacy/corrupt state: the Owner domain operation refuses suspension.
+            fixture.Database.Entry(membership).Property(x => x.Status).CurrentValue = MembershipStatus.Suspended;
+        }
         if (change == "organisation-closing") (await fixture.Database.Organisations.SingleAsync()).BeginClosure(fixture.Clock.Now);
         await fixture.Database.SaveChangesAsync();
+        if (change == "owner-membership")
+            Assert.Equal(MembershipStatus.Suspended, await fixture.Database.OrganisationMemberships.AsNoTracking()
+                .Where(x => x.UserId == fixture.Caller.SubjectId).Select(x => x.Status).SingleAsync());
         await Assert.ThrowsAsync<WorkerRotationException>(() => fixture.ExecuteAsync("revoke-others", next.OperationId, fixture.Deliveries(next)));
         Assert.All(first.Workers, previous => Assert.Null(fixture.Database.BrowserSessionFamilies.Single(x => x.Id == previous.SessionId).RevokedAtUtc));
         Assert.Equal(0, await fixture.Database.AuditEntries.CountAsync(x => x.Action == "m1.workers.revoke-others"));
@@ -189,9 +198,17 @@ public sealed class WorkerRotationPersistenceTests
     {
         await using var fixture = await Fixture.CreateAsync();
         if (change == "owner-session") (await fixture.Database.BrowserSessionFamilies.SingleAsync()).RevokedAtUtc = fixture.Clock.Now;
-        if (change == "owner-membership") (await fixture.Database.OrganisationMemberships.SingleAsync()).Suspend(fixture.Clock.Now);
+        if (change == "owner-membership")
+        {
+            var membership = await fixture.Database.OrganisationMemberships.SingleAsync();
+            // Deliberate persisted legacy/corrupt state: the Owner domain operation refuses suspension.
+            fixture.Database.Entry(membership).Property(x => x.Status).CurrentValue = MembershipStatus.Suspended;
+        }
         if (change == "closed-organisation") (await fixture.Database.Organisations.SingleAsync()).Close(fixture.Clock.Now);
         await fixture.Database.SaveChangesAsync();
+        if (change == "owner-membership")
+            Assert.Equal(MembershipStatus.Suspended, await fixture.Database.OrganisationMemberships.AsNoTracking()
+                .Select(x => x.Status).SingleAsync());
         await Assert.ThrowsAsync<WorkerRotationException>(() => fixture.ExecuteAsync("prepare"));
         Assert.Equal(1, await fixture.Database.Users.CountAsync()); Assert.Empty(await fixture.Database.IdempotencyRecords.ToListAsync());
     }

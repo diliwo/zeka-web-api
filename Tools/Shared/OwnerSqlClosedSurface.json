@@ -93,6 +93,10 @@
     "Tools/Zeka.DbMigrate/AuthOnboarding/onboarding-migration.sql": {
       "sha256": "b68a058177c27b67e22c81e11cf6ec3c0eedbe69833937b534057bc2af7075e2",
       "classification": "reviewed-orchestration-support"
+    },
+    "Tools/Zeka.DbMigrate/AuthOnboarding/organisation-owner-index-migration.sql": {
+      "sha256": "8b2b5ad1ac51c7d0038e127b75791324c11bf4a76c699524b31feee084249400",
+      "classification": "reviewed-orchestration-support"
     }
   }
 }

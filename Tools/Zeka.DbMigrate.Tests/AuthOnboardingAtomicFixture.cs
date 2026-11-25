@@ -26,7 +26,7 @@ namespace Zeka.DbMigrate.Tests;
 // A single wholly owned cluster, with a fresh Auth database per serial scenario.
 // No retained fixture/configuration is accepted. Secret bytes enter only a 0400
 // copied container file; it is not described as a read-only bind mount.
-public sealed class AuthOnboardingAtomicFixture : IAsyncLifetime
+public sealed class AuthOnboardingAtomicFixture : IAsyncLifetime, IAuthMigrationDatabaseHost
 {
     private const string SecretPath = "/run/secrets/admin-password";
     private const string AuthCatalogDockerEndpoint = "npipe://./pipe/docker_engine";
@@ -823,6 +823,11 @@ public sealed class AuthOnboardingAtomicFixture : IAsyncLifetime
         return directory?.FullName ?? throw new InvalidOperationException("SOURCE_BOOTSTRAP_NOT_FOUND");
     }
 
+    Task<NpgsqlConnection> IAuthMigrationDatabaseHost.OpenAdminAsync(string database, CancellationToken ct) => OpenAdminAsync(database, ct);
+    string IAuthMigrationDatabaseHost.MigratorConnection(string database) => MigratorConnection(database);
+    string IAuthMigrationDatabaseHost.RuntimeConnection(string database) => RuntimeConnection(database);
+    string IAuthMigrationDatabaseHost.RolePasswordSql() => RolePasswordSql();
+
     internal string MigratorConnection(string database) => Connection(database, "zeka_auth_migrator", migratorSecret);
     internal string RuntimeConnection(string database) => Connection(database, "zeka_auth_runtime", runtimeSecret);
     internal async Task<NpgsqlConnection> OpenAdminAsync(string database, CancellationToken ct)
@@ -953,7 +958,7 @@ public sealed class AuthOnboardingAtomicFixture : IAsyncLifetime
     private static string Literal(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
 }
 
-internal sealed class AuthOnboardingAtomicDatabase(AuthOnboardingAtomicFixture fixture, string name)
+internal sealed class AuthOnboardingAtomicDatabase(IAuthMigrationDatabaseHost fixture, string name)
 {
     private const string Previous = "20261018144506_BrowserSessionSnapshot";
     private const string Target = "20261115195218_OnboardingRegistration";
@@ -994,10 +999,10 @@ internal sealed class AuthOnboardingAtomicDatabase(AuthOnboardingAtomicFixture f
         {
             AssertCompiledTargets(database);
             await database.GetService<IMigrator>().MigrateAsync(Previous, ct);
-            Assert.Equal(new[] { Target }, await database.Database.GetPendingMigrationsAsync(ct));
+            Assert.Equal(new[] { Target, AuthExactMigrationStep.OwnerTarget }, await database.Database.GetPendingMigrationsAsync(ct));
             await ExecuteAsync(owner, "SET ROLE zeka_auth_owner", ct);
             await database.GetService<IMigrator>().MigrateAsync(Target, ct);
-            Assert.Empty(await database.Database.GetPendingMigrationsAsync(ct));
+            Assert.Equal(new[] { AuthExactMigrationStep.OwnerTarget }, await database.Database.GetPendingMigrationsAsync(ct));
         }
         await using (var admin = await fixture.OpenAdminAsync(name, ct)) await ExecuteAsync(admin, bootstrap, ct);
         await VerifyV20Async(ct);
@@ -1006,9 +1011,10 @@ internal sealed class AuthOnboardingAtomicDatabase(AuthOnboardingAtomicFixture f
     private static void AssertCompiledTargets(AuthDbContext database)
     {
         var migrations = database.Database.GetMigrations().ToArray();
-        Assert.True(migrations.Length >= 2);
-        Assert.Equal(Previous, migrations[^2]);
-        Assert.Equal(Target, migrations[^1]);
+        Assert.True(migrations.Length >= 3);
+        Assert.Equal(Previous, migrations[^3]);
+        Assert.Equal(Target, migrations[^2]);
+        Assert.Equal(AuthExactMigrationStep.OwnerTarget, migrations[^1]);
     }
 
     internal Task<EngineResult> ExecuteAsync(CancellationToken ct, AuthOnboardingHooks? hooks = null)
@@ -1026,11 +1032,24 @@ internal sealed class AuthOnboardingAtomicDatabase(AuthOnboardingAtomicFixture f
     {
         await using var connection = await OpenOwnerAsync(ct);
         await using var database = Context(connection);
-        var assembly = typeof(AuthDbContext).Assembly;
-        var type = assembly.GetType("Zeka.PersistenceSecurity.RlsSecurityManifestVerifier", true)!;
-        var method = type.GetMethods(BindingFlags.Public | BindingFlags.Static).Single(value => value.Name == "VerifyAsync"
-            && value.GetParameters() is var parameters && parameters.Length == 3 && parameters[1].ParameterType == typeof(Assembly));
-        await (Task)method.Invoke(null, [database, assembly, ct])!;
+        await AuthExactMigrationStep.Load(Target).VerifyManifestAsync(database, ct);
+    }
+
+    internal Task<EngineResult> ExecuteOwnerIndexAsync(CancellationToken ct, AuthOnboardingHooks? hooks = null)
+    {
+        Assert.True(ServiceDescriptor.TryGet("auth", out var service));
+        var options = new CommandOptions(MigrationOperation.Apply, service, AuthExactMigrationStep.OwnerTarget, Guid.NewGuid(),
+            Path.GetTempPath(), "provider-owner-index.json", TimeSpan.FromSeconds(5));
+        return AuthOnboardingMigrationExecutor.ExecuteAsync(options, fixture.MigratorConnection(name),
+            "b158531ff28025b19846492436f805eb44426d2d", DateTimeOffset.UtcNow, ct, hooks);
+    }
+
+    internal async Task VerifyV21Async(CancellationToken ct)
+    {
+        await using var connection = await OpenOwnerAsync(ct);
+        await using var database = Context(connection);
+        await AuthExactMigrationStep.Load(AuthExactMigrationStep.OwnerTarget).VerifyManifestAsync(database, ct);
+        Assert.True(await OrganisationOwnerIndexContract.IsInstalledAsync(database, ct));
     }
 
     internal async Task AssertTargetAbsentAsync(CancellationToken ct)

@@ -221,11 +221,98 @@ public sealed class WorkerRotationPostgreSqlFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        await container.StartAsync(deadline.Token);
-        await using var connection = new NpgsqlConnection(container.GetConnectionString());
-        await connection.OpenAsync(deadline.Token);
-        Assert.Equal(17, connection.PostgreSqlVersion.Major);
-        ServerVersion = connection.ServerVersion;
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var stage = "container_start";
+        int? observedServerMajor = null;
+        try
+        {
+            await container.StartAsync(deadline.Token);
+            stage = "connection_create";
+            await using var connection = new NpgsqlConnection(container.GetConnectionString());
+            try
+            {
+                stage = "connection_open";
+                await connection.OpenAsync(deadline.Token);
+                stage = "server_version";
+                observedServerMajor = connection.PostgreSqlVersion.Major;
+                Assert.Equal(17, connection.PostgreSqlVersion.Major);
+                ServerVersion = connection.ServerVersion;
+            }
+            catch (Exception failure)
+            {
+                // Capture before await-using disposal can produce a secondary failure.
+                WriteInitializationDiagnostic(stage, elapsed.ElapsedMilliseconds, deadline.IsCancellationRequested, observedServerMajor, failure);
+                throw;
+            }
+            stage = "connection_dispose";
+        }
+        catch (Exception failure)
+        {
+            // Only the opt-in independent diagnostic lane retains these fixed fields.
+            // Preserve the first original exception and the existing failure outcome.
+            WriteInitializationDiagnostic(stage, elapsed.ElapsedMilliseconds, deadline.IsCancellationRequested, observedServerMajor, failure);
+            throw;
+        }
+        WriteInitializationDiagnostic("completed", elapsed.ElapsedMilliseconds, deadline.IsCancellationRequested, observedServerMajor, null);
+    }
+
+    private static void WriteInitializationDiagnostic(string stage, long elapsedMilliseconds,
+        bool deadlineCancellationRequested, int? observedServerMajor, Exception? failure)
+    {
+        var destination = Environment.GetEnvironmentVariable("ZEKA_WORKER_INIT_DIAGNOSTIC_FILE");
+        if (string.IsNullOrWhiteSpace(destination)) return;
+        var categories = new List<string>();
+        string? sqlState = null;
+        int? dockerHttpStatus = null;
+        for (var current = failure; current is not null && categories.Count < 8; current = current.InnerException)
+        {
+            // Map to constants: no type names, exception messages, Data, stack traces,
+            // container response bodies or connection/configuration values are serialized.
+            categories.Add(current switch
+            {
+                Docker.DotNet.DockerApiException => "DockerApiException",
+                PostgresException => "PostgresException",
+                NpgsqlException => "NpgsqlException",
+                TaskCanceledException => "TaskCanceledException",
+                OperationCanceledException => "OperationCanceledException",
+                TimeoutException => "TimeoutException",
+                System.Net.Sockets.SocketException => "SocketException",
+                HttpRequestException => "HttpRequestException",
+                Xunit.Sdk.XunitException => "AssertionException",
+                InvalidOperationException => "InvalidOperationException",
+                IOException => "IOException",
+                _ => "OtherException"
+            });
+            if (current is PostgresException postgres && sqlState is null
+                && postgres.SqlState.Length == 5
+                && postgres.SqlState.All(character => character is >= 'A' and <= 'Z' or >= '0' and <= '9'))
+                sqlState = postgres.SqlState;
+            if (current is Docker.DotNet.DockerApiException docker && dockerHttpStatus is null
+                && (int)docker.StatusCode is >= 100 and <= 599)
+                dockerHttpStatus = (int)docker.StatusCode;
+        }
+        try
+        {
+            // One producer, one file, first write wins. No fixture DisposeAsync overwrite.
+            using var stream = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            JsonSerializer.Serialize(stream, new
+            {
+                schema = 1,
+                status = failure is null ? "ready" : "failed",
+                stage,
+                elapsedMilliseconds,
+                deadlineCancellationRequested,
+                observedServerMajor,
+                exceptionCategories = categories,
+                sqlState,
+                dockerHttpStatus
+            });
+        }
+        catch (Exception)
+        {
+            // A diagnostic I/O failure must not replace the original fixture exception.
+            // The independent lane treats a missing/malformed record as failed evidence.
+        }
     }
 
     public async Task<string> CreateDatabaseAsync()

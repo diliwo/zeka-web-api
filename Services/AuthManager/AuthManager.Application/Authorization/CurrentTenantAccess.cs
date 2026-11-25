@@ -8,7 +8,10 @@ public sealed record CurrentTenantAccess(
     Guid OrganisationMembershipId,
     IReadOnlyCollection<string> EffectivePermissionCodes,
     string DecisionVersion,
-    DateTimeOffset ObservedAtUtc)
+    DateTimeOffset ObservedAtUtc,
+    string? DisplayName = null,
+    string? TimeZoneId = null,
+    long TimeZoneConfigVersion = 0)
 {
     public static CurrentTenantAccess Denied(DateTimeOffset now) =>
         new(TenantAccessOutcome.Denied, Guid.Empty, Guid.Empty, Array.Empty<string>(), string.Empty, now);

@@ -37,7 +37,7 @@ internal static class AuthOnboardingMigrationExecutor
     // The legacy "latest" alias must not bypass this transaction-only workflow.
     // It is routed here and refused before opening a connection; callers must pin the target.
     internal static bool Handles(CommandOptions options) => options.Operation == MigrationOperation.Apply
-        && options.Service.Key == "auth" && (options.Target == TargetMigration || options.Target == "latest");
+        && options.Service.Key == "auth" && (AuthExactMigrationStep.IsTarget(options.Target) || options.Target == "latest");
 
     internal static async Task<EngineResult> ExecuteAsync(CommandOptions options, string connectionString,
         string sourceCommit, DateTimeOffset startedAt, CancellationToken cancellationToken = default,
@@ -50,6 +50,7 @@ internal static class AuthOnboardingMigrationExecutor
         NpgsqlConnection? connection = null;
         NpgsqlTransaction? transaction = null;
         DbContext? context = null;
+        AuthExactMigrationStep? step = null;
         string? normalizedConnection = null;
         string? databaseName = null;
         int? backendPid = null;
@@ -84,12 +85,12 @@ internal static class AuthOnboardingMigrationExecutor
         try
         {
             if (options.Operation != MigrationOperation.Apply || options.Service.Key != "auth"
-                || options.Target != TargetMigration || options.LockTimeout < TimeSpan.FromSeconds(1)
+                || !AuthExactMigrationStep.IsTarget(options.Target) || options.LockTimeout < TimeSpan.FromSeconds(1)
                 || options.LockTimeout > TimeSpan.FromSeconds(60))
                 throw new AtomicRefusal("ATOMIC_AUTH_EXACT_TARGET_REQUIRED", ResultCodes.InvalidInput);
 
-            var artifacts = AuthOnboardingSqlArtifacts.Load();
-            AuthOnboardingSqlArtifacts.VerifyManifestBinding(typeof(AuthDbContext).Assembly);
+            step = AuthExactMigrationStep.Load(options.Target);
+            var artifacts = step.Artifacts;
             diagnostics.RegisterConnection(connectionString);
             var settings = new NpgsqlConnectionStringBuilder(SafePostgresDiagnostic.WithoutErrorDetail(connectionString))
             { Pooling = false, Multiplexing = false, IncludeErrorDetail = false };
@@ -130,18 +131,21 @@ internal static class AuthOnboardingMigrationExecutor
             context = MigrationEngine.CreateContext(options.Service, connection, diagnostics);
             await context.Database.UseTransactionAsync(transaction, token);
             stage = "HISTORY_AND_SCHEMA_RECHECK";
-            var compiled = context.Database.GetMigrations().ToArray();
-            var predecessorIndex = Array.IndexOf(compiled, FromMigration);
-            if (predecessorIndex < 0 || predecessorIndex + 2 != compiled.Length || compiled[^1] != TargetMigration)
-                throw new AtomicRefusal("ATOMIC_AUTH_COMPILED_HISTORY_REJECTED", ResultCodes.HistoryRejected);
+            string[] compiled;
+            try { compiled = step.ExpectedCompiledHistory(context); }
+            catch (InvalidOperationException)
+            { throw new AtomicRefusal("ATOMIC_AUTH_COMPILED_HISTORY_REJECTED", ResultCodes.HistoryRejected); }
+            var predecessorIndex = Array.IndexOf(compiled, step.From);
             var history = await ReadHistoryAsync(connection, transaction, token);
             starting = history.LastOrDefault();
             var baseline = compiled.Take(predecessorIndex + 1).ToArray();
             var alreadyCurrent = history.SequenceEqual(compiled, StringComparer.Ordinal);
             if (!alreadyCurrent && !history.SequenceEqual(baseline, StringComparer.Ordinal))
                 throw new AtomicRefusal("ATOMIC_AUTH_HISTORY_REJECTED", ResultCodes.HistoryRejected);
-            await VerifyBaselineSchemaAsync(connection, transaction, databaseName, alreadyCurrent, token);
+            await VerifyBaselineSchemaAsync(connection, transaction, databaseName, alreadyCurrent || step.IsOwnerIndex, token);
             await VerifyDefaultPrivilegesAsync(connection, transaction, token);
+            if (step.IsOwnerIndex)
+                await VerifyOwnerIndexBaselineAsync(context, connection, transaction, alreadyCurrent, token);
 
             if (!alreadyCurrent)
             {
@@ -151,10 +155,14 @@ internal static class AuthOnboardingMigrationExecutor
                     await OwnerSqlExecution.ExecuteNonQueryAsync(command, token);
                 migration = "passed";
                 stage = "APPROVED_GRANTS";
-                grants = "started";
-                await using (var command = new NpgsqlCommand(artifacts.GrantSql, connection, transaction))
+                if (step.IsOwnerIndex) grants = "not_needed";
+                else
+                {
+                    grants = "started";
+                    await using var command = new NpgsqlCommand(artifacts.GrantSql, connection, transaction);
                     await OwnerSqlExecution.ExecuteNonQueryAsync(command, token);
-                grants = "passed";
+                    grants = "passed";
+                }
                 if (hooks?.AfterGrants is { } afterGrants) await afterGrants(connection, transaction, token);
             }
             else
@@ -165,13 +173,15 @@ internal static class AuthOnboardingMigrationExecutor
 
             stage = "EXACT_SCHEMA_VERIFICATION";
             await AuthOnboardingSchemaVerifier.VerifyAsync(context, connection, transaction, token);
+            if (step.IsOwnerIndex && !await OrganisationOwnerIndexContract.IsInstalledAsync(context, token))
+                throw new InvalidOperationException("AUTH_ACTIVE_OWNER_INDEX_NOT_ADMITTED");
             var finalHistory = await ReadHistoryAsync(connection, transaction, token);
             if (!finalHistory.SequenceEqual(compiled, StringComparer.Ordinal))
                 throw new AtomicRefusal("ATOMIC_AUTH_FINAL_HISTORY_REJECTED", ResultCodes.HistoryRejected);
             final = finalHistory.LastOrDefault();
-            stage = "FULL_V20_VERIFICATION";
+            stage = step.FullManifestStage;
             manifest = "started";
-            await MigrationEngine.VerifyManifestAsync(context, options.Service.MigrationAssembly, token);
+            await step.VerifyManifestAsync(context, token);
             manifest = "passed";
             if (hooks?.AfterVerification is { } afterVerification)
                 await afterVerification(connection, transaction, token);
@@ -242,21 +252,22 @@ internal static class AuthOnboardingMigrationExecutor
 
         if (commitAttempted && !commitAcknowledged && normalizedConnection is not null)
         {
-            durableState = await InspectDurableStateAsync(options, normalizedConnection, diagnostics);
+            durableState = await InspectDurableStateAsync(options, normalizedConnection, diagnostics, step!);
             caveats.Add("Durable inspection is read-only on a fresh connection; inspection does not authorize a retry.");
         }
 
         var evidence = new MigrationEvidence("zeka-db-migrate-result/v0.1.0", "0.1.0", sourceCommit,
             options.OperationId, "apply", "auth", options.Service.LogicalDatabase, options.Target,
-            starting, TargetMigration, final, classification, resultCode, locked,
+            starting, step?.Target ?? TargetMigration, final, classification, resultCode, locked,
             new RoleAssertions(options.Service.MigratorRole, sessionUser, options.Service.OwnerRole,
                 currentUser, restricted, membership, ownerAssumed),
             new PhaseResults(new PhaseResult(migration), new PhaseResult(grants), new PhaseResult(manifest),
                 new PhaseResult("untested")), startedAt, DateTimeOffset.UtcNow, caveats.ToArray())
         {
             PostgresDiagnostic = diagnostics.Diagnostic,
-            AtomicAuth = new AtomicAuthEvidence(AuthOnboardingSqlArtifacts.MigrationSha256,
-                AuthOnboardingSqlArtifacts.GrantSha256, AuthOnboardingSqlArtifacts.ManifestSha256,
+            AtomicAuth = new AtomicAuthEvidence(step?.MigrationSha256 ?? AuthOnboardingSqlArtifacts.MigrationSha256,
+                step?.GrantSha256 ?? AuthOnboardingSqlArtifacts.GrantSha256,
+                step?.ManifestSha256 ?? AuthOnboardingSqlArtifacts.ManifestSha256,
                 commitAttempted, commitAcknowledged, rollbackConfirmed, durableState, false,
                 databaseName, backendPid, failedStage)
         };
@@ -356,7 +367,28 @@ internal static class AuthOnboardingMigrationExecutor
     private static readonly string[] NewTables =
         ["EmailVerificationChallenges", "OnboardingGrants", "OnboardingOperationReceipts", "VerificationMailOutboxMessages"];
 
-    private static async Task<string> InspectDurableStateAsync(CommandOptions options, string connectionString, SafePostgresDiagnosticCapture diagnostics)
+    private static async Task VerifyOwnerIndexBaselineAsync(DbContext context, NpgsqlConnection connection,
+        NpgsqlTransaction transaction, bool alreadyCurrent, CancellationToken token)
+    {
+        if (alreadyCurrent)
+        {
+            if (!await OrganisationOwnerIndexContract.IsInstalledAsync(context, token))
+                throw new AtomicRefusal("ATOMIC_AUTH_BASELINE_SCHEMA_REJECTED", ResultCodes.HistoryRejected);
+            return;
+        }
+        await using var command = new NpgsqlCommand("""
+            SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c
+              JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relname='UX_OrganisationMemberships_ActiveOwner')
+            """, connection, transaction);
+        if (await OwnerSqlExecution.ExecuteScalarAsync(command, token) is not true)
+            throw new AtomicRefusal("ATOMIC_AUTH_BASELINE_SCHEMA_REJECTED", ResultCodes.HistoryRejected);
+        await AuthOnboardingSchemaVerifier.VerifyAsync(context, connection, transaction, token);
+        // The exact original v20 remains the authority for the predecessor catalog.
+        await AuthExactMigrationStep.Load(TargetMigration).VerifyManifestAsync(context, token);
+    }
+
+    private static async Task<string> InspectDurableStateAsync(CommandOptions options, string connectionString, SafePostgresDiagnosticCapture diagnostics, AuthExactMigrationStep step)
     {
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = budget.Token;
@@ -375,21 +407,23 @@ internal static class AuthOnboardingMigrationExecutor
             await AssumeOwnerAsync(connection, transaction, token);
             await using var context = MigrationEngine.CreateContext(options.Service, connection);
             await context.Database.UseTransactionAsync(transaction, token);
-            var compiled = context.Database.GetMigrations().ToArray();
+            var compiled = step.ExpectedCompiledHistory(context);
             var history = await ReadHistoryAsync(connection, transaction, token);
-            if (compiled.LastOrDefault() != TargetMigration) return "INCONCLUSIVE";
             if (history.SequenceEqual(compiled, StringComparer.Ordinal))
             {
                 await VerifyBaselineSchemaAsync(connection, transaction, connection.Database, true, token);
                 await AuthOnboardingSchemaVerifier.VerifyAsync(context, connection, transaction, token);
-                await MigrationEngine.VerifyManifestAsync(context, options.Service.MigrationAssembly, token);
+                if (step.IsOwnerIndex && !await OrganisationOwnerIndexContract.IsInstalledAsync(context, token)) return "INCONCLUSIVE";
+                await step.VerifyManifestAsync(context, token);
                 await transaction.RollbackAsync(token);
                 return "COMMITTED_VERIFIED";
             }
-            if (compiled.Length > 1 && compiled[^2] == FromMigration
+            if (compiled.Length > 1 && compiled[^2] == step.From
                 && history.SequenceEqual(compiled[..^1], StringComparer.Ordinal))
             {
-                await VerifyBaselineSchemaAsync(connection, transaction, connection.Database, false, token);
+                await VerifyBaselineSchemaAsync(connection, transaction, connection.Database, step.IsOwnerIndex, token);
+                if (step.IsOwnerIndex)
+                    await VerifyOwnerIndexBaselineAsync(context, connection, transaction, false, token);
                 await transaction.RollbackAsync(token);
                 return "BASELINE_VERIFIED";
             }

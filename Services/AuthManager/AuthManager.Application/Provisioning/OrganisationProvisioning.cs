@@ -30,15 +30,24 @@ public interface IOrganisationProvisioningRepository
     Task ValidateOwnerCatalogueAsync(CancellationToken cancellationToken=default);
     Task AddAsync(Organisation organisation,OrganisationMembership ownerMembership,CancellationToken cancellationToken=default);
 }
+public interface IOrganisationOwnershipPolicy
+{
+    Task ValidateCreationCatalogueAsync(CancellationToken cancellationToken=default);
+    Task<int> CountOwnedAsync(Guid subjectId,CancellationToken cancellationToken=default);
+}
 public sealed class OrganisationProvisioningOptions
 {
     public TimeSpan ProcessingTimeout { get; init; }
     public TimeSpan Retention { get; init; }
+    public bool LocalM1SelfServiceEnabled { get; init; }
+    public int MaxOwnedOrganisations { get; init; } = 1;
 }
-public sealed class OrganisationProvisioningException(string code) : Exception(code) { }
+public sealed class OrganisationProvisioningException(string code) : Exception(code)
+{ public string Code { get; } = code; }
 public static class OrganisationProvisioningAudit
 {
     public const string OperatorNoAgreements="operator-provisioned, no agreements";
+    public const string LocalM1DeferredAgreements="local-m1-self-service, agreements deferred by owner";
 }
 public static class OrganisationProvisioningEvents
 {
@@ -49,7 +58,8 @@ public sealed record OrganisationProvisionedIdentifiers(Guid OrganisationId,Guid
 
 public sealed class OrganisationProvisioningService(
     IProvisioningIdentitySource identity,IProvisioningTransaction transaction,IOrganisationProvisioningRepository repository,
-    IIdempotencyStore idempotency,IAuditWriter audit,IOutboxWriter outbox,TimeProvider clock,OrganisationProvisioningOptions options)
+    IIdempotencyStore idempotency,IAuditWriter audit,IOutboxWriter outbox,TimeProvider clock,OrganisationProvisioningOptions options,
+    IOrganisationOwnershipPolicy? ownership=null)
 {
     public const string Operation="organisation.provisioning/v1";
     private const string ResultSchema="zeka.organisation-provisioning-result/v1";
@@ -66,22 +76,41 @@ public sealed class OrganisationProvisioningService(
         var admitted=await identity.DescribeAsync(cancellationToken);
         if(admitted is null || admitted.SubjectId==Guid.Empty || !Enum.IsDefined(admitted.AuthorityKind))
             throw Error("PROVISIONING_AUTHORITY_REJECTED");
-        if(admitted.AuthorityKind==ProvisioningAuthorityKind.VerifiedSubject)throw Error("SELF_SERVICE_NOT_ENABLED");
-        if(command.Agreements is { Count:>0 })throw Error("PROVISIONING_OWNER_AGREEMENTS_REJECTED");
+        var verified=admitted.AuthorityKind==ProvisioningAuthorityKind.VerifiedSubject;
+        if(verified && !options.LocalM1SelfServiceEnabled)throw Error("SELF_SERVICE_NOT_ENABLED");
+        if(verified && (ownership is null || options.MaxOwnedOrganisations is <1 or >100))
+            throw Error(BrowserOrganisationCreationCodes.Unavailable);
+        if(command.Agreements is { Count:>0 })throw Error(verified
+            ? BrowserOrganisationCreationCodes.InvalidRequest : "PROVISIONING_OWNER_AGREEMENTS_REJECTED");
+        var agreementStatus=verified ? OrganisationProvisioningAudit.LocalM1DeferredAgreements
+            : OrganisationProvisioningAudit.OperatorNoAgreements;
         // No credentials, generated identifiers, clocks or correlation identifiers enter canonical retry intent.
-        // Null and empty agreement input are the same explicit owner-provisioned, no-agreements operation.
+        // Null and empty agreement input use the same authority-specific, explicit audit marker.
         var canonical=JsonSerializer.Serialize(new{schemaVersion=Operation,subjectId=admitted.SubjectId,
             authorityKind=admitted.AuthorityKind.ToString(),displayName=command.DisplayName.Trim(),slug=command.Slug?.Trim(),
-            agreementStatus=OrganisationProvisioningAudit.OperatorNoAgreements});
+            agreementStatus});
         return await transaction.ExecuteAsync(async ct=>
         {
+            // The verified adapter locks the current user/session before the first claim read.
+            // READ COMMITTED gives a waiter the prior committed receipt/count after that lock.
+            if(verified)
+            {
+                if(await identity.EnsureConfirmedAsync(admitted,ct)!=admitted.SubjectId)
+                    throw Error(BrowserOrganisationCreationCodes.Unauthenticated);
+                await ownership!.ValidateCreationCatalogueAsync(ct);
+            }
             var claim=await idempotency.TryBeginAsync(admitted.SubjectId,Operation,command.IdempotencyKey,canonical,
                 options.ProcessingTimeout,options.Retention,ct);
             if(claim.Kind==IdempotencyDecisionKind.Replay)return Replay(claim,admitted.SubjectId);
             if(claim.Kind==IdempotencyDecisionKind.Conflict)return Empty(OrganisationProvisioningOutcome.Conflict,admitted.SubjectId);
             if(claim.Kind==IdempotencyDecisionKind.Processing)return Empty(OrganisationProvisioningOutcome.Processing,admitted.SubjectId);
             if(claim.Kind!=IdempotencyDecisionKind.Started)throw Error("PROVISIONING_IDEMPOTENCY_STATE_REJECTED");
-            if(await identity.EnsureConfirmedAsync(admitted,ct)!=admitted.SubjectId)throw Error("PROVISIONING_IDENTITY_CHANGED");
+            if(!verified && await identity.EnsureConfirmedAsync(admitted,ct)!=admitted.SubjectId)
+                throw Error("PROVISIONING_IDENTITY_CHANGED");
+            // A limit refusal must roll back a newly started claim, never commit an orphan.
+            // Successful replays above remain available even when the owner is already at the cap.
+            if(verified && await ownership!.CountOwnedAsync(admitted.SubjectId,ct)>=options.MaxOwnedOrganisations)
+                throw Error(BrowserOrganisationCreationCodes.LimitReached);
             await repository.ValidateOwnerCatalogueAsync(ct);
             if(TenantPermissions.Resolve(PermissionSet.OrganisationOwnerId,"Owner") is not { Count:>0 })
                 throw Error("PROVISIONING_OWNER_CATALOGUE_REJECTED");
@@ -94,10 +123,13 @@ public sealed class OrganisationProvisioningService(
             await audit.WriteAsync(new(admitted.SubjectId,organisation.Id,"organisation.provisioned","Organisation",
                 organisation.Id.ToString("D"),"Created",correlationId,new Dictionary<string,string>{
                     ["authorityKind"]=admitted.AuthorityKind.ToString(),["ownerMembershipId"]=membership.Id.ToString("D"),
-                    ["agreementStatus"]=OrganisationProvisioningAudit.OperatorNoAgreements}),ct);
-            await outbox.EnqueueAsync(new(OrganisationProvisioningEvents.MessageType,OrganisationProvisioningEvents.ContractVersion,
-                JsonSerializer.Serialize(new OrganisationProvisionedIdentifiers(organisation.Id,admitted.SubjectId,membership.Id)),
-                now,correlationId,organisation.Id),ct);
+                    ["agreementStatus"]=agreementStatus}),ct);
+            // Preserve the accepted privileged command's event contract. No downstream contract
+            // requires an event for this local browser creation; Auth authority is usable at commit.
+            if(!verified)
+                await outbox.EnqueueAsync(new(OrganisationProvisioningEvents.MessageType,OrganisationProvisioningEvents.ContractVersion,
+                    JsonSerializer.Serialize(new OrganisationProvisionedIdentifiers(organisation.Id,admitted.SubjectId,membership.Id)),
+                    now,correlationId,organisation.Id),ct);
             var saved=new SavedResult(ResultSchema,admitted.SubjectId,organisation.Id,membership.Id);
             await idempotency.CompleteAsync(admitted.SubjectId,Operation,command.IdempotencyKey,organisation.Id,JsonSerializer.Serialize(saved),ct);
             return new(OrganisationProvisioningOutcome.Created,admitted.SubjectId,organisation.Id,membership.Id);

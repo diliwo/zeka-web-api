@@ -31,11 +31,19 @@ public sealed class EligibleOrganisationsResolver(AuthDbContext database, TimePr
                     && organisation.Status == OrganisationStatus.Active
                 select new EligibleOrganisation(organisation.Id, organisation.DisplayName))
                 .Take(101).ToListAsync(attemptCancellation);
-            await transaction.CommitAsync(attemptCancellation);
             if (choices.Count > 100)
                 return new EligibleOrganisationsResult(EligibleOrganisationsOutcome.Overflow, []);
+            var current = new CurrentTenantAccessResolver(database, clock);
+            var admitted = new List<EligibleOrganisation>();
+            foreach (var choice in choices)
+            {
+                var authority = await current.ResolveInCurrentTransactionAsync(authenticatedSubjectId,
+                    choice.OrganisationId, now, attemptCancellation);
+                if (authority.Outcome == TenantAccessOutcome.Authorized) admitted.Add(choice);
+            }
+            await transaction.CommitAsync(attemptCancellation);
             return new EligibleOrganisationsResult(EligibleOrganisationsOutcome.Success,
-                choices.OrderBy(choice => choice.DisplayName, StringComparer.Ordinal)
+                admitted.OrderBy(choice => choice.DisplayName, StringComparer.Ordinal)
                     .ThenBy(choice => choice.OrganisationId.ToString("D"), StringComparer.Ordinal).ToArray());
         }, cancellationToken);
 }

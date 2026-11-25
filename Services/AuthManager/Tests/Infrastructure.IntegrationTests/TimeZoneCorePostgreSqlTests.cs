@@ -197,7 +197,9 @@ public sealed class TimeZoneCorePostgreSqlTests(PostgreSqlFixture fixture)
         (await resolver.ResolveAsync(request with { OrganisationId = Guid.NewGuid() }, default))
             .Should().BeNull();
         var trackedMembership = await db.OrganisationMemberships.SingleAsync(x => x.Id == membership.Id);
-        trackedMembership.Suspend(Now.AddSeconds(2));
+        // Arrange a persisted legacy/corrupt Owner state; the domain guard refuses suspension.
+        db.Entry(trackedMembership).Property(x => x.Status).CurrentValue = MembershipStatus.Suspended;
+        Assert.Equal(MembershipStatus.Suspended, trackedMembership.Status);
         await db.SaveChangesAsync();
         (await resolver.ResolveAsync(request, default)).Should().BeNull();
     }

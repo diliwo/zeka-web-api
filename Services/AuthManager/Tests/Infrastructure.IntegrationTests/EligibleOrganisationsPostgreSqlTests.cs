@@ -242,7 +242,7 @@ public sealed class EligibleOrganisationsPostgreSqlTests(PostgreSqlFixture fixtu
     public async Task Discovery_never_grants_access_or_resets_idle_and_live_selection_rechecks(string change)
     {
         await using var test = await PrepareAsync(); Guid organisation;
-        await using (var db = test.Administrator()) { organisation = AddChoice(db, test.Ada, "Alpha"); await db.SaveChangesAsync(); }
+        await using (var db = test.Administrator()) { organisation = AddChoice(db, test.Ada, "Alpha", permissionSetId: change == "membership" ? PermissionSet.OrganisationAdministratorId : null); await db.SaveChangesAsync(); }
         DateTimeOffset idle;
         await using (var db = test.Administrator()) idle = (await db.BrowserSessionFamilies.SingleAsync()).IdleExpiresAtUtc;
         test.Host.Auth.Clock.Advance(TimeSpan.FromMinutes(1));
@@ -334,6 +334,52 @@ public sealed class EligibleOrganisationsPostgreSqlTests(PostgreSqlFixture fixtu
         Assert.Equal(0, test.Probe.Limit);
     }
 
+    [Theory]
+    [InlineData("unknown-role")] [InlineData("non-system-role")] [InlineData("unsupported-grant")]
+    public async Task Eligible_choices_and_selected_authority_reject_the_same_modified_role_or_grant(string change)
+    {
+        await using var test = await PrepareAsync();
+        Guid organisation;
+        await using (var db = test.Administrator())
+        {
+            organisation = AddChoice(db, test.Ada, "Authority", permissionSetId: PermissionSet.OrganisationAdministratorId);
+            await db.SaveChangesAsync();
+            var membership = await db.OrganisationMemberships.SingleAsync();
+            db.MembershipPermissionGrants.Add(MembershipPermissionGrant.Create(Guid.NewGuid(), organisation, membership.Id,
+                TenantPermissions.OrganisationExport, membership.Id, test.Ada, test.Host.Auth.Clock.GetUtcNow()));
+            await db.SaveChangesAsync();
+        }
+        using (var scope = test.Host.Services.CreateScope())
+        {
+            Assert.Single((await scope.ServiceProvider.GetRequiredService<IEligibleOrganisations>().ResolveAsync(test.Ada)).Organisations);
+            var selected = await scope.ServiceProvider.GetRequiredService<ICurrentTenantAccess>().ResolveAsync(test.Ada, organisation);
+            Assert.Equal(TenantAccessOutcome.Authorized, selected.Outcome);
+            Assert.Contains(TenantPermissions.OrganisationExport, selected.EffectivePermissionCodes);
+        }
+        await using (var db = test.Administrator())
+        {
+            if (change == "unsupported-grant")
+            {
+                var membership = await db.OrganisationMemberships.SingleAsync();
+                db.MembershipPermissionGrants.Add(MembershipPermissionGrant.Create(Guid.NewGuid(), organisation, membership.Id,
+                    "Clients.Unknown", membership.Id, test.Ada, test.Host.Auth.Clock.GetUtcNow()));
+            }
+            else
+            {
+                var role = await db.PermissionSets.SingleAsync(x => x.Id == PermissionSet.OrganisationAdministratorId);
+                if (change == "unknown-role") db.Entry(role).Property(x => x.Code).CurrentValue = "UnrecognizedAdminProfile";
+                else db.Entry(role).Property(x => x.IsSystem).CurrentValue = false;
+            }
+            await db.SaveChangesAsync();
+        }
+        using var after = test.Host.Services.CreateScope();
+        var eligible = await after.ServiceProvider.GetRequiredService<IEligibleOrganisations>().ResolveAsync(test.Ada);
+        Assert.Equal(EligibleOrganisationsOutcome.Success, eligible.Outcome);
+        Assert.Empty(eligible.Organisations);
+        var denied = await after.ServiceProvider.GetRequiredService<ICurrentTenantAccess>().ResolveAsync(test.Ada, organisation);
+        Assert.Equal(TenantAccessOutcome.Denied, denied.Outcome);
+        Assert.Empty(denied.EffectivePermissionCodes);
+    }
     private static async Task<EligibleOrganisation[]> ReadChoicesAsync(HttpResponseMessage response)
     {
         Assert.Equal(HttpStatusCode.OK, response.StatusCode); Assert.True(response.Headers.CacheControl!.NoStore);
@@ -343,13 +389,15 @@ public sealed class EligibleOrganisationsPostgreSqlTests(PostgreSqlFixture fixtu
             new EligibleOrganisation(x.GetProperty("organisationId").GetGuid(), x.GetProperty("displayName").GetString()!)).ToArray();
     }
     private static Guid AddChoice(AuthDbContext db, Guid subject, string name, OrganisationStatus organisationStatus = OrganisationStatus.Active,
-        MembershipStatus membershipStatus = MembershipStatus.Active, bool member = true, Guid? id = null)
+        MembershipStatus membershipStatus = MembershipStatus.Active, bool member = true, Guid? id = null, Guid? permissionSetId = null)
     {
         var now = DateTimeOffset.UtcNow; var organisation = Organisation.Create(id ?? Guid.NewGuid(), name, subject, now);
         db.Add(organisation); db.Entry(organisation).Property(x => x.Status).CurrentValue = organisationStatus;
         if (member)
         {
-            var membership = OrganisationMembership.CreateOwner(Guid.NewGuid(), organisation.Id, subject, now);
+            var membership = permissionSetId is { } role
+                ? OrganisationMembership.Create(Guid.NewGuid(), organisation.Id, subject, role, now)
+                : OrganisationMembership.CreateOwner(Guid.NewGuid(), organisation.Id, subject, now);
             db.Add(membership); db.Entry(membership).Property(x => x.Status).CurrentValue = membershipStatus;
         }
         return organisation.Id;
