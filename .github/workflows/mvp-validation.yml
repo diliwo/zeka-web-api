@@ -1217,7 +1217,7 @@ jobs:
                   or summary.get("coverageReport") != report.name
                   or hashlib.sha256(report.read_bytes()).hexdigest() != summary.get("coverageSha256")):
               raise SystemExit("PowerShell collector proof, regression counts or XML hash receipt is invalid.")
-          expected_regressions = {"native": 9, "atomic": 2, "ownerAdmission": 156, "workerRotation": 75,
+          expected_regressions = {"native": 9, "atomic": 2, "ownerAdmission": 168, "workerRotation": 129,
                                   "authHttps": 11, "safePostgres": 60, "preflightPrivileges": 97, "queryMetadata": 201}
           regressions = summary.get("regressionCounts")
           if (type(regressions) is not dict or regressions != expected_regressions
@@ -1273,7 +1273,7 @@ jobs:
           if any(counts[path][1] <= 0 for path in required_hits):
               raise SystemExit("An exercised operational source has no actual line hits.")
           print(f"Verified actual PowerShell core line hits: helper {native[1]}/{native[0]}; database initialization 0/{initialization[0]} (NOT RUN).")
-          print("Verified 611 synthetic checks and nine MAIN sources; TLS runtime, worker runtime/provider/adoption, behavioral RLS and database initialization remain NOT_RUN.")
+          print("Verified 677 synthetic checks and nine MAIN sources; TLS runtime, worker runtime/provider/adoption, behavioral RLS and database initialization remain NOT_RUN.")
           PY
 
       - name: Verify SonarQube Cloud prerequisites
@@ -1457,7 +1457,45 @@ jobs:
         env: *standalone_sonar_auth
         run: |
           docker info
+          # Use the already locked/restored collector for projects without their own collector reference.
+          collector_path="$(python - <<'PY'
+          import json
+          from pathlib import Path
+          project = Path("Tools/Zeka.AuthOwnerProvision.Tests")
+          locked = json.loads((project / "packages.lock.json").read_text(encoding="utf-8-sig"))["dependencies"]["net8.0"]["coverlet.collector"]
+          assets = json.loads((project / "obj/project.assets.json").read_text(encoding="utf-8-sig"))
+          library = assets.get("libraries", {}).get("coverlet.collector/6.0.0", {})
+          if locked.get("resolved") != "6.0.0" or library.get("type") != "package" or library.get("path") != "coverlet.collector/6.0.0":
+              raise SystemExit("The existing locked collector identity is unavailable.")
+          def require_plain_path(path):
+              if (not path.is_absolute() or ".." in path.parts
+                      or any(item.is_symlink() for item in (path, *path.parents))
+                      or path.resolve(strict=True) != path):
+                  raise SystemExit("The existing collector path is redirected.")
+          matches = []
+          for folder in assets.get("packageFolders", {}):
+              package = Path(folder) / library["path"]
+              metadata = package / ".nupkg.metadata"
+              candidate = package / "build/netstandard1.0"
+              if not metadata.is_file():
+                  continue
+              require_plain_path(metadata)
+              require_plain_path(candidate)
+              if json.loads(metadata.read_text(encoding="utf-8-sig")).get("contentHash") != locked.get("contentHash"):
+                  raise SystemExit("The existing collector differs from its NuGet lock identity.")
+              for name in ("coverlet.collector.dll", "coverlet.core.dll"):
+                  dependency = candidate / name
+                  if not dependency.is_file():
+                      raise SystemExit("The existing collector files are incomplete.")
+                  require_plain_path(dependency)
+              matches.append(candidate)
+          if len(matches) != 1:
+              raise SystemExit("The existing collector path is missing or ambiguous.")
+          print(matches[0])
+          PY
+          )"
           dotnet test zeka-web-api.sln -m:1 --configuration Release --no-build --no-restore \
+            --test-adapter-path "$collector_path" \
             --collect:"XPlat Code Coverage;Format=opencover" --collect:"Code Coverage;Format=Xml" \
             --results-directory TestResults
 

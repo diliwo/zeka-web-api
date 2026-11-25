@@ -74,7 +74,7 @@ $sourceHashes = Invoke-PowerShellLineCoverage -SourceRoot $root -SourceFile @(
   $ownerReceipt=Join-Path $output 'owner-admission.json'
   & (Join-Path $root 'Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1') -ReportFile $ownerReceipt|Out-Null
   $owner=Read-CoreSyntheticJson $ownerReceipt
-  Assert-CoreSynthetic ($owner.status-ceq'PASS'-and$owner.count-eq156-and!$owner.runtimeOperationsExecuted)
+  Assert-CoreSynthetic ($owner.status-ceq'PASS'-and$owner.count-eq168-and!$owner.runtimeOperationsExecuted)
     $regressionCounts.ownerAdmission=[int]$owner.count
 
   $script:CoverageStage='worker-rotation'
@@ -129,7 +129,7 @@ if ($coverage.coverage.version -ne '1' -or @($coverage.coverage.file).Count -ne 
 $sourceCounts=@($coverage.coverage.file|ForEach-Object{
     [ordered]@{path=$_.path;statementLines=@($_.lineToCover).Count;executedLines=@($_.lineToCover|Where-Object covered -CEQ 'true').Count}
 })
-$expectedCounts=[ordered]@{native=9;atomic=2;ownerAdmission=156;workerRotation=75;authHttps=11;safePostgres=60;preflightPrivileges=97;queryMetadata=201}
+$expectedCounts=[ordered]@{native=9;atomic=2;ownerAdmission=168;workerRotation=129;authHttps=11;safePostgres=60;preflightPrivileges=97;queryMetadata=201}
 foreach($name in $expectedCounts.Keys){if($regressionCounts[$name]-ne$expectedCounts[$name]){throw 'COVERAGE_SYNTHETIC_COUNTS_REJECTED'}}
 $summary = [ordered]@{
     status='PASS'; collectorProof='PASS'; nativeCasesPassed=9; atomicCasesPassed=2

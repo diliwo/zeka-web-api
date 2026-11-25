@@ -78,6 +78,159 @@ public sealed class AuthOwnerSqlReceiptTests
         Assert.Empty(evidence.ReadRows());
     }
 
+
+    [Fact]
+    public async Task SuccessfulDelegateWithoutEfDispatchIsUnobservedAndCaptureResets()
+    {
+        using var evidence = EvidenceScope.Temporary();
+        await using var database = new AuthDbContext(new DbContextOptionsBuilder<AuthDbContext>().Options);
+        var error = await Record.ExceptionAsync(() => ObserveLoad(database, () => Task.CompletedTask));
+        Assert.Equal("OWNER_SQL_EF_EXECUTION_UNOBSERVED", Assert.IsType<InvalidOperationException>(error).Message);
+
+        var unrelated = new InvalidOperationException("synthetic unrelated operation");
+        Assert.Same(unrelated, await Record.ExceptionAsync(() => ObserveLoad(database, () => Task.FromException(unrelated))));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var cancellation = await Record.ExceptionAsync(() => ObserveLoad(database, () => Task.FromCanceled(cancelled.Token)));
+        Assert.Equal(cancelled.Token, Assert.IsAssignableFrom<OperationCanceledException>(cancellation).CancellationToken);
+        error = await Record.ExceptionAsync(() => ObserveLoad(database, () => Task.CompletedTask));
+        Assert.Equal("OWNER_SQL_EF_EXECUTION_UNOBSERVED", Assert.IsType<InvalidOperationException>(error).Message);
+        Assert.Empty(evidence.ReadRows());
+    }
+
+    [Fact]
+    public async Task InactiveInterceptorPreservesEfResultsWithoutInventingReceipt()
+    {
+        using var evidence = EvidenceScope.Temporary();
+        await using var connection = new NpgsqlConnection();
+        await using var database = UnitDatabase(connection);
+        await using var command = connection.CreateCommand();
+        using var table = new DataTable();
+        await using var reader = table.CreateDataReader();
+        var observer = Observer(database);
+        var start = UnitStart(database, connection, command, database, CommandSource.FromSqlQuery);
+        var readerResult = InterceptionResult<DbDataReader>.SuppressWithResult(reader);
+        var actualReader = await observer.ReaderExecutingAsync(command, start, readerResult);
+        Assert.True(actualReader.HasResult);
+        Assert.Same(reader, actualReader.Result);
+        Assert.Same(reader, await observer.ReaderExecutedAsync(command,
+            UnitEnd(database, connection, command, reader), reader));
+        var scalarResult = await observer.NonQueryExecutingAsync(command, start, InterceptionResult<int>.SuppressWithResult(37));
+        Assert.True(scalarResult.HasResult);
+        Assert.Equal(37, scalarResult.Result);
+        Assert.Equal(41, await observer.NonQueryExecutedAsync(command,
+            UnitEnd(database, connection, command, 41), 41));
+
+        var fault = new PostgresException("synthetic unmatched provider fault", "ERROR", "ERROR", PostgresErrorCodes.LockNotAvailable);
+        await observer.CommandFailedAsync(command, UnitError(database, connection, command, fault));
+        await observer.CommandCanceledAsync(command, UnitEnd(database, connection, command, 0));
+        Assert.Equal(ConnectionState.Closed, connection.State);
+        Assert.Empty(evidence.ReadRows());
+    }
+
+    [Theory]
+    [InlineData("suppressed")]
+    [InlineData("wrong-source")]
+    [InlineData("wrong-context")]
+    [InlineData("no-transaction")]
+    public async Task InvalidStartMetadataIsRejectedBeforeAnyProviderObservation(string defect)
+    {
+        using var evidence = EvidenceScope.Temporary();
+        await using var connection = new NpgsqlConnection();
+        await using var database = UnitDatabase(connection);
+        await using var other = new AuthDbContext(new DbContextOptionsBuilder<AuthDbContext>().Options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FOR UPDATE";
+        using var table = new DataTable();
+        await using var reader = table.CreateDataReader();
+        var data = UnitStart(database, connection, command, defect == "wrong-context" ? other : database,
+            defect == "wrong-source" ? CommandSource.LinqQuery : CommandSource.FromSqlQuery);
+        var interception = defect == "suppressed" ? InterceptionResult<DbDataReader>.SuppressWithResult(reader) : default;
+        var error = await Record.ExceptionAsync(() => ObserveLoad(database, async () =>
+        {
+            await Observer(database).ReaderExecutingAsync(command, data, interception);
+        }));
+        Assert.Equal("OWNER_SQL_EF_COMMAND_REJECTED", Assert.IsType<InvalidOperationException>(error).Message);
+        Assert.Equal(ConnectionState.Closed, connection.State);
+        Assert.Empty(evidence.ReadRows());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnmatchedFailureOrCancellationCallbackCannotInventTerminalReceipt(bool cancellation)
+    {
+        using var evidence = EvidenceScope.Temporary();
+        await using var connection = new NpgsqlConnection();
+        await using var database = UnitDatabase(connection);
+        await using var command = connection.CreateCommand();
+        using var token = new CancellationTokenSource();
+        token.Cancel();
+        var fault = new PostgresException("synthetic unacknowledged provider fault", "ERROR", "ERROR",
+            cancellation ? PostgresErrorCodes.QueryCanceled : PostgresErrorCodes.LockNotAvailable);
+        Exception thrown = cancellation ? new OperationCanceledException("synthetic cancellation", fault, token.Token) : fault;
+        var error = await Record.ExceptionAsync(() => ObserveLoad(database, async () =>
+        {
+            if (cancellation)
+                await Observer(database).CommandCanceledAsync(command, UnitEnd(database, connection, command, 0));
+            else
+                await Observer(database).CommandFailedAsync(command, UnitError(database, connection, command, fault));
+            ExceptionDispatchInfo.Capture(thrown).Throw();
+        }));
+        Assert.Same(thrown, error);
+        Assert.Equal(ConnectionState.Closed, connection.State);
+        Assert.Empty(evidence.ReadRows());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletionWithoutAnAdmittedCommandStartIsRejected(bool readerCompletion)
+    {
+        using var evidence = EvidenceScope.Temporary();
+        await using var connection = new NpgsqlConnection();
+        await using var database = UnitDatabase(connection);
+        await using var command = connection.CreateCommand();
+        using var table = new DataTable();
+        await using var reader = table.CreateDataReader();
+        var error = await Record.ExceptionAsync(() => ObserveLoad(database, async () =>
+        {
+            if (readerCompletion)
+                await Observer(database).ReaderExecutedAsync(command, UnitEnd(database, connection, command, reader), reader);
+            else
+                await Observer(database).NonQueryExecutedAsync(command, UnitEnd(database, connection, command, 1), 1);
+        }));
+        Assert.Equal("OWNER_SQL_EF_RESULT_REJECTED", Assert.IsType<InvalidOperationException>(error).Message);
+        Assert.Equal(ConnectionState.Closed, connection.State);
+        Assert.Empty(evidence.ReadRows());
+    }
+
+    // Closed, unconfigured connections are metadata only. These unit cases never
+    // open a connection, invent an Npgsql transaction or claim provider execution.
+    private static AuthDbContext UnitDatabase(NpgsqlConnection connection) =>
+        new(new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connection).EnableSensitiveDataLogging(false).Options);
+
+    private static EventDefinition UnitDefinition(AuthDbContext database) =>
+        new(database.GetService<ILoggingOptions>(), RelationalEventId.CommandExecuting,
+            LogLevel.Debug, nameof(RelationalEventId.CommandExecuting), _ => (_, _) => { });
+
+    private static CommandEventData UnitStart(AuthDbContext database, DbConnection connection,
+        DbCommand command, AuthDbContext eventContext, CommandSource source) =>
+        new(UnitDefinition(database), (_, _) => "synthetic receipt unit event", connection, command, eventContext,
+            DbCommandMethod.ExecuteReader, Guid.NewGuid(), Guid.NewGuid(), true, false, DateTimeOffset.UnixEpoch, source);
+
+    private static CommandExecutedEventData UnitEnd(AuthDbContext database, DbConnection connection,
+        DbCommand command, object result) =>
+        new(UnitDefinition(database), (_, _) => "synthetic receipt unit end", connection, command, database,
+            DbCommandMethod.ExecuteReader, Guid.NewGuid(), Guid.NewGuid(), result, true, false,
+            DateTimeOffset.UnixEpoch, TimeSpan.Zero, CommandSource.FromSqlQuery);
+
+    private static CommandErrorEventData UnitError(AuthDbContext database, DbConnection connection,
+        DbCommand command, Exception error) =>
+        new(UnitDefinition(database), (_, _) => "synthetic receipt unit error", connection, command, database,
+            DbCommandMethod.ExecuteReader, Guid.NewGuid(), Guid.NewGuid(), error, true, false,
+            DateTimeOffset.UnixEpoch, TimeSpan.Zero, CommandSource.FromSqlQuery);
+
     internal static async Task RunAdmittedProviderMatrixAsync(CancellationToken cancellationToken)
     {
         var stage = "FIXTURE_ADMISSION";

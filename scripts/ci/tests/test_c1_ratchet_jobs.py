@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 TOOLING = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLING))
-from c1_ratchet import ANCHOR, AUTHORITY, RatchetError  # noqa: E402
+from c1_ratchet import ANCHOR, AUTHORITY, RatchetError, identity  # noqa: E402
 
 
 SCRIPT = TOOLING / "c1_ratchet_jobs.py"
@@ -223,6 +223,77 @@ class HostedJobEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(RatchetError, "UNTRUSTED_POLICY_REVISION"):
             self.execute(environment={"CONTEXT_JSON": json.dumps(context)})
         self.assertFalse(self.receipt.exists())
+
+    def bind_synthetic_policy(self, data=None):
+        # This is only the owned fixture's input digest, never real source authority.
+        content = json.dumps(self.baseline).encode("utf-8") if data is None else data
+        self.policy.write_bytes(content)
+        self.context["baselineSha256"] = sha256(content).hexdigest()
+        self.environment["CONTEXT_JSON"] = json.dumps(self.context)
+
+    def test_hash_bound_malformed_policy_bytes_are_refused_before_job_evidence(self):
+        for data in (b"{", b"\xff"):
+            with self.subTest(data=data):
+                self.bind_synthetic_policy(data)
+                with self.assertRaisesRegex(RatchetError, "MALFORMED_JSON"):
+                    self.execute()
+                self.assertFalse(self.receipt.exists())
+
+    def test_duplicate_members_in_hash_bound_policy_cannot_override_acceptance(self):
+        raw = json.dumps(self.baseline)[:-1] + ',"schema":1}'
+        self.bind_synthetic_policy(raw.encode("utf-8"))
+        with self.assertRaisesRegex(RatchetError, "DUPLICATE_JSON_KEY"):
+            self.execute()
+        self.assertFalse(self.receipt.exists())
+
+    def test_malformed_authority_uri_is_refused_before_any_hosted_receipt(self):
+        for authority in ("https://[broken", "https://example.invalid/%GG"):
+            with self.subTest(authority=authority):
+                self.baseline["authority"] = authority
+                self.bind_synthetic_policy()
+                with self.assertRaisesRegex(RatchetError, "BASELINE_SCHEMA_VALIDATION_FAILED"):
+                    self.execute()
+                self.assertFalse(self.receipt.exists())
+
+    def test_explicit_linux_skip_policy_does_not_relax_hosted_job_requirements(self):
+        rule = {"identity": ["C1.Ratchet.TestFixtures", "C1.Ratchet.TestFixtures.PlatformTests.LinuxOnly", ""],
+                "platform": "linux", "reason": "Explicit synthetic platform restriction"}
+        self.baseline["jobs"]["non-postgres"][PROJECT]["allowed_skips"] = [rule]
+        self.bind_synthetic_policy()
+        self.assertEqual(len(self.execute()["jobs"]), 6)
+        self.set_step(self.jobs[0], "Restore and prepare the profile", "skipped")
+        self.execute(expected_errors=("UPSTREAM_REQUIRED_STEPS_INCOMPLETE",))
+
+    def test_duplicate_skip_rule_cannot_silently_expand_the_accepted_policy(self):
+        rule = {"identity": ["C1.Ratchet.TestFixtures", "C1.Ratchet.TestFixtures.PlatformTests.LinuxOnly", ""],
+                "platform": "linux", "reason": "Explicit synthetic platform restriction"}
+        self.baseline["jobs"]["non-postgres"][PROJECT]["allowed_skips"] = [rule, deepcopy(rule)]
+        self.bind_synthetic_policy()
+        with self.assertRaisesRegex(RatchetError, "INVALID_SKIP_RULE"):
+            self.execute()
+        self.assertFalse(self.receipt.exists())
+
+    def test_invalid_skip_identity_is_rejected_before_job_evidence(self):
+        # The actual schema refuses this malformed identity before any receipt exists.
+        self.baseline["jobs"]["non-postgres"][PROJECT]["allowed_skips"] = [{
+            "identity": ["invalid assembly/name", "C1.Ratchet.TestFixtures.PlatformTests.LinuxOnly", ""],
+            "platform": "linux", "reason": "Explicit synthetic platform restriction"}]
+        self.bind_synthetic_policy()
+        with self.assertRaisesRegex(RatchetError, "BASELINE_SCHEMA_VALIDATION_FAILED"):
+            self.execute()
+        self.assertFalse(self.receipt.exists())
+
+    def test_policy_identity_parser_refuses_malformed_test_identity_values(self):
+        for value in ([], ["invalid assembly/name", "Namespace.Class.Method", ""], "Namespace.Class.Method"):
+            with self.subTest(value=value), self.assertRaisesRegex(RatchetError, "INVALID_TEST_IDENTITY"):
+                identity(value)
+    def test_each_hosted_context_field_must_match_the_actual_event_environment(self):
+        for field, value in (("GITHUB_REPOSITORY", "someone/else"), ("GITHUB_EVENT_NAME", "push"),
+                             ("GITHUB_RUN_ATTEMPT", "2"), ("GITHUB_RUN_ID", None)):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(RatchetError, "WORKFLOW_RUN_CONTEXT_MISMATCH"):
+                    self.execute(environment={field: value})
+                self.assertFalse(self.receipt.exists())
 
 
 if __name__ == "__main__":

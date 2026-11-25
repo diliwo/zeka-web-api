@@ -174,6 +174,59 @@ public sealed class OwnerProtocolTests
             $"zeka-m1-database/v1:{input.InitializationId}:auth:{DatabaseSource}"));
     }
 
+    [Theory]
+    [InlineData("schema")]
+    [InlineData("initializationId")]
+    [InlineData("service")]
+    [InlineData("kind")]
+    [InlineData("sourceCommit")]
+    [InlineData("database")]
+    [InlineData("extra")]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    [InlineData("undeclared-replacement")]
+    [InlineData("wrong-value-kind")]
+    [InlineData("array")]
+    [InlineData("null")]
+    [InlineData("malformed")]
+    public void Runtime_marker_scope_and_structure_fail_closed_without_connecting(string defect)
+    {
+        var input = Parse(Valid());
+        var role = new JsonObject
+        {
+            ["schema"] = "zeka-m1-role/v1", ["initializationId"] = input.InitializationId,
+            ["service"] = "auth", ["kind"] = "runtime", ["sourceCommit"] = DatabaseSource
+        };
+        var database = $"zeka-m1-database/v1:{input.InitializationId}:auth:{DatabaseSource}";
+        if (role.ContainsKey(defect)) role[defect] = "not-the-admitted-value";
+        if (defect == "database") database += ":unadmitted";
+        if (defect == "extra") role["unexpected"] = true;
+        if (defect == "missing") role.Remove("kind");
+        if (defect == "undeclared-replacement") { role.Remove("kind"); role["unexpected"] = "runtime"; }
+        if (defect == "wrong-value-kind") role["service"] = 1;
+        var text = defect switch
+        {
+            // Five entries, but only four distinct names; no missing-property fallback is accepted.
+            "duplicate" => "{\"schema\":\"zeka-m1-role/v1\",\"schema\":\"zeka-m1-role/v1\","
+                + $"\"initializationId\":\"{input.InitializationId}\",\"service\":\"auth\",\"sourceCommit\":\"{DatabaseSource}\"}}",
+            "array" => "[]", "null" => "null", "malformed" => "{", _ => role.ToJsonString()
+        };
+        var error = Assert.Throws<OwnerToolException>(() => RuntimeAdmission.ValidateMarkers(input, text, database));
+        Assert.Equal("RUNTIME_INITIALIZATION_REJECTED", error.Code);
+        Assert.Equal("Owner provisioning rejected.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public void Runtime_marker_member_order_does_not_change_the_exact_scope_contract()
+    {
+        var input = Parse(Valid());
+        var reordered = JsonSerializer.Serialize(new { sourceCommit = DatabaseSource, kind = "runtime",
+            service = "auth", initializationId = input.InitializationId, schema = "zeka-m1-role/v1" });
+        RuntimeAdmission.ValidateMarkers(input, reordered,
+            $"zeka-m1-database/v1:{input.InitializationId}:auth:{DatabaseSource}");
+    }
+
     [Fact]
     public async Task Rejected_argv_receipt_never_echoes_secret_or_native_error()
     {

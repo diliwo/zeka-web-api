@@ -82,7 +82,7 @@ function Invoke-CoreCoverageChild {
     $regressionsValid=$false
     try {
         $summary=[IO.File]::ReadAllText((Join-Path $Directory 'powershell-coverage-result.json'))|ConvertFrom-Json
-        $expectedCounts=[ordered]@{native=9;atomic=2;ownerAdmission=156;workerRotation=75;authHttps=11;safePostgres=60;preflightPrivileges=97;queryMetadata=201}
+        $expectedCounts=[ordered]@{native=9;atomic=2;ownerAdmission=168;workerRotation=129;authHttps=11;safePostgres=60;preflightPrivileges=97;queryMetadata=201}
         $actualNames=@($summary.regressionCounts.psobject.Properties.Name)
         $valid=($summary.status-ceq'PASS'-and$summary.collectorProof-ceq'PASS'-and
             $actualNames.Count-eq$expectedCounts.Count-and@(Compare-Object @($expectedCounts.Keys) $actualNames -CaseSensitive).Count-eq0-and

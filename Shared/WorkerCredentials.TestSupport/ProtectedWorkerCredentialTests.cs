@@ -242,6 +242,9 @@ public sealed class ProtectedWorkerCredentialTests
     }
 
     [Theory]
+    [InlineData("missing-sub")]
+    [InlineData("multi-audience")]
+    [InlineData("malformed-format")]
     [InlineData("sid")]
     [InlineData("iss")]
     [InlineData("aud")]
@@ -258,6 +261,8 @@ public sealed class ProtectedWorkerCredentialTests
         var jwt = new JsonWebTokenHandler().ReadJsonWebToken(original.Token);
         var header = JsonNode.Parse(Base64UrlEncoder.Decode(jwt.EncodedHeader))!.AsObject();
         var payload = JsonNode.Parse(Base64UrlEncoder.Decode(jwt.EncodedPayload))!.AsObject();
+        if (scenario == "missing-sub") payload.Remove("sub");
+        if (scenario == "multi-audience") payload["aud"] = new JsonArray(WorkerCredentialFixture.Audience, "unadmitted-audience");
         if (scenario == "sid") payload["sid"] = Guid.NewGuid().ToString("D");
         if (scenario == "iss") payload["iss"] = "https://other.invalid/";
         if (scenario == "aud") payload["aud"] = "another-audience";
@@ -271,6 +276,7 @@ public sealed class ProtectedWorkerCredentialTests
         if (scenario == "duplicate-header") headerText = "{\"alg\":\"RS256\"," + headerText[1..];
         if (scenario == "duplicate-payload") payloadText = "{\"sub\":\"ambiguous\"," + payloadText[1..];
         var changed = Base64UrlEncoder.Encode(headerText) + "." + Base64UrlEncoder.Encode(payloadText) + "." + jwt.EncodedSignature;
+        if (scenario == "malformed-format") changed += ".unadmitted-segment";
         var value = WorkerCredentialEncoding.Create(original.OperationId, original.Generation, original.SubjectId,
             original.SessionId, original.Profile, original.OrganisationIds, original.TokenIssuedAtUtc,
             original.AccessExpiresAtUtc, original.SessionCreatedAtUtc, original.SessionExpiresAtUtc, changed);
@@ -305,5 +311,247 @@ public sealed class ProtectedWorkerCredentialTests
         public bool IsEnabled(LogLevel level) => true;
         public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
+}
+
+public sealed class WorkerCredentialConfigurationTests
+{
+    private static readonly Guid Subject = Guid.NewGuid();
+    private static readonly Guid Organisation = Guid.NewGuid();
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("false")]
+    [InlineData("1")]
+    [InlineData(" true ")]
+    public void Rotation_requires_the_explicit_configuration_value(string? enabled)
+    {
+        var configuration = Configuration();
+        configuration["TenantWorker:CredentialRotationEnabled"] = enabled;
+        var error = Assert.Throws<WorkerCredentialUnavailableException>(() =>
+            WorkerCredentialOptions.Read(configuration, WorkerCredentialEncoding.ClientProfile));
+        Assert.Equal("WORKER_ROTATION_NOT_ENABLED", error.Code);
+    }
+
+    [Theory]
+    [InlineData("directory")]
+    [InlineData("subject")]
+    [InlineData("empty-subject")]
+    [InlineData("no-organisations")]
+    [InlineData("too-many-organisations")]
+    [InlineData("invalid-organisation")]
+    [InlineData("empty-organisation")]
+    [InlineData("issuer")]
+    [InlineData("audience")]
+    public void Incomplete_scope_configuration_is_refused_before_reading_a_credential(string defect)
+    {
+        var values = Values();
+        switch (defect)
+        {
+            case "directory": values["TenantWorker:CredentialDirectory"] = "/tmp/unadmitted"; break;
+            case "subject": values["TenantWorker:SubjectId"] = "not-a-guid"; break;
+            case "empty-subject": values["TenantWorker:SubjectId"] = Guid.Empty.ToString("D"); break;
+            case "no-organisations": values.Remove("TenantWorker:OrganisationIds:0"); break;
+            case "too-many-organisations":
+                for (var index = 0; index <= 100; index++) values[$"TenantWorker:OrganisationIds:{index}"] = Guid.NewGuid().ToString("D");
+                break;
+            case "invalid-organisation": values["TenantWorker:OrganisationIds:0"] = "not-a-guid"; break;
+            case "empty-organisation": values["TenantWorker:OrganisationIds:0"] = Guid.Empty.ToString("D"); break;
+            case "issuer": values["Authentication:Issuer"] = " "; break;
+            case "audience": values["Authentication:Audience"] = " "; break;
+        }
+        var error = Assert.Throws<WorkerCredentialUnavailableException>(() =>
+            WorkerCredentialOptions.Read(new ConfigurationBuilder().AddInMemoryCollection(values).Build(), WorkerCredentialEncoding.ClientProfile));
+        Assert.Equal("WORKER_PROVIDER_CONFIGURATION_REJECTED", error.Code);
+    }
+
+    [Fact]
+    public void Configuration_normalizes_only_organisation_order_and_duplicates()
+    {
+        var first = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var second = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var values = Values();
+        values["TenantWorker:CredentialRotationEnabled"] = "TRUE";
+        values["TenantWorker:OrganisationIds:0"] = second.ToString("D");
+        values["TenantWorker:OrganisationIds:1"] = first.ToString("D");
+        values["TenantWorker:OrganisationIds:2"] = second.ToString("D");
+        var options = WorkerCredentialOptions.Read(new ConfigurationBuilder().AddInMemoryCollection(values).Build(), WorkerCredentialEncoding.ClientProfile);
+        Assert.Equal(new[] { first, second }, options.OrganisationIds);
+        Assert.Equal(Subject, options.SubjectId);
+        Assert.Equal(WorkerCredentialOptions.MountedDirectory, options.Directory);
+        Assert.Equal(WorkerCredentialEncoding.ClientProfile, options.Profile);
+        Assert.Equal(WorkerCredentialFixture.Issuer, options.Issuer);
+        Assert.Equal(WorkerCredentialFixture.Audience, options.Audience);
+    }
+
+    [Theory]
+    [InlineData("subject")]
+    [InlineData("profile")]
+    [InlineData("no-organisations")]
+    [InlineData("too-many-organisations")]
+    [InlineData("empty-organisation")]
+    [InlineData("duplicate-organisation")]
+    [InlineData("relative-issuer")]
+    [InlineData("http-issuer")]
+    [InlineData("issuer-user-info")]
+    [InlineData("issuer-query")]
+    [InlineData("issuer-fragment")]
+    [InlineData("audience")]
+    public void Provider_refuses_an_invalid_scope_even_when_options_bypass_configuration_binding(string defect)
+    {
+        var options = Options(defect);
+        var reader = new NeverRead();
+        var error = Assert.Throws<WorkerCredentialUnavailableException>(() => new ProtectedWorkerCredentialProvider(
+            reader, options, TimeProvider.System, NullLogger<ProtectedWorkerCredentialProvider>.Instance));
+        Assert.Equal("WORKER_PROVIDER_CONFIGURATION_REJECTED", error.Code);
+        Assert.Equal(0, reader.Reads);
+    }
+
+    [Theory]
+    [InlineData(WorkerCredentialEncoding.AdminAreaProfile)]
+    [InlineData(WorkerCredentialEncoding.ClientProfile)]
+    public void Both_admitted_profiles_accept_the_exact_scope_without_reading_material(string profile)
+    {
+        var reader = new NeverRead();
+        var options = Options(profile: profile);
+        _ = new ProtectedWorkerCredentialProvider(reader, options, TimeProvider.System, NullLogger<ProtectedWorkerCredentialProvider>.Instance);
+        Assert.Equal(0, reader.Reads);
+    }
+
+    [Fact]
+    public async Task Caller_cancellation_is_preserved_without_a_redacted_fallback_exception()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var expected = new OperationCanceledException(cancellation.Token);
+        var provider = WorkerCredentialFixture.Provider(new ThrowingReader(expected), [Organisation]);
+        var observed = await Assert.ThrowsAsync<OperationCanceledException>(() => provider.ReadAsync(cancellation.Token).AsTask());
+        Assert.Same(expected, observed);
+        Assert.Equal(cancellation.Token, observed.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Unrequested_reader_cancellation_is_unavailable_and_does_not_export_the_original_error()
+    {
+        var provider = WorkerCredentialFixture.Provider(new ThrowingReader(new OperationCanceledException()), [Organisation]);
+        var error = await Assert.ThrowsAsync<WorkerCredentialUnavailableException>(() => provider.ReadAsync(default).AsTask());
+        Assert.Equal("WORKER_CREDENTIAL_UNAVAILABLE", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public async Task Credential_buffer_is_cleared_after_a_valid_snapshot_is_created()
+    {
+        var package = WorkerCredentialFixture.Package([Organisation]);
+        var bytes = WorkerCredentialEncoding.Serialize(package);
+        var provider = WorkerCredentialFixture.Provider(new BorrowedBytes(bytes), [Organisation]);
+        var snapshot = await provider.ReadAsync(default);
+        Assert.All(bytes, value => Assert.Equal((byte)0, value));
+        Assert.Equal(package.OperationId, snapshot.OperationId);
+        Assert.Equal(package.Generation, snapshot.Generation);
+        Assert.Equal(WorkerCredentialFixture.Subject, snapshot.SubjectId);
+        Assert.Equal(package.SessionId, snapshot.SessionId);
+        Assert.Equal(package.Profile, snapshot.Profile);
+        Assert.Equal(new[] { Organisation }, snapshot.OrganisationIds);
+        Assert.Throws<NotSupportedException>(() => ((IList<Guid>)snapshot.OrganisationIds)[0] = Guid.NewGuid());
+        Assert.Equal(package.TokenIssuedAtUtc, snapshot.TokenIssuedAtUtc);
+        Assert.Equal(package.AccessExpiresAtUtc, snapshot.AccessExpiresAtUtc);
+        Assert.Equal(package.SessionCreatedAtUtc, snapshot.SessionCreatedAtUtc);
+        Assert.Equal(package.SessionExpiresAtUtc, snapshot.SessionExpiresAtUtc);
+        Assert.Equal(package.PayloadSha256, snapshot.PayloadSha256);
+        Assert.Equal(WorkerCredentialFixture.TokenSha256(package.Token), WorkerCredentialFixture.TokenSha256(snapshot.Token));
+        Assert.Equal("Worker credential snapshot (redacted)", snapshot.ToString());
+    }
+
+    [Theory]
+    [InlineData("profile")]
+    [InlineData("subject")]
+    public async Task Adoption_from_another_scope_is_refused_before_any_success_log(string difference)
+    {
+        var foreign = difference == "profile" ? WorkerCredentialFixture.Provider(new WorkerCredentialFixture.Bytes(WorkerCredentialEncoding.Serialize(
+            WorkerCredentialFixture.Package([Organisation], profile: WorkerCredentialEncoding.ClientProfile))),
+            [Organisation], WorkerCredentialEncoding.ClientProfile)
+            : new ProtectedWorkerCredentialProvider(new WorkerCredentialFixture.Bytes(WorkerCredentialEncoding.Serialize(
+                WorkerCredentialFixture.Package([Organisation], subject: Subject))), Options(),
+                new WorkerCredentialFixture.Clock(WorkerCredentialFixture.Now.AddMinutes(1)),
+                NullLogger<ProtectedWorkerCredentialProvider>.Instance);
+        var snapshot = await foreign.ReadAsync(default);
+        var logs = new AdoptionLogs();
+        var target = WorkerCredentialFixture.Provider(new NeverRead(), [Organisation], logger: logs);
+        Assert.Empty(logs.Entries);
+        var error = Assert.Throws<WorkerCredentialUnavailableException>(() => target.MarkSuccessfulUse(snapshot));
+        Assert.Equal("WORKER_SUCCESS_CONTEXT_REJECTED", error.Code);
+        Assert.Empty(logs.Entries);
+    }
+
+    private static ConfigurationManager Configuration()
+    {
+        var configuration = new ConfigurationManager();
+        configuration.AddInMemoryCollection(Values());
+        return configuration;
+    }
+
+    private static Dictionary<string, string?> Values() => new()
+    {
+        ["TenantWorker:CredentialRotationEnabled"] = "true",
+        ["TenantWorker:CredentialDirectory"] = WorkerCredentialOptions.MountedDirectory,
+        ["TenantWorker:SubjectId"] = Subject.ToString("D"),
+        ["TenantWorker:OrganisationIds:0"] = Organisation.ToString("D"),
+        ["Authentication:Issuer"] = WorkerCredentialFixture.Issuer,
+        ["Authentication:Audience"] = WorkerCredentialFixture.Audience
+    };
+
+    private static WorkerCredentialOptions Options(string? defect = null, string profile = WorkerCredentialEncoding.AdminAreaProfile) => new()
+    {
+        SubjectId = defect == "subject" ? Guid.Empty : Subject,
+        Profile = defect == "profile" ? "unadmitted" : profile,
+        OrganisationIds = defect switch
+        {
+            "no-organisations" => [],
+            "too-many-organisations" => Enumerable.Range(0, 101).Select(_ => Guid.NewGuid()).ToArray(),
+            "empty-organisation" => [Guid.Empty],
+            "duplicate-organisation" => [Organisation, Organisation],
+            _ => [Organisation]
+        },
+        Directory = WorkerCredentialOptions.MountedDirectory,
+        Issuer = defect switch
+        {
+            "relative-issuer" => "/auth",
+            "http-issuer" => "http://auth.invalid/",
+            "issuer-user-info" => "https://operator@auth.invalid/",
+            "issuer-query" => "https://auth.invalid/?unexpected=1",
+            "issuer-fragment" => "https://auth.invalid/#unexpected",
+            _ => WorkerCredentialFixture.Issuer
+        },
+        Audience = defect == "audience" ? " " : WorkerCredentialFixture.Audience
+    };
+
+    private sealed class NeverRead : IProtectedWorkerCredentialReader
+    {
+        internal int Reads;
+        public ValueTask<byte[]> ReadAsync(string directory, CancellationToken cancellationToken)
+        {
+            Reads++;
+            throw new InvalidOperationException("Configuration must be admitted before reading.");
+        }
+    }
+
+    private sealed class ThrowingReader(Exception error) : IProtectedWorkerCredentialReader
+    {
+        public ValueTask<byte[]> ReadAsync(string directory, CancellationToken cancellationToken) => throw error;
+    }
+
+    private sealed class BorrowedBytes(byte[] value) : IProtectedWorkerCredentialReader
+    {
+        public ValueTask<byte[]> ReadAsync(string directory, CancellationToken cancellationToken) => ValueTask.FromResult(value);
+    }
+
+    private sealed class AdoptionLogs : ILogger<ProtectedWorkerCredentialProvider>
+    {
+        internal readonly List<EventId> Entries = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => true;
+        public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Entries.Add(eventId);
     }
 }

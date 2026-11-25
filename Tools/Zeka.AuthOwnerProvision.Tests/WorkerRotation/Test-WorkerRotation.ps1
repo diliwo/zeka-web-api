@@ -207,4 +207,143 @@ Confirm-Source $overlay
 $overlayText=[IO.File]::ReadAllText($overlay)
 Check ([regex]::Matches($overlayText,'user: "1654:1654"').Count -eq 2 -and [regex]::Matches($overlayText,'cap_drop: \[ALL\]').Count -eq 2 -and [regex]::Matches($overlayText,'no-new-privileges:true').Count -eq 2) 'BOTH_CONSUMER_UID_CAPS_NNP'
 Check ([regex]::Matches($overlayText,'read_only: true').Count -eq 2 -and [regex]::Matches($overlayText,'subpath: private').Count -eq 2 -and !$overlayText.Contains('logging:')) 'DIRECTORY_RO_PRESERVED_LOGGING'
+
+# Request construction and guarded orchestration only. Every HTTP/native/journal
+# port is synthetic; runtime/provider/adoption acceptance remains NOT_RUN.
+$scalarJson=ConvertFrom-WorkerJson '{"enabled":true,"disabled":false,"ratio":1.25}'
+Check ($scalarJson.enabled-eq$true-and$scalarJson.disabled-eq$false-and$scalarJson.ratio-eq[decimal]1.25) 'JSON_BOOLEAN_AND_DECIMAL_TYPES_PRESERVED'
+$rawCode=$null;try{throw [InvalidOperationException]::new('synthetic detail not for receipts')}catch{$rawCode=Get-WorkerSafeCode $_}
+Check ($rawCode-ceq'OPERATION_FAILED_DETAILS_WITHHELD') 'RAW_NATIVE_DETAIL_NEVER_BECOMES_RECEIPT_CODE'
+$emptyGuidRejected=$false;try{New-WorkerJournal ([Guid]::Empty) ([Guid]::NewGuid()) ('a'*40)|Out-Null}catch{$emptyGuidRejected=$_.Exception.Message-ceq'OPERATION_ID_REQUIRED'}
+Check $emptyGuidRejected 'EMPTY_OPERATION_REFUSED_BEFORE_ANY_PORT'
+$noConsumer=Assert-WorkerConsumerMount @{consumer=$null}
+Check ($null-eq$noConsumer) 'MISSING_CONSUMER_IS_NOT_ADOPTION_PROOF'
+$badPhase=$false;try{Invoke-WorkerPhase 'unknown' (New-WorkerJournal ([Guid]::NewGuid()) ([Guid]::NewGuid()) ('a'*40))|Out-Null}catch{$badPhase=$_.Exception.Message-ceq'AUTH_PHASE_REJECTED'}
+Check $badPhase 'UNKNOWN_AUTH_PHASE_REFUSED_BEFORE_SEND'
+
+function Invoke-PurePhaseCase([string]$Case) {
+    $previous=$script:WorkerContext
+    $s=New-Scenario;$journal=Invoke-WorkerRotationFlow $s.journal $s.ports
+    $body=@{operationId=$journal.operationId;organisationId=$journal.organisationId;state='ISSUED'}
+    if($Case-ceq'wrong-identity'){$body.operationId=[Guid]::NewGuid().ToString('D')}
+    $response=[Net.Http.HttpResponseMessage]::new($(if($Case-ceq'status'){[Net.HttpStatusCode]::ServiceUnavailable}else{[Net.HttpStatusCode]::OK}))
+    $response.Content=[Net.Http.StringContent]::new($(if($Case-ceq'malformed'){'{'}else{$body|ConvertTo-Json -Compress}))
+    $state=@{calls=0;request=$null;method='';uri='';completion=$null;payload=$null;response=$response}
+    try {
+        $client=[pscustomobject]@{state=$state}
+        $client|Add-Member -MemberType ScriptMethod -Name Send -Value {
+            param($request,$completion)
+            $this.state.calls++;$this.state.request=$request;$this.state.method=$request.Method.Method
+            $this.state.uri=$request.RequestUri.AbsolutePath;$this.state.completion=$completion
+            $this.state.payload=ConvertFrom-WorkerJson ($request.Content.ReadAsStringAsync().GetAwaiter().GetResult())
+            return $this.state.response
+        }
+        $script:WorkerContext=@{Client=$client}
+        $phase=if($Case-cin@('revoke','readonly-denied')){'revoke-others'}else{'prepare'}
+        if($Case-ceq'readonly-denied'){$journal.publications['client-projection'].readOnlyMount=$false}
+        $errorCode=$null;$result=$null
+        try{$result=Invoke-WorkerPhase $phase $journal}catch{$errorCode=$_.Exception.Message}
+        $requestDisposed=$false;$responseDisposed=$false
+        if($state.calls-gt0){
+            try{$null=$state.request.Content.ReadAsStringAsync()}catch{$requestDisposed=$true}
+            try{$null=$response.Content.ReadAsStringAsync()}catch{$responseDisposed=$true}
+        }
+        return @{error=$errorCode;result=$result;state=$state;requestDisposed=$requestDisposed;responseDisposed=$responseDisposed;operationId=$journal.operationId;organisationId=$journal.organisationId}
+    } finally {$script:WorkerContext=$previous;$response.Dispose()}
+}
+foreach($phaseCase in @('prepare','revoke')){
+    $phaseResult=Invoke-PurePhaseCase $phaseCase
+    $expectedPath=if($phaseCase-ceq'revoke'){'/internal/m1/worker-rotation/revoke-others'}else{'/internal/m1/worker-rotation/prepare'}
+    Check ($null-eq$phaseResult.error-and$phaseResult.state.calls-eq1-and$phaseResult.state.method-ceq'POST'-and$phaseResult.state.uri-ceq$expectedPath-and$phaseResult.state.completion-eq[Net.Http.HttpCompletionOption]::ResponseContentRead) "PURE_HTTP_$($phaseCase)_EXACT_ROUTE_METHOD_AND_COMPLETE_BODY"
+    Check ($phaseResult.state.payload.operationId-ceq$phaseResult.operationId-and$phaseResult.state.payload.organisationId-ceq$phaseResult.organisationId) "PURE_HTTP_$($phaseCase)_EXACT_OPERATION_ORGANISATION"
+    Check ($phaseResult.requestDisposed-and$phaseResult.responseDisposed) "PURE_HTTP_$($phaseCase)_REQUEST_AND_RESPONSE_RELEASED"
+    if($phaseCase-ceq'revoke'){Check ($phaseResult.state.payload.deliveries.Count-eq2) 'PURE_HTTP_REVOKE_BINDS_BOTH_VERIFIED_DELIVERIES'}
+}
+foreach($phaseCase in @('status','wrong-identity','malformed','readonly-denied')){
+    $phaseResult=Invoke-PurePhaseCase $phaseCase
+    $expectedCode=switch($phaseCase){
+        'status' {'AUTH_PHASE_REJECTED_OR_UNCERTAIN'}
+        'wrong-identity' {'AUTH_RESPONSE_IDENTITY_REJECTED'}
+        'malformed' {'OPERATION_FAILED_DETAILS_WITHHELD'}
+        'readonly-denied' {'ACTUAL_CONSUMER_RO_SCOPE_REQUIRED'}
+    }
+    Check ($phaseResult.error-ceq$expectedCode) "PURE_HTTP_$($phaseCase)_REFUSED"
+    if($phaseCase-ceq'readonly-denied'){Check ($phaseResult.state.calls-eq0) 'PURE_HTTP_UNPROVEN_RO_MOUNT_NEVER_SENDS_REVOCATION'}
+    else{Check ($phaseResult.requestDisposed-and$phaseResult.responseDisposed) "PURE_HTTP_$($phaseCase)_FAILURE_RELEASES_MESSAGES"}
+}
+
+function Invoke-PureOwnedHelperCase([string]$Case,[switch]$Initialize) {
+    $previous=$script:WorkerContext
+    $journal=New-WorkerJournal ([Guid]::NewGuid()) ([Guid]::NewGuid()) ('a'*40)
+    $profile='adminarea-retry';$volume='synthetic-rotation';$id='e'*64
+    $command=if($Initialize){'test "$(find /target -mindepth 1 -maxdepth 1 | wc -l)" -eq 0; chown 1654:1654 /target'}else{'test -f /input/current.json'}
+    $private=Join-Path ([IO.Path]::GetTempPath()) 'synthetic-worker-no-files'
+    $relative='workers/operations/'+$journal.operationId+'/'+$profile+'.json'
+    $journal.stages[$profile]=@{path=(Join-Path $private $relative)}
+    $state=@{calls=[Collections.Generic.List[string]]::new();arguments=@();inspections=0;journalIds=[Collections.Generic.List[object]]::new();case=$Case}
+    try {
+        $script:WorkerContext=@{Private=$private;JournalPath='synthetic-journal-not-written';Bindings=@{ownerSid='S-1-5-21-100-200-300-1001';registryId=('a'*32);dockerPrivateRoot='/synthetic/private'}}
+        $labels=Get-WorkerResourceLabels $profile;$labels['com.zeka.operation']=$journal.operationId;$labels['com.zeka.source']=$journal.sourceCommit
+        $labels['com.zeka.command.sha256']=Get-WorkerHash ([Text.Encoding]::UTF8.GetBytes($command))
+        $inspection=@{Id=$id;Image=$script:WorkerHelperImage;Config=@{Labels=$labels;User=$(if($Initialize){'0:0'}else{'1654:1654'});Cmd=@('sh','-euc',$command)};
+            HostConfig=@{NetworkMode='none';ReadonlyRootfs=$true;CapDrop=@('ALL');CapAdd=@();SecurityOpt=@('no-new-privileges=true')};
+            Mounts=@(@{Type='volume';Name=$volume;Destination='/target';RW=$true});State=@{Running=$false;ExitCode=0}}
+        if($Initialize){$inspection.HostConfig.CapAdd=@('CHOWN')}
+        if(!$Initialize){$inspection.Mounts+=@(@{Type='bind';Source=('/synthetic/private/'+$relative);Destination='/input/current.json';RW=$false})}
+        switch($Case){
+            'sandbox' {$inspection.HostConfig.NetworkMode='host'}
+            'user' {$inspection.Config.User='unexpected'}
+            'caps' {$inspection.HostConfig.CapAdd=@('SYS_ADMIN')}
+            'target' {$inspection.Mounts[0].Name='unrelated-volume'}
+            'secret' {$inspection.Mounts[1].RW=$true}
+            'exit' {$inspection.State.Running=$true}
+        }
+        function Invoke-WorkerNative {
+            param([string[]]$Arguments,[double]$TimeoutSeconds=30,[switch]$AllowFailure)
+            $operation=$Arguments[0];$state.calls.Add($operation)
+            switch($operation){
+                'ps' {return @{stdout=$(if($state.case-ceq'retained'){$id}else{''})}}
+                'create' {$state.arguments=$Arguments;return @{stdout=$id}}
+                'start' {return @{stdout=''}}
+                'wait' {return @{stdout=$(if($state.case-ceq'wait'){'17'}else{'0'})}}
+                'rm' {if($state.case-ceq'cleanup'){throw 'SYNTHETIC_HELPER_CLEANUP_FAILED'};return @{stdout=$id}}
+                default {throw 'UNEXPECTED_NATIVE_OPERATION'}
+            }
+        }
+        function Get-WorkerDockerJson {
+            param([string[]]$Arguments,[double]$TimeoutSeconds=30)
+            if($Arguments.Count-ne2-or$Arguments[0]-cne'inspect'-or$Arguments[1]-cne$id){throw 'UNEXPECTED_INSPECTION_ARGUMENTS'}
+            $state.inspections++;return $inspection
+        }
+        function Write-WorkerJournal {
+            param([string]$Path,[System.Collections.IDictionary]$Journal)
+            if($Path-cne'synthetic-journal-not-written'){throw 'UNEXPECTED_JOURNAL_PATH'}
+            $state.journalIds.Add($Journal.retainedHelperId)
+        }
+        $failure=$null
+        try{Invoke-WorkerOwnedHelper $journal $profile $volume $command -Initialize:$Initialize}catch{$failure=$_.Exception.Message}
+        return @{error=$failure;state=$state;journal=$journal;id=$id}
+    } finally {$script:WorkerContext=$previous}
+}
+foreach($initializer in @($false,$true)){
+    $helperResult=Invoke-PureOwnedHelperCase 'success' -Initialize:$initializer
+    Check ($null-eq$helperResult.error-and($helperResult.state.calls-join',')-ceq'ps,create,start,wait,rm'-and$null-eq$helperResult.journal.retainedHelperId) "PURE_HELPER_$($initializer)_BOUNDED_SUCCESS_REMOVES_ONLY_EXACT_FAKE_ID"
+    Check ($helperResult.state.journalIds.Count-eq2-and$helperResult.state.journalIds[0]-ceq$helperResult.id-and$null-eq$helperResult.state.journalIds[1]) "PURE_HELPER_$($initializer)_RETENTION_IS_CLEARED_ONLY_AFTER_CLEANUP"
+    $helperArguments=$helperResult.state.arguments
+    Check ($helperArguments-contains'none'-and$helperArguments-contains'--read-only'-and$helperArguments-contains'ALL'-and$helperArguments-contains'no-new-privileges=true'-and$helperArguments-contains'--log-driver') "PURE_HELPER_$($initializer)_ACTUAL_ARGUMENTS_KEEP_ISOLATION"
+    if($initializer){Check ($helperArguments-contains'0:0'-and$helperArguments-contains'CHOWN') 'PURE_INITIALIZER_EXPLICIT_NARROW_CAPABILITY'}
+    else{Check ($helperArguments-contains'1654:1654'-and@($helperArguments|Where-Object {$_-like'type=bind,*readonly'}).Count-eq1) 'PURE_PUBLISHER_READONLY_INPUT_AND_UNPRIVILEGED_UID'}
+}
+$codes=@{retained='RETAINED_HELPER_REQUIRES_INSPECTION';sandbox='HELPER_ADMISSION_REJECTED';user='HELPER_USER_REJECTED';caps='HELPER_CAPABILITY_REJECTED';target='HELPER_TARGET_MOUNT_REJECTED';secret='HELPER_SECRET_MOUNT_REJECTED';wait='HELPER_FAILED_PRESERVED';exit='HELPER_EXIT_UNCERTAIN';cleanup='SYNTHETIC_HELPER_CLEANUP_FAILED'}
+foreach($defect in $codes.Keys){
+    $helperResult=Invoke-PureOwnedHelperCase $defect
+    Check ($helperResult.error-ceq$codes[$defect]) "PURE_HELPER_$($defect)_REFUSED"
+    if($defect-ceq'retained'){Check (($helperResult.state.calls-join',')-ceq'ps') 'PURE_RETAINED_HELPER_NEVER_CREATES_OR_STARTS'}
+    else{
+        Check ($helperResult.journal.retainedHelperId-ceq$helperResult.id) "PURE_HELPER_$($defect)_RETAINS_INSPECTION_ID"
+        $removals=@($helperResult.state.calls|Where-Object {$_-ceq'rm'}).Count
+        Check ($removals-eq$(if($defect-ceq'cleanup'){1}else{0})) "PURE_HELPER_$($defect)_NO_RETRY_OR_UNAPPROVED_CLEANUP"
+    }
+}
+
 @{tests=$script:checks;passed=$script:checks;failed=0;runtime='NOT_RUN';provider='NOT_RUN';adoption='NOT_RUN';historicalObservability=@{case='EXACT_ACTUAL_USE_EVENT';original='FAIL_UNCLASSIFIED';retiredFrom='REVOCATION_AND_OPERATOR_LOG_PARSER';c1Closure='INDEPENDENT_EXPLANATION_OR_EXPLICIT_REVIEWED_RETIREMENT_REQUIRED'};secretMaterial='GENERATED_IN_MEMORY_ONLY'}|ConvertTo-Json -Depth 5 -Compress
