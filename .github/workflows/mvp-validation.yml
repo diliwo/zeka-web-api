@@ -1590,13 +1590,13 @@ jobs:
         run: |
           python - <<'PY'
           import csv
+          import json
           import re
+          from xml.etree import ElementTree as ET
           from pathlib import Path
 
           base = Path.cwd()
           assertion_scripts = {
-              (base / "Shared/WorkerCredentials.TestSupport/ProtectedWorkerCredentialTests.cs").resolve(),
-              (base / "Shared/StaffProjectionTransportTests.cs").resolve(),
               *{(base / "Tools/Zeka.AuthOwnerProvision.Tests/BuildContext" / name).resolve()
                 for name in ("Test-OwnerHelperBuildContext.ps1", "Test-OwnerImageContainment.py")},
               (base / "Tools/Zeka.AuthOwnerProvision.Tests/OperatorBoundary/Test-OwnerAdmission.ps1").resolve(),
@@ -1621,9 +1621,16 @@ jobs:
           text = (base / ".sonarqube/out/sonar-project.properties").read_text(encoding="utf-8-sig")
           text = re.sub(r"\\\r?\n[ \t]*", "", text)
           scopes = {"sonar.tests": set(), "sonar.sources": set()}
+          settings = {}
           for line in text.splitlines():
               key, separator, value = line.partition("=")
-              scope = next((name for name in scopes if key.strip().endswith(name)), None)
+              setting = key.strip()
+              if separator and any(setting.endswith(name) for name in (
+                  "sonar.test.inclusions", "sonar.test.exclusions", "sonar.dotnet.excludeTestProjects")):
+                  if setting in settings:
+                      raise SystemExit("Duplicate linked C# analysis filter")
+                  settings[setting] = re.sub(r"\\([\\:= ,#!])", r"\1", value)
+              scope = next((name for name in scopes if setting.endswith(name)), None)
               if not separator or scope is None:
                   continue
               value = re.sub(r"\\([\\:= ,#!])", r"\1", value)
@@ -1634,7 +1641,98 @@ jobs:
           for script in main_scripts:
               if script not in scopes["sonar.sources"] or script in scopes["sonar.tests"]:
                   raise SystemExit(f"Forwarding and operational entrypoints must remain MAIN source: {script.relative_to(base)}")
-          print("Final scanner input: ten test harness/infrastructure scripts are TEST; forwarding and operational entrypoints remain MAIN.")
+          # .NET 11.3 categorizes C# through MSBuild. Raw ROOT sources can retain
+          # linked declarations before filters, so they cannot prove C# MAIN scope.
+          linked_csharp = {(base / relative).resolve() for relative in (
+              "Shared/WorkerCredentials.TestSupport/ProtectedWorkerCredentialTests.cs",
+              "Shared/StaffProjectionTransportTests.cs",
+          )}
+          expected_owners = {(base / relative).resolve() for relative in (
+              "Services/AdminAreaManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+              "Services/ClientManagement/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj",
+          )}
+          python_tests = {"scripts/ci/tests/" + name for name in (
+              "test_application_conformance.py", "test_c1_ratchet.py", "test_c1_ratchet_context.py",
+              "test_strict_restore_graph.py", "test_c1_ratchet_jobs.py",
+          )} | {"Tools/Shared/Test-OwnerSqlInventory.py"}
+          expected_inclusions = {path.relative_to(base).as_posix() for path in assertion_scripts | linked_csharp} | python_tests
+          proof = dict(filesPresent=False, exactFilters=False, noExclusionConflicts=False,
+                       metadataBound=False, exactOwners=False, ownersTest=False, ownersIncluded=False)
+
+          def refuse(code):
+              print("Linked C# TEST proof: " + json.dumps(proof, sort_keys=True))
+              raise SystemExit("Linked C# assertion scope rejected: " + code)
+
+          def patterns(value):
+              return next(csv.reader([value], skipinitialspace=True)) if value else []
+
+          proof["filesPresent"] = all(path.is_file() and not path.is_symlink() for path in linked_csharp | expected_owners)
+          if not proof["filesPresent"]:
+              refuse("PHYSICAL_INPUT_MISSING")
+          actual_inclusions = patterns(settings.get("sonar.test.inclusions", ""))
+          proof["exactFilters"] = (len(actual_inclusions) == len(expected_inclusions)
+                                   and set(actual_inclusions) == expected_inclusions
+                                   and all(key == "sonar.test.inclusions" or patterns(value) == actual_inclusions
+                                           for key, value in settings.items() if key.endswith("sonar.test.inclusions")))
+          if not proof["exactFilters"]:
+              refuse("TEST_INCLUSIONS_CHANGED")
+          # The reviewed configuration has no test exclusions. Refuse any drift
+          # instead of approximating Sonar's Ant wildcard matching semantics.
+          proof["noExclusionConflicts"] = (all(not value.strip() for key, value in settings.items()
+                                              if key.endswith("sonar.test.exclusions"))
+              and all(value.strip().lower() == "false" for key, value in settings.items()
+                      if key.endswith("sonar.dotnet.excludeTestProjects")))
+          if not proof["noExclusionConflicts"]:
+              refuse("TEST_EXCLUSION_CONFLICT")
+
+          namespace = "{http://www.sonarsource.com/msbuild/integration/2015/1}"
+          artifacts = (base / ".sonarqube").resolve()
+          owners = {path: [] for path in linked_csharp}
+          try:
+              infos = sorted((artifacts / "out").glob("*/ProjectInfo.xml"))
+              if not infos:
+                  refuse("PROJECT_METADATA_MISSING")
+              for info in infos:
+                  if info.is_symlink() or not info.resolve().is_relative_to(artifacts):
+                      refuse("PROJECT_METADATA_UNSAFE")
+                  project = ET.parse(info).getroot()
+                  if project.tag != namespace + "ProjectInfo":
+                      refuse("PROJECT_METADATA_SHAPE")
+                  project_path = Path(project.findtext(namespace + "FullPath") or "")
+                  if not project_path.is_absolute():
+                      refuse("PROJECT_METADATA_PATH")
+                  results = [entry for entry in project.findall(namespace + "AnalysisResultFiles/" + namespace + "AnalysisResultFile")
+                             if entry.get("Id") == "FilesToAnalyze"]
+                  # No result means MSBuild reported no analyzable files. Such a
+                  # project supplies no ownership; the exact owner pair is still mandatory.
+                  if not results:
+                      continue
+                  if len(results) != 1:
+                      refuse("PROJECT_FILE_LIST_AMBIGUOUS")
+                  file_list = Path(results[0].get("Location") or "")
+                  if (not file_list.is_absolute() or not file_list.is_file() or file_list.is_symlink()
+                      or not file_list.resolve().is_relative_to(artifacts)):
+                      refuse("PROJECT_FILE_LIST_UNSAFE")
+                  for line in file_list.read_text(encoding="utf-8-sig").splitlines():
+                      if not line:
+                          continue
+                      path = Path(line)
+                      if not path.is_absolute():
+                          refuse("PROJECT_SOURCE_PATH")
+                      if path.resolve() in owners:
+                          owners[path.resolve()].append((project_path.resolve(),
+                              project.findtext(namespace + "ProjectType"), project.findtext(namespace + "IsExcluded")))
+              proof["metadataBound"] = True
+          except (OSError, UnicodeError, ET.ParseError, ValueError):
+              refuse("PROJECT_METADATA_UNREADABLE")
+          proof["exactOwners"] = all(len(values) == 2 and {value[0] for value in values} == expected_owners
+                                     for values in owners.values())
+          proof["ownersTest"] = all(value[1] == "Test" for values in owners.values() for value in values)
+          proof["ownersIncluded"] = all(value[2] == "false" for values in owners.values() for value in values)
+          if not all(proof.values()):
+              refuse("PROJECT_OWNERSHIP_REJECTED")
+          print("Linked C# TEST proof: " + json.dumps(proof, sort_keys=True))
+          print("Final scanner input: script scopes preserved; linked C# assertions have exact included TEST owners and filters.")
           PY
 
   mvp_validation:

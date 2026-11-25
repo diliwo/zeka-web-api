@@ -9,7 +9,14 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Infrastructure.IntegrationTests;
 
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class BrowserRegistrationBoundaryCollection
+{
+    public const string Name = "Browser registration boundary";
+}
+
 // These invoke real transport functions in-process, not HTTP or Origin/CSRF middleware acceptance.
+[Collection(BrowserRegistrationBoundaryCollection.Name)]
 public sealed class BrowserRegistrationBoundaryTests
 {
     [Fact]
