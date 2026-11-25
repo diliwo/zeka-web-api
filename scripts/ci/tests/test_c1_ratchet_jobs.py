@@ -9,12 +9,23 @@ import runpy
 import sys
 import tempfile
 import unittest
+import contextlib
+import io
+import importlib.util
 from unittest.mock import patch
 
 
 TOOLING = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLING))
 from c1_ratchet import ANCHOR, AUTHORITY, RatchetError, identity  # noqa: E402
+import c1_ratchet_context as ratchet_context  # noqa: E402
+
+# The reusable input fixture must come from this exact tooling checkout, even
+# under isolated Python entry or when another repository is on the import path.
+_fixture_spec = importlib.util.spec_from_file_location(
+    "c1_ratchet_local_input_fixtures", Path(__file__).with_name("test_c1_ratchet.py"))
+ratchet_fixtures = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(ratchet_fixtures)
 
 
 SCRIPT = TOOLING / "c1_ratchet_jobs.py"
@@ -294,6 +305,179 @@ class HostedJobEvidenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(RatchetError, "WORKFLOW_RUN_CONTEXT_MISMATCH"):
                     self.execute(environment={field: value})
                 self.assertFalse(self.receipt.exists())
+
+
+class RatchetCommandEvidenceTests(ratchet_fixtures.RatchetFixture):
+    """Exercise the actual CLI against owned evidence, not copied gate code."""
+
+    def setUp(self):
+        super().setUp()
+        self.policy = self.folder / "accepted.json"
+        self.policy.write_text(json.dumps(self.baseline), encoding="utf-8")
+        self.context["baselineSha256"] = sha256(self.policy.read_bytes()).hexdigest()
+        self.context_file = self.folder / "context.json"
+        self.context_file.write_text(json.dumps(self.context), encoding="utf-8")
+        self.result_file = self.folder / "result.json"
+
+    def command(self, action="compare", *, baseline=None, arguments=(), environment=None):
+        args = [str(TOOLING / "c1_ratchet.py"), action, "--context", str(self.context_file),
+                "--baseline", str(baseline or self.policy), "--out", str(self.result_file)]
+        args += (["--accepted-baseline", str(self.policy), "--evidence", str(self.evidence)] if action == "compare"
+                 else ["--lane", self.lane, "--role", "candidate", "--run-inputs", str(self.folder / "candidate")])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false", **(environment or {})}, clear=True), \
+                patch.object(sys, "argv", [*args, *map(str, arguments)]), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as ended:
+                runpy.run_path(str(TOOLING / "c1_ratchet.py"), run_name="__main__")
+        return ended.exception.code, stdout.getvalue(), stderr.getvalue()
+
+    def test_cli_capture_keeps_failed_native_test_evidence_without_claiming_tests_passed(self):
+        self.capture("candidate", self.candidate)
+        native, stdout, stderr = self.command("capture")
+        self.assertEqual((native, stdout, stderr), (0, "", ""))
+        result = json.loads(self.result_file.read_text(encoding="utf-8"))
+        self.assertEqual(result["context"], self.context)
+        self.assertEqual(result["role"], "candidate")
+        self.assertEqual({item["outcome"] for item in result["projects"][PROJECT]["results"]}, {"Passed", "Failed"})
+
+    def test_cli_compare_accepts_only_complete_bound_evidence_and_the_same_baseline(self):
+        self.both()
+        native, stdout, stderr = self.command(environment={
+            "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": self.context["repository"],
+            "GITHUB_EVENT_NAME": self.context["event"], "GITHUB_RUN_ID": self.context["runId"],
+            "GITHUB_RUN_ATTEMPT": self.context["runAttempt"]})
+        self.assertEqual((native, stderr), (0, ""))
+        self.assertEqual(stdout.strip(), "C1 Failure Ratchet: PASS (0 findings)")
+        result = json.loads(self.result_file.read_text(encoding="utf-8"))
+        self.assertEqual(result["baselineDiff"], "")
+        self.assertEqual(result["errors"], [])
+        self.assertFalse(result["bootstrapFromPinnedAnchor"])
+
+    def test_cli_unknown_lane_refuses_capture_before_writing_any_evidence(self):
+        native, _, stderr = self.command("capture", arguments=("--lane", "unapproved"))
+        self.assertEqual(native, 1)
+        self.assertIn("UNKNOWN_REQUIRED_JOB", stderr)
+        self.assertFalse(self.result_file.exists())
+
+    def test_cli_native_zero_cannot_relabel_failed_trx_rows(self):
+        self.capture("candidate", self.candidate)
+        invocation = self.folder / "candidate" / "invocations.json"
+        data = json.loads(invocation.read_text(encoding="utf-8"))
+        data["invocations"][0]["exitCode"] = 0
+        invocation.write_text(json.dumps(data), encoding="utf-8")
+        native, _, stderr = self.command("capture")
+        self.assertEqual(native, 1)
+        self.assertIn("NATIVE_EXIT_AND_TRX_DISAGREE", stderr)
+        self.assertFalse(self.result_file.exists())
+
+    def test_cli_changed_accepted_bytes_emit_a_fail_receipt_not_a_candidate_diff(self):
+        self.policy.write_bytes(self.policy.read_bytes() + b"\n")
+        native, stdout, stderr = self.command()
+        self.assertEqual((native, stdout), (1, ""))
+        self.assertIn("ACCEPTED_BASELINE_BYTES_MISMATCH", stderr)
+        result = json.loads(self.result_file.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIsNone(result["baselineDiff"])
+        self.assertEqual(result["errors"], [{"reason": "ACCEPTED_BASELINE_BYTES_MISMATCH"}])
+
+    def test_cli_malformed_candidate_reports_only_a_controlled_error(self):
+        marker = "synthetic-sensitive-row-canary"
+        proposed = self.folder / "proposed.json"
+        proposed.write_text('{"row":"' + marker, encoding="utf-8")
+        native, stdout, stderr = self.command(baseline=proposed)
+        self.assertEqual((native, stdout), (1, ""))
+        self.assertIn("MALFORMED_JSON", stderr)
+        result = self.result_file.read_text(encoding="utf-8")
+        self.assertNotIn(marker, stdout + stderr + result)
+        self.assertEqual(json.loads(result)["errors"], [{"reason": "MALFORMED_JSON"}])
+
+    def test_cli_candidate_baseline_cannot_admit_itself(self):
+        self.both()
+        proposed = self.folder / "proposed.json"
+        proposed.write_text(json.dumps({**self.baseline, "id": self.baseline["id"] + "-changed"}), encoding="utf-8")
+        native, stdout, stderr = self.command(baseline=proposed)
+        self.assertEqual((native, stderr), (1, ""))
+        self.assertEqual(stdout.strip(), "C1 Failure Ratchet: FAIL (1 findings)")
+        result = json.loads(self.result_file.read_text(encoding="utf-8"))
+        self.assertEqual(result["errors"], [{"reason": "BASELINE_CHANGE_REQUIRES_INDEPENDENT_ADMISSION"}])
+        self.assertIn("-changed", result["baselineDiff"])
+
+    def test_cli_missing_profile_artifacts_remain_explicit_failures(self):
+        native, stdout, stderr = self.command()
+        self.assertEqual((native, stderr), (1, ""))
+        self.assertEqual(stdout.strip(), "C1 Failure Ratchet: FAIL (2 findings)")
+        result = json.loads(self.result_file.read_text(encoding="utf-8"))
+        self.assertEqual({item["reason"] for item in result["errors"]}, {"MISSING_REQUIRED_JOB_EVIDENCE"})
+        self.assertEqual({item["role"] for item in result["errors"]}, {"base", "candidate"})
+
+    def test_cli_existing_output_is_never_overwritten_even_by_valid_input(self):
+        self.both()
+        retained = b'{"retained":"original-evidence"}\n'
+        self.result_file.write_bytes(retained)
+        native, stdout, stderr = self.command()
+        self.assertEqual((native, stdout), (1, ""))
+        self.assertIn("INPUT_OR_TEST_EVIDENCE_REJECTED", stderr)
+        self.assertEqual(self.result_file.read_bytes(), retained)
+
+    def test_cli_mismatched_hosted_run_fails_before_accepting_the_local_artifact(self):
+        native, _, stderr = self.command("capture", environment={"GITHUB_ACTIONS": "true"})
+        self.assertEqual(native, 1)
+        self.assertIn("WORKFLOW_RUN_CONTEXT_MISMATCH", stderr)
+        self.assertFalse(self.result_file.exists())
+
+
+class ContextCommandBoundaryTests(unittest.TestCase):
+    """Early context-command refusals must not inspect Git or echo untrusted data."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="zeka-context-command-unit-")
+        self.addCleanup(directory.cleanup)
+        self.folder = Path(directory.name)
+
+    def command(self, arguments=(), environment=None):
+        stderr = io.StringIO()
+        with patch.object(sys, "argv", [str(TOOLING / "c1_ratchet_context.py"), *map(str, arguments)]), \
+                patch.dict(os.environ, environment or {}, clear=True), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as ended:
+                runpy.run_path(str(TOOLING / "c1_ratchet_context.py"), run_name="__main__")
+        self.assertEqual(ended.exception.code, 1)
+        return stderr.getvalue()
+
+    def test_unknown_context_command_is_refused_without_a_git_operation(self):
+        self.assertEqual(self.command(("unapproved-operation",)),
+                         "C1 ratchet context refused: INVALID_CONTEXT_COMMAND\n")
+
+    def test_missing_event_path_has_a_fixed_safe_diagnostic(self):
+        self.assertEqual(self.command(),
+                         "C1 ratchet context refused: CONTEXT_IO_OR_ENVIRONMENT_UNAVAILABLE\n")
+
+    def test_malformed_event_bytes_fail_before_resolving_any_repository(self):
+        event = self.folder / "event.json"
+        for contents in (b'\xff', b'{"synthetic-row":"do-not-export"', b'{"a":1,"a":2}', b'{"a":NaN}'):
+            with self.subTest(contents=contents):
+                event.write_bytes(contents)
+                result = self.command(environment={"GITHUB_EVENT_PATH": str(event)})
+                expected = "DUPLICATE_JSON_KEY" if contents == b'{"a":1,"a":2}' else (
+                    "MALFORMED_JSON" if contents == b'{"a":NaN}' else "INVALID_GITHUB_EVENT")
+                self.assertEqual(result, f"C1 ratchet context refused: {expected}\n")
+                self.assertNotIn("do-not-export", result)
+
+    def test_tooling_context_file_is_bounded_and_malformed_input_has_no_fallback(self):
+        context = self.folder / "context.json"
+        for contents in (b" " * 8193, b"[]", b'{"schema":2}', b'\xff'):
+            with self.subTest(size=len(contents)):
+                context.write_bytes(contents)
+                self.assertEqual(self.command(("verify-tooling", context, self.folder)),
+                                 "C1 ratchet context refused: INVALID_TOOLING_CONTEXT\n")
+
+    def test_tooling_path_must_be_a_directory_before_git_can_be_invoked(self):
+        path = self.folder / "not-a-checkout"
+        path.write_text("public synthetic fixture", encoding="utf-8")
+        context = {"schema": 2, "mode": "installed", "tooling": "1" * 40, "base": "1" * 40,
+                   "policySha256": "2" * 64, "baselineSha256": "3" * 64}
+        with self.assertRaisesRegex(ratchet_context.ContextError, "UNSAFE_TOOLING_PATH"):
+            ratchet_context.verify_tooling(context, path)
 
 
 if __name__ == "__main__":

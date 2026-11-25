@@ -6,6 +6,9 @@ import unittest
 from unittest import mock
 import tempfile
 import subprocess
+import contextlib
+import io
+import sys
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("owner_inventory", Path(__file__).with_name("OwnerSqlInventory.py"))
@@ -1082,6 +1085,98 @@ class CompleteInventoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(module.InventoryError, "Missing source scope"):
                 module.build_inventory(Path(directory))
+
+    def command(self, root, *arguments):
+        output = io.StringIO()
+        # Only owned, public fixture files use this scanner seam. The real builder,
+        # manifests, receipt reader and comparator still execute unchanged.
+        with mock.patch.object(module, "public_bytes", side_effect=lambda path: path.read_bytes()), \
+                mock.patch.object(module, "SCANNER", module.SCANNER), \
+                mock.patch.object(sys, "argv", ["OwnerSqlInventory.py", "--source-root", str(root), *map(str, arguments)]), \
+                contextlib.redirect_stdout(output):
+            status = module.main()
+            selected_scanner = module.SCANNER
+        return status, json.loads(output.getvalue()), selected_scanner
+
+    def receipts(self, inventory):
+        return [{"schema": module.SCHEMA, "producerId": producer["producerId"],
+                 "producerSha256": producer["producerSha256"],
+                 "querySha256": producer["producerSha256"] if producer["kind"] == "bootstrap-batch" else "c" * 64,
+                 "serverMajor": 17, "executionCompleted": True, "outcome": "success", "processId": 1,
+                 "observedAtUtc": "2026-11-03T00:00:00Z", "sourceBindings": producer.get("sourceBindings", {})}
+                for producer in inventory["producers"]]
+
+    def test_cli_inventory_persists_the_actual_source_bound_inventory(self):
+        root, _, _ = self.fixture()
+        target = root / "inventory.json"
+        expected = self.inventory(root)
+        status, summary, scanner = self.command(root, "--inventory-out", target, "--sonar", "synthetic-fixture-scanner")
+        self.assertEqual(status, 0)
+        self.assertEqual(summary, {"status": "INVENTORIED", "producerCount": len(expected["producers"])})
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), expected)
+        self.assertEqual(scanner, "synthetic-fixture-scanner")
+
+    def test_cli_receipt_success_is_distinct_from_inventory_only_success(self):
+        root, _, _ = self.fixture()
+        inventory = self.inventory(root)
+        receipts = self.write(root, "receipts.json", json.dumps(self.receipts(inventory)))
+        report = root / "report.json"
+        status, summary, _ = self.command(root, "--receipts", receipts, "--report", report)
+        self.assertEqual(status, 0)
+        self.assertEqual(summary, {"status": "PASS", "expectedProducerCount": len(inventory["producers"]),
+                                   "successfulProducerCount": len(inventory["producers"])})
+        result = json.loads(report.read_text(encoding="utf-8"))
+        self.assertEqual(result["missingSuccessfulProducers"], [])
+        self.assertEqual(result["invalidReceiptReasons"], [])
+        self.assertEqual(result["separateObligations"], inventory["separateObligations"])
+
+    def test_cli_empty_receipt_selection_cannot_claim_executed_producers(self):
+        root, _, _ = self.fixture()
+        report = root / "report.json"
+        status, summary, _ = self.command(root, "--receipts", "--report", report)
+        self.assertEqual(status, 2)
+        self.assertEqual(summary["status"], "FAIL")
+        self.assertEqual(summary["successfulProducerCount"], 0)
+        result = json.loads(report.read_text(encoding="utf-8"))
+        self.assertEqual(len(result["missingSuccessfulProducers"]), summary["expectedProducerCount"])
+
+    def test_cli_malformed_receipt_never_exports_its_contents_or_a_success_report(self):
+        root, _, _ = self.fixture()
+        marker = "private-row-canary-not-a-credential"
+        receipt = self.write(root, "receipts.json", '[{"syntheticRow":"' + marker + '",')
+        report = root / "report.json"
+        status, summary, _ = self.command(root, "--receipts", receipt, "--report", report)
+        self.assertEqual((status, summary), (2, {"status": "FAIL", "reason": "JSONDecodeError"}))
+        self.assertNotIn(marker, json.dumps(summary))
+        self.assertFalse(report.exists())
+
+    def test_cli_output_io_error_is_sanitized_without_success(self):
+        root, _, _ = self.fixture()
+        target = root / "not-created" / "inventory.json"
+        status, summary, _ = self.command(root, "--inventory-out", target)
+        self.assertEqual((status, summary), (2, {"status": "FAIL", "reason": "FileNotFoundError"}))
+        self.assertNotIn(str(root), json.dumps(summary))
+        self.assertFalse(target.exists())
+
+    def test_cli_report_io_failure_does_not_print_a_passing_receipt_summary(self):
+        root, _, _ = self.fixture()
+        receipts = self.write(root, "receipts.json", json.dumps(self.receipts(self.inventory(root))))
+        target = root / "not-created" / "report.json"
+        status, summary, _ = self.command(root, "--receipts", receipts, "--report", target)
+        self.assertEqual((status, summary), (2, {"status": "FAIL", "reason": "FileNotFoundError"}))
+        self.assertFalse(target.exists())
+
+    def test_cli_unmatched_receipt_input_preserves_the_controlled_refusal(self):
+        root, _, _ = self.fixture()
+        status, summary, _ = self.command(root, "--receipts", root / "absent-*.jsonl")
+        self.assertEqual((status, summary), (2, {"status": "FAIL", "reason": "No receipt files matched an explicit input"}))
+
+    def test_cli_source_drift_is_not_reported_as_an_empty_successful_inventory(self):
+        root, _, _ = self.fixture()
+        self.write(root, "Tools/Zeka.AuthOwnerProvision/Unexpected.cs", "class Unexpected {}")
+        status, summary, _ = self.command(root)
+        self.assertEqual(status, 2)
+        self.assertEqual(summary, {"status": "FAIL", "reason": "Referenced compiled source/project bytes or file set changed; explicit review required"})
 
 
 if __name__ == "__main__": unittest.main()

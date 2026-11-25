@@ -205,6 +205,111 @@ public sealed class AuthOwnerSqlReceiptTests
         Assert.Empty(evidence.ReadRows());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DefaultOffTypedWrappersPreserveTheDelegateResultAndOriginalFailures(bool update)
+    {
+        using var evidence = EvidenceScope.Temporary();
+        var previous = Environment.GetEnvironmentVariable("ZEKA_OWNER_SQL_EVIDENCE");
+        try
+        {
+            Environment.SetEnvironmentVariable("ZEKA_OWNER_SQL_EVIDENCE", null);
+            await using var database = new AuthDbContext(new DbContextOptionsBuilder<AuthDbContext>().Options);
+            var calls = 0;
+            Assert.Equal(17, await ObserveTyped(database, update, () => { calls++; return Task.FromResult(17); }));
+            Assert.Equal(1, calls);
+            var fault = new IOException("synthetic default-off delegate failure");
+            Assert.Same(fault, await Record.ExceptionAsync(() => ObserveTyped(database, update, () => Task.FromException<int>(fault))));
+            using var cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+            var error = await Record.ExceptionAsync(() => ObserveTyped(database, update, () => Task.FromCanceled<int>(cancelled.Token)));
+            Assert.Equal(cancelled.Token, Assert.IsAssignableFrom<OperationCanceledException>(error).CancellationToken);
+        }
+        finally { Environment.SetEnvironmentVariable("ZEKA_OWNER_SQL_EVIDENCE", previous); }
+        Assert.Empty(evidence.ReadRows());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TypedCapturesRequireDispatchAndResetAfterDelegateFailureAndCancellation(bool update)
+    {
+        using var evidence = EvidenceScope.Temporary();
+        await using var database = new AuthDbContext(new DbContextOptionsBuilder<AuthDbContext>().Options);
+        var unobserved = await Record.ExceptionAsync(() => ObserveTyped(database, update, () => Task.FromResult(17)));
+        Assert.Equal("OWNER_SQL_EF_EXECUTION_UNOBSERVED", Assert.IsType<InvalidOperationException>(unobserved).Message);
+        var fault = new IOException("synthetic typed delegate failure");
+        Assert.Same(fault, await Record.ExceptionAsync(() => ObserveTyped(database, update, () => Task.FromException<int>(fault))));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var cancellation = await Record.ExceptionAsync(() => ObserveTyped(database, update, () => Task.FromCanceled<int>(cancelled.Token)));
+        Assert.Equal(cancelled.Token, Assert.IsAssignableFrom<OperationCanceledException>(cancellation).CancellationToken);
+        unobserved = await Record.ExceptionAsync(() => ObserveTyped(database, update, () => Task.FromResult(19)));
+        Assert.Equal("OWNER_SQL_EF_EXECUTION_UNOBSERVED", Assert.IsType<InvalidOperationException>(unobserved).Message);
+        Assert.Empty(evidence.ReadRows());
+    }
+
+    [Theory]
+    [InlineData("suppressed")]
+    [InlineData("wrong-source")]
+    [InlineData("wrong-context")]
+    [InlineData("no-transaction")]
+    public async Task NonQueryAdmissionRefusesMalformedMetadataAndDoesNotPoisonTheNextCapture(string defect)
+    {
+        using var evidence = EvidenceScope.Temporary();
+        await using var connection = new NpgsqlConnection();
+        await using var database = UnitDatabase(connection);
+        await using var other = new AuthDbContext(new DbContextOptionsBuilder<AuthDbContext>().Options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE synthetic_unit_metadata SET value = 1";
+        var start = UnitStart(database, connection, command, defect == "wrong-context" ? other : database,
+            defect == "wrong-source" ? CommandSource.LinqQuery : CommandSource.ExecuteUpdate, DbCommandMethod.ExecuteNonQuery);
+        var interception = defect == "suppressed" ? InterceptionResult<int>.SuppressWithResult(1) : default;
+        var error = await Record.ExceptionAsync(() => ObserveTyped(database, true, async () =>
+        {
+            await Observer(database).NonQueryExecutingAsync(command, start, interception);
+            return 1;
+        }));
+        Assert.Equal("OWNER_SQL_EF_COMMAND_REJECTED", Assert.IsType<InvalidOperationException>(error).Message);
+        var next = await Record.ExceptionAsync(() => ObserveTyped(database, true, () => Task.FromResult(1)));
+        Assert.Equal("OWNER_SQL_EF_EXECUTION_UNOBSERVED", Assert.IsType<InvalidOperationException>(next).Message);
+        Assert.Equal(ConnectionState.Closed, connection.State);
+        Assert.Empty(evidence.ReadRows());
+    }
+
+    [Fact]
+    public async Task UnsupportedScalarCallbacksCannotMasqueradeAsAnAdmittedQuery()
+    {
+        using var evidence = EvidenceScope.Temporary();
+        await using var connection = new NpgsqlConnection();
+        await using var database = UnitDatabase(connection);
+        await using var command = connection.CreateCommand();
+        var start = UnitStart(database, connection, command, database, CommandSource.LinqQuery, DbCommandMethod.ExecuteScalar);
+        var error = await Record.ExceptionAsync(() => ObserveTyped(database, false, async () =>
+        {
+            // Scalar callbacks are inherited pass-through, not an admitted Auth producer shape.
+            var result = await Observer(database).ScalarExecutingAsync(command, start, InterceptionResult<object>.SuppressWithResult(17));
+            Assert.True(result.HasResult);
+            Assert.Equal(17, result.Result);
+            Assert.Equal(17, await Observer(database).ScalarExecutedAsync(command,
+                UnitEnd(database, connection, command, 17, DbCommandMethod.ExecuteScalar, CommandSource.LinqQuery), 17));
+            return 17;
+        }));
+        Assert.Equal("OWNER_SQL_EF_EXECUTION_UNOBSERVED", Assert.IsType<InvalidOperationException>(error).Message);
+        Assert.Equal(ConnectionState.Closed, connection.State);
+        Assert.Empty(evidence.ReadRows());
+    }
+
+    private static Task<int> ObserveTyped(AuthDbContext database, bool update, Func<Task<int>> operation)
+    {
+        var type = typeof(AuthDbContext).Assembly.GetType("AuthManager.Infrastructure.Persistence.AuthOwnerSqlReceipt")!;
+        var method = type.GetMethod(update ? "ObserveAuthUpdateAsync" : "ObserveAuthQueryAsync",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        if (!update) method = method.MakeGenericMethod(typeof(int));
+        return (Task<int>)method.Invoke(null, [database, operation, "", 0])!;
+    }
+
     // Closed, unconfigured connections are metadata only. These unit cases never
     // open a connection, invent an Npgsql transaction or claim provider execution.
     private static AuthDbContext UnitDatabase(NpgsqlConnection connection) =>
@@ -215,15 +320,16 @@ public sealed class AuthOwnerSqlReceiptTests
             LogLevel.Debug, nameof(RelationalEventId.CommandExecuting), _ => (_, _) => { });
 
     private static CommandEventData UnitStart(AuthDbContext database, DbConnection connection,
-        DbCommand command, AuthDbContext eventContext, CommandSource source) =>
+        DbCommand command, AuthDbContext eventContext, CommandSource source, DbCommandMethod method = DbCommandMethod.ExecuteReader) =>
         new(UnitDefinition(database), (_, _) => "synthetic receipt unit event", connection, command, eventContext,
-            DbCommandMethod.ExecuteReader, Guid.NewGuid(), Guid.NewGuid(), true, false, DateTimeOffset.UnixEpoch, source);
+            method, Guid.NewGuid(), Guid.NewGuid(), true, false, DateTimeOffset.UnixEpoch, source);
 
     private static CommandExecutedEventData UnitEnd(AuthDbContext database, DbConnection connection,
-        DbCommand command, object result) =>
+        DbCommand command, object result, DbCommandMethod method = DbCommandMethod.ExecuteReader,
+        CommandSource source = CommandSource.FromSqlQuery) =>
         new(UnitDefinition(database), (_, _) => "synthetic receipt unit end", connection, command, database,
-            DbCommandMethod.ExecuteReader, Guid.NewGuid(), Guid.NewGuid(), result, true, false,
-            DateTimeOffset.UnixEpoch, TimeSpan.Zero, CommandSource.FromSqlQuery);
+            method, Guid.NewGuid(), Guid.NewGuid(), result, true, false,
+            DateTimeOffset.UnixEpoch, TimeSpan.Zero, source);
 
     private static CommandErrorEventData UnitError(AuthDbContext database, DbConnection connection,
         DbCommand command, Exception error) =>

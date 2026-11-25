@@ -32,6 +32,7 @@ public sealed class OwnerProtocolTests
     [InlineData("actualOwnerSid", "S-1-5-21-111-222-333-1002")]
     [InlineData("expectedOwnerSid", "")]
     [InlineData("actualOwnerProfile", "C:\\Users\\another")]
+    [InlineData("expectedOwnerProfile", "C:\\Users\\another")]
     [InlineData("normalizedEmail", "OTHER@EXAMPLE.ORG")]
     [InlineData("sourceCommit", "wrong")]
     [InlineData("binarySha256", "wrong")]
@@ -58,6 +59,69 @@ public sealed class OwnerProtocolTests
     }
 
     [Theory]
+    [InlineData("Host=postgres;Port=5433;Database=zeka_m1_auth;Username=zeka_auth_runtime;Password=unit_fixture_not_live")]
+    [InlineData("Host=postgres;Database=zeka_m1_auth;Username=zeka_auth_runtime;Password=")]
+    [InlineData("Host=postgres;Database=zeka_m1_auth;Username=zeka_auth_runtime;Password=unit_fixture_not_live;Search Path=public")]
+    [InlineData("not-a-connection-string")]
+    public void Port_password_search_path_and_malformed_connection_refusals_have_the_same_safe_code(string connection)
+    {
+        var json = Valid(); json["authRuntimeConnectionString"] = connection;
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal("RUNTIME_CONNECTION_REJECTED", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData("idempotency-null")]
+    [InlineData("idempotency-empty")]
+    [InlineData("idempotency-whitespace")]
+    [InlineData("idempotency-long")]
+    [InlineData("display-null")]
+    [InlineData("display-empty")]
+    [InlineData("display-whitespace")]
+    [InlineData("display-long")]
+    [InlineData("password-null")]
+    [InlineData("password-empty")]
+    [InlineData("password-long")]
+    [InlineData("processing-timeout")]
+    [InlineData("retention")]
+    public void Provisioning_shape_and_fixed_policy_are_checked_before_database_admission(string invalid)
+    {
+        var json = Valid();
+        switch (invalid)
+        {
+            case "idempotency-null": json["idempotencyKey"] = null; break;
+            case "idempotency-empty": json["idempotencyKey"] = ""; break;
+            case "idempotency-whitespace": json["idempotencyKey"] = " "; break;
+            case "idempotency-long": json["idempotencyKey"] = new string('i', 201); break;
+            case "display-null": json["displayName"] = null; break;
+            case "display-empty": json["displayName"] = ""; break;
+            case "display-whitespace": json["displayName"] = " "; break;
+            case "display-long": json["displayName"] = new string('d', 201); break;
+            case "password-null": json["ownerPassword"] = null; break;
+            case "password-empty": json["ownerPassword"] = ""; break;
+            case "password-long": json["ownerPassword"] = new string('x', 513); break;
+            case "processing-timeout": json["processingTimeoutSeconds"] = 119; break;
+            case "retention": json["retentionSeconds"] = 86399; break;
+        }
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal("PROVISIONING_INPUT_REJECTED", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData("sourceCommit", "SOURCE_BINDING_REJECTED")]
+    [InlineData("databaseSourceCommit", "DATABASE_BINDING_REJECTED")]
+    [InlineData("expectedOwnerSid", "OWNER_IDENTITY_REJECTED")]
+    public void Explicit_null_authority_values_are_refused_without_native_errors(string field, string code)
+    {
+        var json = Valid(); json[field] = null;
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal(code, error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
     [InlineData("agreements")]
     [InlineData("requiredAgreements")]
     [InlineData("emailVerified")]
@@ -74,6 +138,17 @@ public sealed class OwnerProtocolTests
         Assert.Throws<OwnerToolException>(() => OwnerProtocol.Parse(
             Encoding.UTF8.GetBytes("{\"schema\":\"one\",\"schema\":\"two\"}")));
         Assert.Throws<OwnerToolException>(() => OwnerProtocol.Parse(new byte[OwnerProtocol.MaximumInputBytes + 1]));
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("[{\"schema\":\"one\",\"schema\":\"two\"}]")]
+    [InlineData("{\"schema\": [ {\"nested\": [true, null]} ]}")]
+    public void Non_object_or_nested_ambiguous_stdin_is_never_an_owner_authority(string text)
+    {
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Parse(Encoding.UTF8.GetBytes(text)));
+        Assert.Equal("INPUT_SCHEMA_REJECTED", error.Code);
     }
 
     [Theory]
@@ -158,6 +233,7 @@ public sealed class OwnerProtocolTests
         var input = Parse(Valid());
         Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(input, Binding() with { InformationalVersion = "unknown" }));
         Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(input, Binding() with { BinarySha256 = new string('d', 64) }));
+        Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(input, Binding() with { SourceCommit = new string('d', 40) }));
     }
 
     [Fact]
@@ -258,6 +334,102 @@ public sealed class OwnerProtocolTests
         using var input = new MemoryStream();
         using var output = new RejectedWriter();
         Assert.Equal(6, await Program.ExecuteAsync(["unit_fixture_private"], input, output));
+    }
+
+    [Theory]
+    [InlineData(65536, "INPUT_SCHEMA_REJECTED")]
+    [InlineData(65537, "INPUT_SIZE_REJECTED")]
+    public async Task Stdin_size_is_checked_before_parsing_and_never_enters_database_admission(int length, string code)
+    {
+        using var input = new MemoryStream(Enumerable.Repeat((byte)' ', length).ToArray());
+        using var output = new StringWriter();
+        Assert.Equal(2, await Program.ExecuteAsync([], input, output));
+        AssertAdmissionReceipt(output, code, 2);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    public async Task Invalid_stdin_produces_only_the_original_admission_refusal(string text)
+    {
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(text));
+        using var output = new StringWriter();
+        Assert.Equal(2, await Program.ExecuteAsync([], input, output));
+        AssertAdmissionReceipt(output, text.Length == 0 ? "INPUT_SIZE_REJECTED" : "INPUT_SCHEMA_REJECTED", 2);
+    }
+
+    [Fact]
+    public async Task Input_read_failure_has_a_safe_admission_receipt_and_no_native_detail()
+    {
+        using var input = new RejectedReadStream();
+        using var output = new StringWriter();
+        Assert.Equal(3, await Program.ExecuteAsync([], input, output));
+        Assert.Equal(1, input.Reads);
+        AssertAdmissionReceipt(output, "OWNER_PROVISIONING_FAILED", 3);
+        Assert.DoesNotContain("unit_fixture_private_read_detail", output.ToString());
+    }
+
+    [Fact]
+    public async Task Caller_cancellation_stops_stdin_before_parsing_or_database_admission()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(Valid().ToJsonString()));
+        using var output = new StringWriter();
+        Assert.Equal(124, await Program.ExecuteAsync([], input, output, cancellation.Token));
+        AssertAdmissionReceipt(output, "OWNER_PROVISIONING_DEADLINE", 124);
+    }
+
+    [Fact]
+    public async Task Failed_receipt_flush_returns_channel_exit_and_preserves_the_first_refusal()
+    {
+        using var input = new RejectedReadStream();
+        using var output = new RejectedFlushWriter();
+        Assert.Equal(6, await Program.ExecuteAsync(["unit_fixture_private"], input, output));
+        Assert.Equal(0, input.Reads);
+        Assert.Equal(1, output.Flushes);
+        AssertAdmissionReceipt(output, "ARGUMENTS_REJECTED", 2);
+        Assert.DoesNotContain("unit_fixture_private_flush_detail", output.ToString());
+    }
+
+    [Fact]
+    public async Task Normal_CLI_entry_point_refuses_arguments_before_reading_standard_input()
+    {
+        Assert.Equal(2, await Program.Main(["unit_fixture_private"]));
+    }
+
+    private static void AssertAdmissionReceipt(StringWriter output, string code, int exit)
+    {
+        using var receipt = JsonDocument.Parse(output.ToString());
+        Assert.Equal("BLOCKED", receipt.RootElement.GetProperty("status").GetString());
+        Assert.Equal("admission", receipt.RootElement.GetProperty("stage").GetString());
+        Assert.Equal(code, receipt.RootElement.GetProperty("code").GetString());
+        Assert.Equal(exit, receipt.RootElement.GetProperty("exitCode").GetInt32());
+        Assert.Equal(JsonValueKind.Null, receipt.RootElement.GetProperty("sourceCommit").ValueKind);
+        Assert.Equal(JsonValueKind.Null, receipt.RootElement.GetProperty("binarySha256").ValueKind);
+        Assert.False(receipt.RootElement.TryGetProperty("postgresDiagnostic", out _));
+    }
+
+    private sealed class RejectedReadStream : MemoryStream
+    {
+        internal int Reads;
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Reads++;
+            return ValueTask.FromException<int>(new IOException("unit_fixture_private_read_detail"));
+        }
+    }
+
+    private sealed class RejectedFlushWriter : StringWriter
+    {
+        internal int Flushes;
+        public override Task FlushAsync()
+        {
+            Flushes++;
+            return Task.FromException(new IOException("unit_fixture_private_flush_detail"));
+        }
     }
 
     private sealed class RejectedWriter : StringWriter
