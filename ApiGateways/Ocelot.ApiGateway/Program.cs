@@ -65,6 +65,8 @@ namespace Zeka.Gateway
             ("POST", "/api/v1/browser-session/restore"),
             ("POST", "/api/v1/browser-session/logout"),
             ("POST", "/api/v1/browser-session/onboarding/registrations"),
+            ("POST", "/api/v1/browser-session/onboarding/registrations/resend"),
+            ("POST", "/api/v1/browser-session/onboarding/registrations/email-verification/exchange"),
             ("GET", "/api/v1/browser-organisations/eligible"),
             ("GET", "/api/v1/tenant-access/{organisationId}")
         ];

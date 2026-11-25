@@ -262,23 +262,79 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
     {
         var organisation = Guid.NewGuid(); var actor = Guid.NewGuid();
         var own = await Seed(organisation, actor);
-        await using var provider = Provider(organisation, actor, syntheticActionGate: true);
+        var observed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var provider = Provider(organisation, actor, syntheticActionGate: true,
+            onEligibility: () => { observed.TrySetResult(); return Task.CompletedTask; });
         var locked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var holder = HoldRowLock(organisation, "Clients", "Id", own.ClientId, locked, release);
-        await locked.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
-            "Synthetic action", "stale-lock", new FollowUpActionInput("Follow up",
-                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
-        var writing = Send(provider, command);
-        await Task.Delay(TimeSpan.FromMilliseconds(2250));
-        release.SetResult();
-        await holder;
-        var denied = await Assert.ThrowsAsync<TenantAccessException>(() => writing);
-        Assert.Equal(AccessFailure.Unavailable, denied.Failure);
-        Assert.Equal(0, await Count<Interaction>(organisation));
-        Assert.Equal(0, await Count<FollowUpAction>(organisation));
-        Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+        var holderProcessId = 0;
+        var holderLockedAt = 0L;
+        var holder = HoldRowLock(organisation, "Clients", "Id", own.ClientId, locked, release,
+            processId => { holderProcessId = processId; holderLockedAt = System.Diagnostics.Stopwatch.GetTimestamp(); });
+        using var stopProbe = new CancellationTokenSource();
+        Task<RecordInteractionResult>? writing = null;
+        Task? observedWait = null;
+        var writingObserved = false;
+        Exception? primaryFailure = null;
+        try
+        {
+            await locked.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var command = new RecordInteractionCommand(own.ClientId, own.CaseId, DateTime.UtcNow,
+                "Synthetic action", "stale-lock", new FollowUpActionInput("Follow up",
+                    DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), actor));
+            writing = Send(provider, command);
+            // The probe must finish inside the original holder's five-second window.
+            var remaining = TimeSpan.FromSeconds(5) - System.Diagnostics.Stopwatch.GetElapsedTime(holderLockedAt);
+            if (remaining <= TimeSpan.Zero) throw new TimeoutException("Issue76 lock-holder setup budget expired.");
+            stopProbe.CancelAfter(remaining);
+            observedWait = ObserveParentLockWait(observed.Task, holderProcessId, stopProbe.Token);
+            var reached = await Task.WhenAny(observedWait, writing, holder);
+            await reached; // Preserve an early writer/holder failure rather than replacing it with a probe timeout.
+            Assert.Same(observedWait, reached);
+            // Age the captured authority only after PostgreSQL proves the writer is blocked by our holder.
+            var ageing = Task.Delay(TimeSpan.FromMilliseconds(2250));
+            var completed = await Task.WhenAny(ageing, writing, holder);
+            await completed;
+            Assert.Same(ageing, completed);
+            Assert.False(writing.IsCompleted);
+            Assert.False(holder.IsCompleted);
+            release.TrySetResult();
+            await holder;
+            var denied = await Assert.ThrowsAsync<TenantAccessException>(() => writing);
+            writingObserved = true;
+            Assert.Equal(AccessFailure.Unavailable, denied.Failure);
+            Assert.Equal(0, await Count<Interaction>(organisation));
+            Assert.Equal(0, await Count<FollowUpAction>(organisation));
+            Assert.Equal(0, await Count<IdempotencyReceipt>(organisation));
+        }
+        catch (Exception exception)
+        {
+            primaryFailure = exception;
+            throw;
+        }
+        finally
+        {
+            stopProbe.Cancel();
+            release.TrySetResult();
+            var cleanupFailures = new List<Exception>();
+            async Task ObserveCleanup(Task task, bool expectedCancellation = false)
+            {
+                try { await task; }
+                catch (OperationCanceledException) when (expectedCancellation && stopProbe.IsCancellationRequested) { }
+                catch (Exception exception)
+                {
+                    if (!ReferenceEquals(exception, primaryFailure)) cleanupFailures.Add(exception);
+                }
+            }
+            await ObserveCleanup(holder);
+            if (observedWait is not null) await ObserveCleanup(observedWait, expectedCancellation: true);
+            if (writing is not null && !writingObserved) await ObserveCleanup(writing);
+            if (cleanupFailures.Count != 0)
+            {
+                if (primaryFailure is not null) cleanupFailures.Insert(0, primaryFailure);
+                throw new AggregateException("Issue76 writer/lock-holder cleanup failed.", cleanupFailures);
+            }
+        }
     }
 
     [Fact]
@@ -1012,8 +1068,28 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
         await context.ExecuteNonQueryAsync();
     }
 
+    private async Task ObserveParentLockWait(Task observed, int holderProcessId, CancellationToken cancellationToken)
+    {
+        await observed.WaitAsync(cancellationToken); // Synthetic authority has already captured ObservedAtUtc.
+        await using var connection = new NpgsqlConnection(database.AdministratorConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_stat_activity AS waiter
+                WHERE waiter.datname = current_database()
+                  AND waiter.usename = 'zeka_client_runtime'
+                  AND waiter.wait_event_type = 'Lock'
+                  AND @holder_process_id = ANY (pg_catalog.pg_blocking_pids(waiter.pid))
+            )
+            """, connection);
+        command.Parameters.AddWithValue("holder_process_id", holderProcessId);
+        command.CommandTimeout = 3;
+        while (!(bool)(await command.ExecuteScalarAsync(cancellationToken))!)
+            await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
+    }
+
     private async Task HoldRowLock(Guid organisation, string table, string idColumn, int id,
-        TaskCompletionSource locked, TaskCompletionSource release)
+        TaskCompletionSource locked, TaskCompletionSource release, Action<int>? onLocked = null)
     {
         await using var connection = new NpgsqlConnection(database.RuntimeConnectionString);
         await connection.OpenAsync();
@@ -1027,6 +1103,7 @@ public sealed class Issue76ActionWriteTests(PostgreSqlClientRuntimeDatabase data
             command.Parameters.AddWithValue("id", id);
             Assert.Equal(1, await command.ExecuteScalarAsync());
         }
+        onLocked?.Invoke(connection.ProcessID);
         locked.SetResult();
         await release.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await transaction.CommitAsync();

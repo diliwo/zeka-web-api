@@ -114,6 +114,63 @@ public sealed class RegistrationPostgreSqlTests(RegistrationPostgreSqlFixture fi
         Assert.Equal(0, await db.OrganisationMemberships.CountAsync());
     }
 
+    [Fact]
+    public async Task Another_users_challenge_cannot_be_substituted_and_valid_exchange_confirms_only_its_owner()
+    {
+        await using var test = await fixture.PrepareAsync();
+        var firstInput = Input("first-" + Guid.NewGuid().ToString("N") + "@example.invalid");
+        var secondInput = Input("second-" + Guid.NewGuid().ToString("N") + "@example.invalid");
+        Assert.Equal(RegistrationOutcome.Accepted,
+            await test.Run(service => service.RegisterAsync(firstInput, CancellationToken.None)));
+        Assert.Equal(RegistrationOutcome.Accepted,
+            await test.Run(service => service.RegisterAsync(secondInput, CancellationToken.None)));
+
+        await using var db = test.Read();
+        var firstUser = await db.Users.AsNoTracking().SingleAsync(user => user.Email == firstInput.Email);
+        var secondUser = await db.Users.AsNoTracking().SingleAsync(user => user.Email == secondInput.Email);
+        var secondChallenge = await db.EmailVerificationChallenges.AsNoTracking()
+            .SingleAsync(challenge => challenge.UserId == secondUser.Id);
+        var firstToken = await test.CurrentToken(firstUser.Id);
+        var secondToken = await test.CurrentToken(secondUser.Id);
+        var substituted = firstToken.Split('.');
+        Assert.Equal(5, substituted.Length);
+        substituted[2] = secondChallenge.Id.ToString("N");
+
+        var invalid = await test.Run(service => service.ExchangeAsync(string.Join('.', substituted), CancellationToken.None));
+        Assert.Equal(RegistrationOutcome.Invalid, invalid.Outcome);
+        Assert.Null(invalid.Credential);
+        Assert.All(await db.Users.AsNoTracking().ToListAsync(), user =>
+        {
+            Assert.False(user.EmailConfirmed);
+            Assert.Equal(UserStatus.PendingVerification, user.Status);
+        });
+        Assert.Equal(2, await db.EmailVerificationChallenges.CountAsync(challenge => challenge.Status == VerificationChallengeState.Pending));
+        Assert.Equal(0, await db.OnboardingGrants.CountAsync());
+
+        // Exchange is anonymous: a genuine token confirms its own Identity user, not a selected browser user.
+        var confirmed = await test.Run(service => service.ExchangeAsync(secondToken, CancellationToken.None));
+        Assert.Equal(RegistrationOutcome.Accepted, confirmed.Outcome);
+        Assert.NotNull(confirmed.Credential);
+        var untouched = await db.Users.AsNoTracking().SingleAsync(user => user.Id == firstUser.Id);
+        var verified = await db.Users.AsNoTracking().SingleAsync(user => user.Id == secondUser.Id);
+        Assert.False(untouched.EmailConfirmed);
+        Assert.Equal(UserStatus.PendingVerification, untouched.Status);
+        Assert.True(verified.EmailConfirmed);
+        Assert.Equal(UserStatus.Active, verified.Status);
+        var grant = await db.OnboardingGrants.AsNoTracking().SingleAsync();
+        Assert.Equal(secondUser.Id, grant.UserId);
+        Assert.Equal(secondChallenge.Id, grant.ChallengeId);
+        Assert.Equal(VerificationTokenService.GrantHash(confirmed.Credential!), grant.CredentialHash);
+        Assert.Equal(VerificationChallengeState.Pending, (await db.EmailVerificationChallenges.AsNoTracking()
+            .SingleAsync(challenge => challenge.UserId == firstUser.Id)).Status);
+        Assert.Equal(VerificationChallengeState.Consumed, (await db.EmailVerificationChallenges.AsNoTracking()
+            .SingleAsync(challenge => challenge.UserId == secondUser.Id)).Status);
+        Assert.Equal(3, await db.OnboardingOperationReceipts.CountAsync());
+        Assert.Equal(0, await db.OrganisationMemberships.CountAsync());
+        Assert.Equal(0, await db.Organisations.CountAsync());
+        Assert.Equal(0, await db.BrowserSessionFamilies.CountAsync());
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -627,6 +684,8 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        try
+        {
         verificationKey = RegistrationVerificationKeyFixture.Create(
             Environment.GetEnvironmentVariable("ZEKA_ZEK27_VERIFICATION_KEY_FILE"));
         keyPath = verificationKey.Path;
@@ -655,6 +714,12 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
         await connection.OpenAsync(startup.Token);
         await using var version = new NpgsqlCommand("SHOW server_version_num", connection);
         Assert.StartsWith("17", (string)(await version.ExecuteScalarAsync(startup.Token))!);
+        }
+        catch
+        {
+            verificationKey?.Dispose();
+            throw;
+        }
     }
 
     public async Task DisposeAsync()
@@ -795,11 +860,13 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
             return await operation((RegistrationService)scope.ServiceProvider.GetRequiredService<IRegistrationService>());
         }
 
-        public async Task<string> CurrentToken()
+        public async Task<string> CurrentToken(Guid? userId = null)
         {
             await using var db = Read();
-            var row = await db.EmailVerificationChallenges.AsNoTracking()
-                .SingleAsync(item => item.Status == VerificationChallengeState.Pending);
+            var challenges = db.EmailVerificationChallenges.AsNoTracking()
+                .Where(item => item.Status == VerificationChallengeState.Pending);
+            if (userId is { } selectedUser) challenges = challenges.Where(item => item.UserId == selectedUser);
+            var row = await challenges.SingleAsync();
             return services.GetRequiredService<VerificationTokenService>().Create(row)!;
         }
 
