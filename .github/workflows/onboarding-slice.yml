@@ -214,3 +214,197 @@ jobs:
           path: ${{ runner.temp }}/zek49-onboarding/results/artifact/*
           if-no-files-found: warn
           retention-days: 7
+  worker-initialization-diagnostic:
+    name: Worker PostgreSQL initialization diagnostic
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out the actual pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Install the existing pinned SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.129
+          cache: false
+
+      - name: Restore existing locked dependencies and build
+        shell: bash
+        env:
+          PACKAGE_READ_TOKEN: ${{ github.token }}
+          PACKAGE_USERNAME: ${{ github.repository_owner }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          NUGET_PACKAGES: ${{ runner.temp }}/worker-init/packages
+          NUGET_HTTP_CACHE_PATH: ${{ runner.temp }}/worker-init/http
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(dotnet --version)" = 8.0.129
+          test ! -e "$NUGET_PACKAGES" && test ! -e "$NUGET_HTTP_CACHE_PATH"
+          mkdir -p "$NUGET_PACKAGES" "$NUGET_HTTP_CACHE_PATH"
+          NuGetPackageSourceCredentials_github="Username=$PACKAGE_USERNAME;Password=$PACKAGE_READ_TOKEN;ValidAuthenticationTypes=Basic" \
+            dotnet restore Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
+              --locked-mode --no-cache --configfile scripts/ci/nuget.strict.config \
+              -p:Configuration=Release -p:RestorePackagesWithLockFile=true \
+              -p:RestoreFallbackFolders= -p:RestoreAdditionalProjectSources= \
+              -p:RestoreAdditionalProjectFallbackFolders=
+          git diff --exit-code -- '*.lock.json'
+          unset PACKAGE_READ_TOKEN
+          test -z "${NuGetPackageSourceCredentials_github+x}"
+          dotnet build Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
+            --configuration Release --no-restore --no-incremental
+
+      - name: Execute exactly the four unchanged security variants once
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          NUGET_PACKAGES: ${{ runner.temp }}/worker-init/packages
+          NUGET_HTTP_CACHE_PATH: ${{ runner.temp }}/worker-init/http
+          RESULTS: ${{ runner.temp }}/worker-init/results
+        run: |
+          set -euo pipefail
+          umask 077
+          test -z "${PACKAGE_READ_TOKEN+x}${NuGetPackageSourceCredentials_github+x}"
+          docker info --format '{{.ServerVersion}}' > /dev/null
+          mkdir -p "$RESULTS/raw" "$RESULTS/artifact"
+          export ZEKA_WORKER_INIT_DIAGNOSTIC_FILE="$RESULTS/raw/initialization.json"
+          test ! -e "$ZEKA_WORKER_INIT_DIAGNOSTIC_FILE"
+          set +e
+          dotnet test Services/AuthManager/Tests/Infrastructure.IntegrationTests/Infrastructure.IntegrationTests.csproj \
+            --configuration Release --no-build --no-restore \
+            --filter 'FullyQualifiedName=Infrastructure.IntegrationTests.WorkerRotationPostgreSqlTests.OwnerAuthorityChangedAfterPrecheckCannotRotateWorkers' \
+            --logger 'trx;LogFileName=worker-init.trx' --results-directory "$RESULTS/raw" \
+            > "$RESULTS/raw/native-output.private.log" 2>&1
+          native_status=$?
+          set -e
+          export WORKER_NATIVE_EXIT="$native_status"
+          unset ZEKA_WORKER_INIT_DIAGNOSTIC_FILE
+          set +e
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          root = pathlib.Path(os.environ['RESULTS'])
+          native = int(os.environ['WORKER_NATIVE_EXIT'])
+          method = 'Infrastructure.IntegrationTests.WorkerRotationPostgreSqlTests.OwnerAuthorityChangedAfterPrecheckCannotRotateWorkers'
+          variants = (('prepare', 'revoked-session'), ('revoke-others', 'revoked-session'),
+                      ('prepare', 'changed-stamp'), ('prepare', 'suspended-owner'))
+          expected = {f'{method}(phase: "{phase}", change: "{change}")' for phase, change in variants}
+          receipt = {'schema': 1, 'sourceSha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                     'expectedHead': os.environ['EXPECTED_HEAD'], 'runId': os.environ['GITHUB_RUN_ID'],
+                     'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'], 'nativeExit': native,
+                     'status': 'NOT_VERIFIED', 'reason': 'MISSING_OR_INVALID_SAFE_EVIDENCE',
+                     'scope': 'INDEPENDENT_FOCUSED_RUN_NOT_ORIGINAL_C1_FAILURE'}
+          try:
+              assert re.fullmatch(r'[0-9a-f]{40}', receipt['sourceSha'])
+              assert receipt['sourceSha'] == receipt['expectedHead']
+              assert receipt['runId'].isdigit() and receipt['runAttempt'].isdigit()
+              assert 0 <= native <= 255
+              diagnostic_path = root / 'raw/initialization.json'
+              assert diagnostic_path.stat().st_size <= 4096
+              diagnostic = json.loads(diagnostic_path.read_text())
+              assert set(diagnostic) == {'schema', 'status', 'stage', 'elapsedMilliseconds',
+                                        'deadlineCancellationRequested', 'observedServerMajor', 'exceptionCategories', 'sqlState', 'dockerHttpStatus'}
+              assert type(diagnostic['schema']) is int and diagnostic['schema'] == 1
+              assert diagnostic['status'] in {'ready', 'failed'}
+              assert diagnostic['stage'] in {'container_start', 'connection_create', 'connection_open',
+                                            'server_version', 'connection_dispose', 'completed'}
+              assert type(diagnostic['elapsedMilliseconds']) is int and diagnostic['elapsedMilliseconds'] >= 0
+              assert type(diagnostic['deadlineCancellationRequested']) is bool
+              major = diagnostic['observedServerMajor']
+              assert major is None or (type(major) is int and 0 <= major <= 2147483647)
+              categories = diagnostic['exceptionCategories']
+              assert type(categories) is list and len(categories) <= 8
+              assert all(category in {'DockerApiException', 'PostgresException', 'NpgsqlException',
+                                     'TaskCanceledException', 'OperationCanceledException', 'TimeoutException',
+                                     'SocketException', 'HttpRequestException', 'AssertionException',
+                                     'InvalidOperationException', 'IOException', 'OtherException'} for category in categories)
+              assert diagnostic['sqlState'] is None or (type(diagnostic['sqlState']) is str
+                                                       and re.fullmatch(r'[A-Z0-9]{5}', diagnostic['sqlState']))
+              assert diagnostic['dockerHttpStatus'] is None or (type(diagnostic['dockerHttpStatus']) is int
+                                                               and 100 <= diagnostic['dockerHttpStatus'] <= 599)
+              assert (diagnostic['status'] == 'ready' and diagnostic['stage'] == 'completed' and major == 17 and not categories
+                      and diagnostic['sqlState'] is None and diagnostic['dockerHttpStatus'] is None) or (
+                          diagnostic['status'] == 'failed' and diagnostic['stage'] != 'completed' and categories)
+              ns = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
+              trx = ET.parse(root / 'raw/worker-init.trx')
+              rows = trx.findall('t:Results/t:UnitTestResult', ns)
+              counters = trx.find('t:ResultSummary/t:Counters', ns)
+              assert counters is not None
+              zero_counters = {'error', 'timeout', 'aborted', 'inconclusive', 'passedButRunAborted',
+                               'notRunnable', 'notExecuted', 'disconnected', 'warning', 'completed', 'inProgress', 'pending'}
+              assert set(counters.attrib) == zero_counters | {'total', 'executed', 'passed', 'failed'}
+              counts = {key: int(value) for key, value in counters.attrib.items()}
+              assert all(counts[key] == 0 for key in zero_counters)
+              assert counts['total'] == counts['executed'] == len(rows) == 4
+              assert counts['passed'] >= 0 and counts['failed'] >= 0 and counts['passed'] + counts['failed'] == 4
+              assert {row.get('testName') for row in rows} == expected
+              row_ids = [row.get('testId') for row in rows]
+              row_executions = [row.get('executionId') for row in rows]
+              assert all(row_ids) and len(set(row_ids)) == 4
+              assert all(row_executions) and len(set(row_executions)) == 4
+              row_links = set(zip(row_ids, row_executions))
+              raw_definitions = trx.findall('t:TestDefinitions/t:UnitTest', ns)
+              assert len(raw_definitions) == 4
+              definition_ids = [unit.get('id') for unit in raw_definitions]
+              definition_executions = [unit.find('t:Execution', ns) for unit in raw_definitions]
+              assert all(definition_ids) and len(set(definition_ids)) == 4
+              assert all(execution is not None for execution in definition_executions)
+              execution_ids = [execution.get('id') for execution in definition_executions]
+              assert all(execution_ids) and len(set(execution_ids)) == 4
+              assert set(zip(definition_ids, execution_ids)) == row_links
+              definitions = dict(zip(definition_ids, raw_definitions))
+              entries = trx.findall('t:TestEntries/t:TestEntry', ns)
+              assert len(entries) == 4
+              entry_ids = [entry.get('testId') for entry in entries]
+              entry_executions = [entry.get('executionId') for entry in entries]
+              assert all(entry_ids) and len(set(entry_ids)) == 4
+              assert all(entry_executions) and len(set(entry_executions)) == 4
+              assert set(zip(entry_ids, entry_executions)) == row_links
+              for row in rows:
+                  assert row.get('testId') and row.get('executionId')
+                  definition = definitions[row.get('testId')]
+                  execution = definition.find('t:Execution', ns)
+                  test_method = definition.find('t:TestMethod', ns)
+                  assert execution is not None and execution.get('id') == row.get('executionId')
+                  assert test_method is not None and test_method.get('className', '').split(',')[0] == 'Infrastructure.IntegrationTests.WorkerRotationPostgreSqlTests'
+                  assert test_method.get('name') == 'OwnerAuthorityChangedAfterPrecheckCannotRotateWorkers'
+                  assert row.get('outcome') in {'Passed', 'Failed'}
+              assert sum(row.get('outcome') == 'Passed' for row in rows) == counts['passed']
+              assert sum(row.get('outcome') == 'Failed' for row in rows) == counts['failed']
+              assert (native == 0) == (counts['failed'] == 0)
+              assert diagnostic['status'] != 'failed' or counts['failed'] == 4
+              (root / 'artifact/initialization.json').write_text(json.dumps(diagnostic, indent=2) + '\n')
+              receipt.update(status='PASS' if native == 0 else 'FAIL', reason='COMPLETE_FOUR_VARIANTS', counts=counts)
+          except Exception:
+              # Never print malformed producer JSON, TRX/native exceptions or parser exception values.
+              pass
+          (root / 'artifact/receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          print('WORKER_INITIALIZATION_EVIDENCE_' + receipt['status'])
+          raise SystemExit(0 if receipt['status'] == 'PASS' else 1)
+          PY
+          evidence_status=$?
+          set -e
+          if (( native_status != 0 )); then exit "$native_status"; fi
+          exit "$evidence_status"
+
+      - name: Retain only schema-validated fixture initialization and outcome evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: worker-initialization-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/worker-init/results/artifact/*.json
+          if-no-files-found: warn
+          retention-days: 7
