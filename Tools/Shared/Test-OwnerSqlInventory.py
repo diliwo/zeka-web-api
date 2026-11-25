@@ -690,4 +690,256 @@ class ReferencedSourceBoundaryTests(unittest.TestCase):
                 (root/module.SOURCE_BOUNDARY).write_text(body, encoding="utf-8")
                 with self.assertRaises(module.InventoryError): self.validate(root, self.bindings(root, files))
 
+class ScanIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.cache = mock.patch.object(module, "_READ_CACHE", {})
+        self.cache.start()
+        self.addCleanup(self.cache.stop)
+
+    def fixture(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "synthetic.cs"
+        path.write_bytes(b"synthetic public fixture")
+        return path
+
+    def test_successful_scan_precedes_read_and_unchanged_identity_reuses_only_scanned_bytes(self):
+        path = self.fixture()
+        original_read = Path.read_bytes
+        reads = []
+        with mock.patch.object(module, "SCANNER", "synthetic-scanner"), mock.patch.object(
+                module.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as scan:
+            def observe_read(candidate):
+                self.assertEqual(scan.call_count, 1)
+                reads.append(candidate)
+                return original_read(candidate)
+            with mock.patch.object(Path, "read_bytes", observe_read):
+                self.assertEqual(module.public_bytes(path), b"synthetic public fixture")
+                self.assertEqual(module.public_bytes(path), b"synthetic public fixture")
+        self.assertEqual(scan.call_count, 1)
+        self.assertEqual(reads, [path.resolve()])
+
+    def test_cached_file_mutation_is_refused_before_another_scan_or_content_read(self):
+        path = self.fixture()
+        with mock.patch.object(module, "SCANNER", "synthetic-scanner"), mock.patch.object(
+                module.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as scan:
+            module.public_bytes(path)
+            path.write_bytes(b"changed after admission and now longer")
+            with mock.patch.object(Path, "read_bytes") as read:
+                with self.assertRaisesRegex(module.InventoryError, "changed after its successful scan"):
+                    module.public_bytes(path)
+                read.assert_not_called()
+        self.assertEqual(scan.call_count, 1)
+
+    def test_input_changed_by_scanner_is_never_read_or_cached(self):
+        path = self.fixture()
+        def scan_changes_input(*args, **kwargs):
+            path.write_bytes(b"changed during scan and now longer")
+            return subprocess.CompletedProcess([], 0)
+        with mock.patch.object(module, "SCANNER", "synthetic-scanner"), mock.patch.object(
+                module.subprocess, "run", side_effect=scan_changes_input), mock.patch.object(Path, "read_bytes") as read:
+            with self.assertRaisesRegex(module.InventoryError, "changed during its secret scan"):
+                module.public_bytes(path)
+            read.assert_not_called()
+        self.assertEqual(module._READ_CACHE, {})
+
+    def test_input_changed_during_the_read_is_not_cached_as_admitted(self):
+        path = self.fixture()
+        original_read = Path.read_bytes
+        def changing_read(candidate):
+            value = original_read(candidate)
+            candidate.write_bytes(value + b" changed")
+            return value
+        with mock.patch.object(module, "SCANNER", "synthetic-scanner"), mock.patch.object(
+                module.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), mock.patch.object(
+                Path, "read_bytes", changing_read):
+            with self.assertRaisesRegex(module.InventoryError, "changed during its post-scan read"):
+                module.public_bytes(path)
+        self.assertEqual(module._READ_CACHE, {})
+
+    def test_scanner_start_failure_and_timeout_never_read_the_input(self):
+        for failure in (OSError("synthetic scanner start failure"), subprocess.TimeoutExpired(["synthetic-scanner"], 120)):
+            with self.subTest(category=type(failure).__name__):
+                path = self.fixture()
+                with mock.patch.object(module, "SCANNER", "synthetic-scanner"), mock.patch.object(
+                        module.subprocess, "run", side_effect=failure), mock.patch.object(Path, "read_bytes") as read:
+                    with self.assertRaisesRegex(module.InventoryError, "scan could not complete"):
+                        module.public_bytes(path)
+                    read.assert_not_called()
+        self.assertEqual(module._READ_CACHE, {})
+
+    def test_absent_file_directory_and_symlink_metadata_are_refused_before_scanning(self):
+        path = self.fixture()
+        for candidate in (path.parent / "missing.cs", path.parent):
+            with self.subTest(kind=candidate.name), mock.patch.object(module.subprocess, "run") as scan:
+                with self.assertRaisesRegex(module.InventoryError, "existing regular non-symlink"):
+                    module.public_bytes(candidate)
+                scan.assert_not_called()
+        # Synthetic metadata refusal; this does not claim creation of a Windows symlink.
+        with mock.patch.object(Path, "is_symlink", return_value=True), mock.patch.object(module.subprocess, "run") as scan:
+            with self.assertRaisesRegex(module.InventoryError, "existing regular non-symlink"):
+                module.public_bytes(path)
+            scan.assert_not_called()
+
+
+class ReceiptInputTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+
+    def write(self, name, value):
+        path = self.root / name
+        path.write_text(value, encoding="utf-8-sig")
+        return path
+
+    def read(self, paths):
+        # Only synthetic receipt fixtures bypass their scanner subprocess here.
+        # Real public_bytes scan/identity behavior has its own tests above.
+        with mock.patch.object(module, "public_bytes", side_effect=lambda path: path.read_bytes()):
+            return module.read_records(paths)
+
+    def test_directory_expansion_is_sorted_and_duplicate_inputs_are_not_replayed(self):
+        self.write("owner-sql-b.jsonl", '\n{"producerId":"second"}\n')
+        first = self.write("owner-sql-a.jsonl", '{"producerId":"first"}\n\n')
+        self.write("unrelated.jsonl", '{"mustNotAppear":true}')
+        self.assertEqual(self.read([self.root, first, first]), [{"producerId": "first"}, {"producerId": "second"}])
+
+    def test_explicit_file_glob_and_json_array_use_the_same_validated_input_reader(self):
+        first = self.write("one.json", '[{"producerId":"first"},{"producerId":"second"}]')
+        self.assertEqual(self.read([first]), [{"producerId": "first"}, {"producerId": "second"}])
+        self.write("owner-sql-one.jsonl", '{"producerId":"third"}')
+        self.assertEqual(self.read([self.root / "owner-sql-*.jsonl"]), [{"producerId": "third"}])
+
+    def test_empty_directory_and_unmatched_glob_do_not_become_empty_success(self):
+        for path in (self.root, self.root / "missing-*.jsonl"):
+            with self.subTest(path=path.name), self.assertRaisesRegex(module.InventoryError, "No receipt files matched"):
+                self.read([path])
+
+    def test_malformed_json_lines_and_arrays_are_not_silently_dropped(self):
+        for text in ('[{"missing":', '{"missing":\n', '{"ok":1}\nnot-json\n'):
+            with self.subTest(text=text):
+                path = self.write("broken.jsonl", text)
+                with self.assertRaises(json.JSONDecodeError):
+                    self.read([path])
+
+
+class CompleteInventoryTests(unittest.TestCase):
+    """Exercise the real builder with synthetic, explicitly sealed source data.
+
+    No production implementation is copied or replaced. The fixture manifests are
+    unit-test inputs, never review authority for the real Zeka source graph.
+    """
+
+    def write(self, root, relative, text):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def fixture(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        closed = InventoryTests.closed_fixture(self, root)
+        for tool in module.TOOLS:
+            self.write(root, tool + "/" + Path(tool).name + ".csproj", '<Project Sdk="Microsoft.NET.Sdk" />')
+            self.write(root, tool + "/Program.cs", "class SyntheticFixture {}")
+        for project in module.SERVICE_PROJECTS:
+            sdk = "Microsoft.NET.Sdk.Web" if project == module.AUTH_WEB_PROJECT else "Microsoft.NET.Sdk"
+            self.write(root, project, '<Project Sdk="' + sdk + '" />')
+        for extra in module.EXTRA:
+            self.write(root, extra, "class SyntheticFixture {}")
+        self.write(root, "Tools/Shared/OwnerSqlExecution.cs", "class SyntheticAdapterFixture {}")
+        self.write(root, "Tools/Zeka.AuthOwnerProvision/Program.cs", "await OwnerSqlExecution.ExecuteScalarAsync(command, ct);")
+        self.write(root, module.QUERY_FILE, "\n".join("'" + value + "'" for value in module.QUERY_IDS + module.CONTROL_IDS))
+        runtime = "Services/AuthManager/AuthManager.Infrastructure/SyntheticRuntime.cs"
+        self.write(root, runtime, "await runtimeCommand.ExecuteScalarAsync(ct);")
+        self.seal_closed(root, closed)
+        self.seal_graph(root, runtime)
+        return root, closed, runtime
+
+    def seal_closed(self, root, manifest):
+        for relative, item in manifest["files"].items():
+            item["sha256"] = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+        self.write(root, module.CLOSED_SURFACE, json.dumps(manifest))
+
+    def seal_graph(self, root, runtime):
+        # The deterministic scanner is substituted only for these generated public
+        # fixture bytes; every source-discovery and manifest check stays real.
+        with mock.patch.object(module, "public_bytes", side_effect=lambda path: path.read_bytes()):
+            projects, tools = module.discover_tools(root)
+            projects, sources = module.discover_project_sources(root, projects + [root / path for path in module.SERVICE_PROJECTS])
+        files = set(projects) | set(tools) | set(sources) | {root / path for path in module.EXTRA}
+        files.add(root / "Tools/Shared/OwnerSqlExecution.cs")
+        bindings = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
+        manifest = {"schema": "zeka-owner-sql-referenced-source-boundary/v1", "reviewPolicy": module.SOURCE_BOUNDARY_POLICY,
+                    "baseRevision": "a" * 40, "sourceGraphSha256": module.source_graph_sha256(bindings),
+                    "runtimeOnlySources": {runtime: {"sha256": bindings[runtime], "classification": "service-runtime-only",
+                                                     "reason": "Explicit synthetic fixture runtime classification."}}}
+        self.write(root, module.SOURCE_BOUNDARY, json.dumps(manifest))
+
+    def inventory(self, root):
+        with mock.patch.object(module, "public_bytes", side_effect=lambda path: path.read_bytes()):
+            return module.build_inventory(root)
+
+    def test_complete_builder_binds_each_producer_dependency_and_separate_obligation(self):
+        root, _, runtime = self.fixture()
+        inventory = self.inventory(root)
+        expected = {"Tools/Zeka.AuthOwnerProvision/Program.cs:L1", *module.QUERY_IDS, *module.CONTROL_IDS,
+                    *("bootstrap:" + path + ":batch" for path in module.BOOTSTRAPS)}
+        self.assertEqual({item["producerId"] for item in inventory["producers"]}, expected)
+        self.assertEqual(len(inventory["producers"]), len(expected))
+        self.assertEqual(inventory["scope"]["runtimeOnlySources"], [runtime])
+        self.assertEqual(len(inventory["separateObligations"]), 2)
+        for item in inventory["producers"]:
+            self.assertEqual(item["producerSha256"], hashlib.sha256((root / item["source"]).read_bytes()).hexdigest())
+            if item["producerId"] in module.DEPENDENCIES:
+                self.assertEqual(set(item["sourceBindings"]), set(module.DEPENDENCIES[item["producerId"]]))
+
+    def test_new_unsealed_default_helper_is_rejected_before_runtime_exclusion(self):
+        root, _, _ = self.fixture()
+        self.write(root, "Tools/Zeka.AuthOwnerProvision/NewHelper.cs", "class UnexpectedHelper {}")
+        with self.assertRaisesRegex(module.InventoryError, "compiled source/project bytes or file set changed"):
+            self.inventory(root)
+
+    def test_reviewed_but_duplicate_physical_calls_never_share_one_producer_identity(self):
+        root, _, runtime = self.fixture()
+        self.write(root, "Tools/Zeka.AuthOwnerProvision/Program.cs",
+                   "await OwnerSqlExecution.ExecuteScalarAsync(first, ct); await OwnerSqlExecution.ExecuteScalarAsync(second, ct);")
+        self.seal_graph(root, runtime)
+        with self.assertRaisesRegex(module.InventoryError, "Multiple executions share one physical producer line"):
+            self.inventory(root)
+
+    def test_reviewed_graph_with_no_handwritten_csharp_producer_is_not_a_complete_inventory(self):
+        root, _, runtime = self.fixture()
+        self.write(root, "Tools/Zeka.AuthOwnerProvision/Program.cs", "class NoOwnerExecution {}")
+        self.seal_graph(root, runtime)
+        with self.assertRaisesRegex(module.InventoryError, "Empty C# SQL inventory"):
+            self.inventory(root)
+
+    def test_query_identifier_change_is_rejected_even_when_script_bytes_are_sealed(self):
+        root, closed, _ = self.fixture()
+        path = root / module.QUERY_FILE
+        path.write_text(path.read_text(encoding="utf-8") + "\n'owner.unregistered.v1'", encoding="utf-8")
+        self.seal_closed(root, closed)
+        with self.assertRaisesRegex(module.InventoryError, "query/control identifier set changed"):
+            self.inventory(root)
+
+    def test_late_source_mutation_is_rejected_by_the_final_byte_recheck(self):
+        root, _, _ = self.fixture()
+        original_recheck = module.recheck_source_sets
+        def mutate_after_recheck(*arguments):
+            original_recheck(*arguments)
+            self.write(root, "Tools/Zeka.AuthOwnerProvision/Program.cs", "class ChangedAfterInventory {}")
+        with mock.patch.object(module, "recheck_source_sets", side_effect=mutate_after_recheck):
+            with self.assertRaisesRegex(module.InventoryError, "Source changed during inventory"):
+                self.inventory(root)
+
+    def test_missing_required_tool_scope_cannot_enter_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(module.InventoryError, "Missing source scope"):
+                module.build_inventory(Path(directory))
+
+
 if __name__ == "__main__": unittest.main()
