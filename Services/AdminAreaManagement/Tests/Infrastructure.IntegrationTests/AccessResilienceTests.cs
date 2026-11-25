@@ -13,6 +13,7 @@ namespace Infrastructure.IntegrationTests;
 
 [Trait("Issue", "46")]
 [Trait("Evidence", "ApplicationConformance")]
+[Collection(AdminAuthorityTimingCollection.Name)]
 public sealed class AccessResilienceTests
 {
     [Theory]
@@ -199,4 +200,11 @@ public sealed class AccessResilienceTests
             ObservedAtUtc = invalid == "observation" ? default : DateTimeOffset.UtcNow
         })
     };
+}
+
+// Measure the existing authority budgets without concurrent container/bootstrap fixtures.
+[CollectionDefinition(AdminAuthorityTimingCollection.Name, DisableParallelization = true)]
+public sealed class AdminAuthorityTimingCollection
+{
+    public const string Name = "Admin authority deadline isolation";
 }

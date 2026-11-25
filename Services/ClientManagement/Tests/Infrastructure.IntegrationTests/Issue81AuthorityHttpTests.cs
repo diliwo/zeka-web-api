@@ -14,6 +14,7 @@ using Xunit;
 namespace Infrastructure.IntegrationTests;
 
 [Trait("Issue", "81")]
+[Collection(ClientAuthorityTimingCollection.Name)]
 public sealed class Issue81AuthorityHttpTests
 {
     [Fact]
