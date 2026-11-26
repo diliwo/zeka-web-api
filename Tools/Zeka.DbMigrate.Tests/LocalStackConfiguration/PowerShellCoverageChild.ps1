@@ -79,7 +79,25 @@ function Invoke-CoreCoverageChild {
             }
         } catch { $native.valid=$false }
     }
-    if ($receipt.status -eq 'PASS' -and (!$native.valid -or $native.status -ne 'PASS' -or $native.passed -ne 9 -or $native.failed -ne 0 -or
+    $regressionsValid=$false
+    try {
+        $summary=[IO.File]::ReadAllText((Join-Path $Directory 'powershell-coverage-result.json'))|ConvertFrom-Json
+        $expectedCounts=[ordered]@{native=9;atomic=2;ownerAdmission=168;workerRotation=129;authHttps=11;safePostgres=60;preflightPrivileges=97;queryMetadata=201}
+        $actualNames=@($summary.regressionCounts.psobject.Properties.Name)
+        $valid=($summary.status-ceq'PASS'-and$summary.collectorProof-ceq'PASS'-and
+            $actualNames.Count-eq$expectedCounts.Count-and@(Compare-Object @($expectedCounts.Keys) $actualNames -CaseSensitive).Count-eq0-and
+            @($summary.sourceCounts).Count-eq9-and@($summary.sourceHashes).Count-eq9-and
+            $summary.initializationExecutedLines-eq0-and$summary.workerRuntime-ceq'NOT_RUN'-and
+            $summary.workerProvider-ceq'NOT_RUN'-and$summary.workerAdoption-ceq'NOT_RUN'-and
+            $summary.authOwnerChange-ceq'NOT_RUN'-and$summary.behavioralRlsProof-ceq'NOT_RUN'-and!$summary.validAuthCertificatesCreated-and
+            !$summary.privateAuthKeysCreated-and!$summary.trustInstalled)
+        foreach($name in $expectedCounts.Keys){
+            $value=$summary.regressionCounts.$name
+            if(($value-isnot[int]-and$value-isnot[long])-or$value-ne$expectedCounts[$name]){$valid=$false}
+        }
+        $regressionsValid=$valid
+    } catch {$regressionsValid=$false}
+    if ($receipt.status -eq 'PASS' -and (!$regressionsValid -or !$native.valid -or $native.status -ne 'PASS' -or $native.passed -ne 9 -or $native.failed -ne 0 -or
         !(Test-Path -LiteralPath (Join-Path $Directory 'powershell-coverage.xml')) -or
         !(Test-Path -LiteralPath (Join-Path $Directory 'powershell-coverage-result.json')))) {
         $receipt.status='FAIL'; $receipt.code='CORE_COVERAGE_CHILD_RECEIPTS_REJECTED'

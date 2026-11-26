@@ -34,9 +34,23 @@ function New-AuthHttpsTestPrivate([string]$Name, [string]$Missing = '') {
     Set-AuthHttpsNewDirectoryAcl $private
     foreach ($relative in @('auth/tls-certificate.pem','auth/tls-key.pem','trust/ca-bundle.pem')) {
         $path = Join-Path $private $relative
-        [IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
+        $parent = Split-Path -Parent $path
+        if (!(Test-Path -LiteralPath $parent)) {
+            [IO.Directory]::CreateDirectory($parent) | Out-Null
+            # Synthetic children must satisfy the same exact owner/DACL contract
+            # on both a normal workstation and an elevated CI runner.
+            Set-AuthHttpsNewDirectoryAcl $parent
+        }
         if ($relative -ne $Missing) {
             [IO.File]::WriteAllText($path, 'NON_SENSITIVE_TLS_FIXTURE_NOT_VALID_KEY_OR_CERTIFICATE', [Text.UTF8Encoding]::new($false))
+            # Retain the restricted inherited DACL; explicitly bind this new
+            # fixture file to the current user instead of a default owner group.
+            $file = [IO.FileInfo]::new($path)
+            $acl = [IO.FileSystemAclExtensions]::GetAccessControl($file,
+                [Security.AccessControl.AccessControlSections]'Access,Owner')
+            $acl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+            [IO.FileSystemAclExtensions]::SetAccessControl($file, $acl)
+            Assert-AuthHttpsPrivateMetadata $path
         }
     }
     return $private

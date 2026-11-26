@@ -11,7 +11,15 @@ function Check([string]$CaseName,[scriptblock]$Action,[string]$Expected='') {
         $checks.Add([pscustomobject]@{name=$CaseName;passed=$true})
     } catch {
         if($Expected-and$_.Exception.Message-ceq$Expected){$checks.Add([pscustomobject]@{name=$CaseName;passed=$true})}
-        else{throw [InvalidOperationException]::new('OWNER_ADMISSION_TEST_FAILED_'+$CaseName)}
+        else{
+            if($CaseName.StartsWith('resource_decoder_',[StringComparison]::Ordinal)){
+                $allowed=@('OWNER_RESOURCE_CONFIGURATION_REJECTED','OWNER_RESOURCE_ID_DRIFT','OWNER_RESOURCE_LABEL_DRIFT',
+                    'OWNER_NATIVE_ADAPTER_SIGNATURE_REJECTED','RESOURCE_BINDING','UNEXPECTED_NATIVE_SIGNATURE','UNEXPECTED_NATIVE_ARGUMENT')
+                $safe=if($_.Exception.Message-cin$allowed){$_.Exception.Message}else{'DETAIL_WITHHELD'}
+                @{case=$CaseName;type=$_.Exception.GetType().FullName;code=$safe;line=$_.InvocationInfo.ScriptLineNumber;nativeCalls=$script:ownerResourceNativeCalls}|ConvertTo-Json -Compress
+            }
+            throw [InvalidOperationException]::new('OWNER_ADMISSION_TEST_FAILED_'+$CaseName)
+        }
     }
 }
 function Identity {return @{isWindows=$true;attested=$true;account='DILI_LP\herve';userProfile='C:\Users\herve';sid='S-1-5-21-1-2-3-1001'}}
@@ -302,6 +310,139 @@ Check 'failure_boundary_discards_partial_success_output_on_exception' {
     $r=@(Invoke-OwnerCommand {$planted[0];throw [Exception]::new($planted[1])})
     if($r.Count-ne1){throw 'PARTIAL_OUTPUT_ESCAPED'}
     Assert-SafeFailure $r[0] 'command-entry' 'UnexpectedException'
+}
+
+
+# Additional pure helper cases. All native/resource ports below are synthetic;
+# the real owner command and every private/credential operation remain NOT_RUN.
+Check 'docker_denial_stops_before_the_native_boundary' {
+    & {
+        $script:ownerDeniedNativeCalls=0;$script:ownerDeniedGuardCalls=0
+        function Assert-W3DockerArguments([string[]]$ArgumentList){@{Allowed=$false;ReasonCode='SYNTHETIC_ARGUMENT_REFUSAL'}}
+        function Write-W3GuardRecord {param($Rule,$Operation)$script:ownerDeniedGuardCalls++}
+        function Invoke-W3Native {throw 'UNEXPECTED_NATIVE_OPERATION'}
+        $refused=$false
+        try{Invoke-OwnerDocker @('unapproved')|Out-Null}catch{$refused=$_.Exception.Message-ceq'OWNER_DOCKER_ARGUMENTS_REJECTED'}
+        if(!$refused-or$script:ownerDeniedGuardCalls-ne1){throw 'GUARD_ORDER'}
+    }
+}
+foreach($payloadKind in @('ascii','utf8')){
+    $kind=$payloadKind
+    Check ('private_tool_refuses_oversized_'+$kind+'_before_native_setup') {
+        & {
+            function Assert-W3DockerArguments {throw 'ARGUMENT_GUARD_MUST_NOT_BE_REACHED'}
+            $payload=if($kind-ceq'ascii'){'x'*65537}else{([string][char]0x00e9)*32769}
+            $refused=$false
+            try{Invoke-OwnerPrivateTool 'synthetic-unstarted-id' $payload 'synthetic-operation' $null|Out-Null}
+            catch{$refused=$_.Exception.Message-ceq'OWNER_STDIN_LIMIT_REJECTED'}
+            if(!$refused){throw 'BYTE_LIMIT'}
+        }
+    }
+}
+Check 'private_tool_exact_byte_limit_still_requires_native_argument_admission' {
+    & {
+        $script:ownerExactGuard=0
+        function Assert-W3DockerArguments {param($ArgumentList)$script:ownerExactGuard++;@{Allowed=$false;ReasonCode='SYNTHETIC_ARGUMENT_REFUSAL'}}
+        function Write-W3GuardRecord {param($Rule,$Operation)}
+        $refused=$false
+        try{Invoke-OwnerPrivateTool 'synthetic-unstarted-id' ('x'*65536) 'synthetic-operation' $null|Out-Null}
+        catch{$refused=$_.Exception.Message-ceq'OWNER_DOCKER_ARGUMENTS_REJECTED'}
+        if(!$refused-or$script:ownerExactGuard-ne1){throw 'EXACT_LIMIT_GUARD'}
+    }
+}
+Check 'pre_stdin_inspection_refuses_denied_arguments_before_process_setup' {
+    & {
+        function Assert-W3DockerArguments {param($ArgumentList)@{Allowed=$false;ReasonCode='SYNTHETIC_INSPECTION_REFUSAL'}}
+        function Write-W3GuardRecord {param($Rule,$Operation)}
+        $refused=$false
+        try{Read-OwnerPreStdinHelper ('1'*64) 1000|Out-Null}
+        catch{$refused=$_.Exception.Message-ceq'OWNER_HELPER_NETWORK_REJECTED'}
+        if(!$refused){throw 'PRE_STDIN_GUARD'}
+    }
+}
+Check 'exited_helper_cannot_reach_pre_stdin_inspection' {
+    & {
+        function Read-OwnerPreStdinHelper {throw 'UNEXPECTED_INSPECTION'}
+        $refused=$false
+        try{Wait-OwnerHelperRunningNetwork ([pscustomobject]@{HasExited=$true}) (ExpectedHelperNetwork)}
+        catch{$refused=$_.Exception.Message-ceq'OWNER_HELPER_EXITED_BEFORE_STDIN'}
+        if(!$refused){throw 'EXIT_ORDER'}
+    }
+}
+foreach($startState in @('running','created')){
+    $initial=$startState
+    Check ('helper_wait_validates_'+$initial+'_transition_using_only_fixture_metadata') {
+        & {
+            $script:ownerInspectionCalls=0
+            function Read-OwnerPreStdinHelper {
+                param($ContainerId,$TimeoutMs)
+                $script:ownerInspectionCalls++
+                $state=if($initial-ceq'created'-and$script:ownerInspectionCalls-eq1){'created'}else{'running'}
+                $h=HelperNetwork $state ('2'*64)
+                $isolation=IsolatedHelper;$h.HostConfig=$isolation.HostConfig
+                $h|Add-Member -NotePropertyName Mounts -NotePropertyValue @()
+                return $h
+            }
+            Wait-OwnerHelperRunningNetwork ([pscustomobject]@{HasExited=$false}) (ExpectedHelperNetwork)
+            $expected=if($initial-ceq'created'){2}else{1}
+            if($script:ownerInspectionCalls-ne$expected){throw 'UNBOUNDED_INSPECTION'}
+        }
+    }
+}
+Check 'helper_exit_after_network_admission_still_precedes_stdin' {
+    & {
+        $script:ownerProcessReads=0
+        function Read-OwnerPreStdinHelper {
+            param($ContainerId,$TimeoutMs)
+            $h=HelperNetwork 'running' ('2'*64);$h.HostConfig=(IsolatedHelper).HostConfig
+            $h|Add-Member -NotePropertyName Mounts -NotePropertyValue @()
+            $h
+        }
+        $process=[pscustomobject]@{}
+        $process|Add-Member -MemberType ScriptProperty -Name HasExited -Value {$script:ownerProcessReads++;$script:ownerProcessReads-ge2}
+        $refused=$false
+        try{Wait-OwnerHelperRunningNetwork $process (ExpectedHelperNetwork)}
+        catch{$refused=$_.Exception.Message-ceq'OWNER_HELPER_EXITED_BEFORE_STDIN'}
+        if(!$refused-or$script:ownerProcessReads-ne2){throw 'SECOND_EXIT_GUARD'}
+    }
+}
+foreach($resourceShape in @('exact','published','multiple-networks')){
+    $shape=$resourceShape
+    Check ('resource_decoder_'+$shape+'_never_queries_a_real_engine') {
+        & {
+            $script:ownerResourceNativeCalls=0
+            $p=Progress;$r=Resource;$expected=$p.Clone();$expected.volumeCreated=[DateTime]::Parse($p.volumeCreated,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind)
+            $ownerFixtureContainer=@{Id=$p.containerId;Name='/zeka-m1-postgres-1';Image='postgres:17';Labels=$r.containerLabels;
+                Ports=@{};Mode='zeka-m1_internal';Networks=@{'zeka-m1_internal'=@{NetworkID=$p.networkId}};
+                Data=@{Name='zeka-m1_postgres_data';RW=$true}}
+            if($shape-ceq'published'){$ownerFixtureContainer.Ports=@{'5432/tcp'=@(@{HostPort='15432'})}}
+            if($shape-ceq'multiple-networks'){$ownerFixtureContainer.Networks['unexpected']=@{NetworkID=('9'*64)}}
+            $ownerFixtureNetwork=@{Id=$p.networkId;Name='zeka-m1_internal';Internal=$true;Driver='bridge';Labels=$r.networkLabels}
+            $ownerFixtureVolume=@{Name='zeka-m1_postgres_data';CreatedAt=$p.volumeCreated;Labels=$r.volumeLabels}
+            function Invoke-W3Native {
+                param($Exe,$ArgumentList,$WorkingDirectory,$TimeoutMs,$Operation,[switch]$AllowFailure)
+                $script:ownerResourceNativeCalls++
+                if($Exe-cne'docker'-or$ArgumentList[0]-cne'--context'-or$ArgumentList[1]-cne'default'){throw 'UNEXPECTED_NATIVE_SIGNATURE'}
+                $out=switch($ArgumentList[2]){
+                    'context' {'default'}
+                    'info' {'0b62f5ec-15d9-4e4b-a450-817d52378eef'}
+                    'container' {$ownerFixtureContainer|ConvertTo-Json -Depth 8 -Compress}
+                    'network' {$ownerFixtureNetwork|ConvertTo-Json -Depth 8 -Compress}
+                    'volume' {$ownerFixtureVolume|ConvertTo-Json -Depth 8 -Compress}
+                    default {throw 'UNEXPECTED_NATIVE_ARGUMENT'}
+                }
+                [pscustomobject]@{Exit=0;Out=$out;Error=''}
+            }
+            $facts=Read-OwnerResourceFacts
+            if($script:ownerResourceNativeCalls-ne5-or$facts.containerId-cne$p.containerId-or$facts.networkId-cne$p.networkId){throw 'RESOURCE_BINDING'}
+            if($shape-ceq'exact'){Assert-OwnerResourceFacts $facts $expected}
+            else{
+                $refused=$false
+                try{Assert-OwnerResourceFacts $facts $expected}catch{$refused=$_.Exception.Message-ceq'OWNER_RESOURCE_CONFIGURATION_REJECTED'}
+                if(!$refused){throw 'RESOURCE_REFUSAL'}
+            }
+        }
+    }
 }
 
 $result=[ordered]@{schema='zeka-m1-owner-admission-tests/v1';status='PASS';count=$checks.Count;checks=$checks.ToArray();runtimeOperationsExecuted=$false}

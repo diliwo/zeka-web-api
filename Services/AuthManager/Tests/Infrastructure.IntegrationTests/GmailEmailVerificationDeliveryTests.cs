@@ -11,6 +11,103 @@ public sealed class GmailEmailVerificationDeliveryTests
 {
     private const string Recipient = "owner@example.org";
 
+    [Fact]
+    public void Unit_fixture_null_configuration_is_a_safe_configuration_refusal()
+    {
+        AssertConfigurationRefused(() => new GmailEmailVerificationDelivery(null!));
+    }
+
+    [Theory]
+    [InlineData(true, null)]
+    [InlineData(true, " ")]
+    [InlineData(true, "not-an-email")]
+    [InlineData(true, "Owner <owner@example.org>")]
+    [InlineData(false, null)]
+    [InlineData(false, " ")]
+    [InlineData(false, "not-an-email")]
+    [InlineData(false, "Owner <owner@example.org>")]
+    public void Unit_fixture_sender_and_recipient_must_be_exact_addresses_before_any_IO(bool sender, string? address)
+    {
+        var options = new GmailEmailVerificationDeliveryOptions
+        {
+            SenderAddress = sender ? address! : Recipient,
+            ApprovedRecipientAddress = sender ? Recipient : address!,
+            AppPasswordFile = MissingCredentialPath(),
+            VerificationLandingUri = new Uri("https://auth.example.test/verify")
+        };
+        AssertConfigurationRefused(() => new GmailEmailVerificationDelivery(options));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(" ")]
+    public void Unit_fixture_missing_file_reference_is_refused_without_opening_a_file(string? reference)
+    {
+        var options = new GmailEmailVerificationDeliveryOptions
+        {
+            SenderAddress = Recipient, ApprovedRecipientAddress = Recipient,
+            AppPasswordFile = reference!, VerificationLandingUri = new Uri("https://auth.example.test/verify")
+        };
+        AssertConfigurationRefused(() => new GmailEmailVerificationDelivery(options));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Unit_fixture_null_or_relative_landing_configuration_fails_before_any_IO(bool relative)
+    {
+        var options = new GmailEmailVerificationDeliveryOptions
+        {
+            SenderAddress = Recipient, ApprovedRecipientAddress = Recipient,
+            AppPasswordFile = MissingCredentialPath(),
+            VerificationLandingUri = relative ? new Uri("verify", UriKind.Relative) : null!
+        };
+        AssertConfigurationRefused(() => new GmailEmailVerificationDelivery(options));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(60)]
+    public async Task Unit_fixture_exact_deadline_boundaries_preserve_precredential_recipient_refusal(int seconds)
+    {
+        var delivery = new GmailEmailVerificationDelivery(new GmailEmailVerificationDeliveryOptions
+        {
+            SenderAddress = Recipient, ApprovedRecipientAddress = Recipient,
+            AppPasswordFile = MissingCredentialPath(), VerificationLandingUri = new Uri("https://auth.example.test/verify"),
+            SendDeadline = TimeSpan.FromSeconds(seconds)
+        });
+        var failure = await Assert.ThrowsAsync<EmailVerificationDeliveryException>(() =>
+            delivery.DeliverAsync("other@example.org", ValidLink()));
+        Assert.Equal(EmailVerificationDeliveryFailure.InvalidRecipient, failure.Category);
+        Assert.Null(failure.InnerException);
+        Assert.Null(failure.SmtpStatusCode);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("relative")]
+    [InlineData("user-info")]
+    [InlineData("oversize")]
+    public async Task Unit_fixture_unusable_links_are_rejected_before_the_missing_credential_is_considered(string invalid)
+    {
+        var delivery = new GmailEmailVerificationDelivery(Options());
+        var link = invalid switch
+        {
+            "relative" => new Uri("verify#unit-fixture", UriKind.Relative),
+            "user-info" => new Uri("https://user@auth.example.test/verify#unit-fixture"),
+            "oversize" => new Uri("https://auth.example.test/verify#" + new string('a', 4096)),
+            _ => null
+        };
+        // A missing file would produce CredentialFileUnavailable. This distinct outcome
+        // proves request refusal precedes credential-file access and SMTP setup.
+        var failure = await Assert.ThrowsAsync<EmailVerificationDeliveryException>(() =>
+            delivery.DeliverAsync(Recipient, link!));
+        Assert.Equal(EmailVerificationDeliveryFailure.InvalidVerificationLink, failure.Category);
+        Assert.Equal("Email verification delivery failed.", failure.Message);
+        Assert.Null(failure.InnerException);
+        Assert.Null(failure.SmtpStatusCode);
+    }
+
     [Theory]
     [InlineData("http://auth.example.test/verify")]
     [InlineData("https://auth.example.test/verify?value=unit-fixture")]
@@ -163,6 +260,7 @@ public sealed class GmailEmailVerificationDeliveryTests
     [Theory]
     [InlineData(535, EmailVerificationDeliveryFailure.AuthenticationRejected)]
     [InlineData(534, EmailVerificationDeliveryFailure.AuthenticationRejected)]
+    [InlineData(538, EmailVerificationDeliveryFailure.AuthenticationRejected)]
     [InlineData(550, EmailVerificationDeliveryFailure.SmtpRejected)]
     public void Unit_fixture_preserves_native_smtp_status_but_discards_message_and_inner_failure(
         int status,
@@ -200,6 +298,15 @@ public sealed class GmailEmailVerificationDeliveryTests
         AppPasswordFile = MissingCredentialPath(),
         VerificationLandingUri = landing ?? new Uri("https://auth.example.test/verify")
     };
+
+    private static void AssertConfigurationRefused(Action action)
+    {
+        var failure = Assert.Throws<EmailVerificationDeliveryException>(action);
+        Assert.Equal(EmailVerificationDeliveryFailure.InvalidConfiguration, failure.Category);
+        Assert.Equal("Email verification delivery failed.", failure.Message);
+        Assert.Null(failure.InnerException);
+        Assert.Null(failure.SmtpStatusCode);
+    }
 
     private static string MissingCredentialPath() =>
         Path.Combine(Path.GetTempPath(), "zeka-mail-unit-fixture", Guid.NewGuid().ToString("N"));
