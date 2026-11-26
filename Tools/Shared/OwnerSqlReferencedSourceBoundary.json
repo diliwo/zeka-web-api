@@ -2,7 +2,7 @@
   "schema": "zeka-owner-sql-referenced-source-boundary/v1",
   "reviewPolicy": "Every referenced compiled source/project file-set or byte change requires explicit source review and manifest acceptance; no automatic enrollment.",
   "baseRevision": "4806b71bfcfb168d53592692a935374981106af8",
-  "sourceGraphSha256": "cbe6522c2ed8cbc62625dfe7749ad507ef1b5acfa49ce172e67e1eed591d09b0",
+  "sourceGraphSha256": "7a409d501f827ffe3836c84107287e053d8233a3d55ed125f9734b2e6e20a584",
   "runtimeOnlySources": {
     "Services/AdminAreaManagement/AdminAreaManagement.Infrastructure/Closures/AdminAreaClosureGate.cs": {
       "sha256": "31feff4756e455cd900c14201868fd55d18850849f71a9dc872a6039acc85c9d",

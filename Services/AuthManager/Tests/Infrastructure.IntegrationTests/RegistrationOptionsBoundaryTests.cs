@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
+using AuthManager.Infrastructure;
 using AuthManager.Infrastructure.Onboarding;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
 
@@ -13,12 +15,66 @@ public sealed class RegistrationOptionsBoundaryTests
     {
         using var input = new RegistrationOptionInputs();
         input.Values["OnboardingRegistration:Enabled"] = null;
+        input.Values["OnboardingRegistration:VerificationMailpitEnabled"] = "false";
         input.Values["OnboardingRegistration:VerificationKeyFiles:active"] = "not-an-absolute-file";
         using var options = input.Read();
         Assert.False(options.Enabled);
         Assert.False(options.MailpitEnabled);
         Assert.Null(options.VerificationPage);
         Assert.Empty(options.Keys);
+    }
+
+    [Theory]
+    [InlineData(null, "LocalStack")]
+    [InlineData("false", "LocalStack")]
+    [InlineData(null, "Production")]
+    [InlineData("false", "Production")]
+    public void Enabled_registration_without_delivery_is_refused_before_service_registration(string? mailpit, string environment)
+    {
+        using var input = new RegistrationOptionInputs();
+        input.Values["OnboardingRegistration:VerificationMailpitEnabled"] = mailpit;
+        var services = new ServiceCollection();
+
+        var error = Assert.Throws<InvalidOperationException>(() => services.AddVerificationRegistration(
+            new ConfigurationBuilder().AddInMemoryCollection(input.Values).Build(),
+            Mock.Of<IHostEnvironment>(value => value.EnvironmentName == environment)));
+
+        Assert.Equal("ONBOARDING_REGISTRATION_CONFIGURATION_REJECTED", error.Message);
+        Assert.Empty(services); // No endpoint service, readiness or worker can be installed.
+    }
+
+    [Fact]
+    public void Supported_local_registration_installs_the_real_delivery_and_readiness_worker()
+    {
+        using var input = new RegistrationOptionInputs();
+        var services = new ServiceCollection();
+        services.AddVerificationRegistration(new ConfigurationBuilder().AddInMemoryCollection(input.Values).Build(),
+            Mock.Of<IHostEnvironment>(value => value.EnvironmentName == "LocalStack"));
+        Assert.Single(services, value => value.ServiceType == typeof(RegistrationReadiness));
+        Assert.Single(services, value => value.ServiceType == typeof(VerificationMailDispatcher));
+        Assert.Single(services, value => value.ServiceType == typeof(IHostedService)
+            && value.ImplementationType == typeof(VerificationMailWorker));
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        Assert.IsType<LocalStackMailpitDelivery>(scope.ServiceProvider.GetRequiredService<IVerificationMailDelivery>());
+        var options = provider.GetRequiredService<RegistrationOptions>();
+        Assert.True(options.Enabled);
+        Assert.True(options.MailpitEnabled);
+        Assert.Equal("https://app.example.invalid:19444/verify/email", options.VerificationPage!.AbsoluteUri);
+    }
+
+    [Fact]
+    public void Disabled_registration_installs_no_readiness_or_delivery_worker()
+    {
+        var services = new ServiceCollection();
+        services.AddVerificationRegistration(new ConfigurationBuilder().Build(),
+            Mock.Of<IHostEnvironment>(value => value.EnvironmentName == "Production"));
+        Assert.DoesNotContain(services, value => value.ServiceType == typeof(RegistrationReadiness)
+            || value.ServiceType == typeof(VerificationMailDispatcher)
+            || value.ServiceType == typeof(IVerificationMailDelivery)
+            || value.ServiceType == typeof(IHostedService));
+        using var provider = services.BuildServiceProvider();
+        Assert.False(provider.GetRequiredService<RegistrationOptions>().Enabled);
     }
 
     [Theory]
@@ -198,7 +254,7 @@ internal sealed class RegistrationOptionInputs : IDisposable
         ["OnboardingRegistration:Enabled"] = "true",
         ["OnboardingRegistration:Deployment"] = "unit-fixture",
         ["OnboardingRegistration:ActiveKeyId"] = "active",
-        ["OnboardingRegistration:VerificationMailpitEnabled"] = "false",
+        ["OnboardingRegistration:VerificationMailpitEnabled"] = "true",
         ["OnboardingRegistration:VerificationPagePath"] = "/verify/email",
         ["BrowserSession:Origin"] = "https://app.example.invalid:19444"
     };

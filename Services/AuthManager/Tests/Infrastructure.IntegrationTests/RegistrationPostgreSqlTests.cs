@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
@@ -768,6 +769,9 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "LocalStack" });
         builder.Logging.ClearProviders();
         builder.Configuration["OnboardingRegistration:Enabled"] = "true";
+        builder.Configuration["OnboardingRegistration:VerificationMailpitEnabled"] = "true";
+        builder.Configuration["OnboardingRegistration:VerificationPagePath"] = "/verify/email";
+        builder.Configuration["BrowserSession:Origin"] = "https://app.example.invalid";
         builder.Configuration["OnboardingRegistration:Deployment"] = "zek27-fixture";
         builder.Configuration["OnboardingRegistration:ActiveKeyId"] = "fixture-v1";
         builder.Configuration["OnboardingRegistration:VerificationKeyFiles:fixture-v1"] = keyPath;
@@ -778,6 +782,10 @@ public sealed class RegistrationPostgreSqlFixture : IAsyncLifetime
         builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
         builder.Services.AddSingleton<TimeProvider>(clock);
         builder.Services.AddVerificationRegistration(builder.Configuration, builder.Environment);
+        // These persistence/HTTP tests inspect the outbox themselves; as before,
+        // no background sender may race them or contact the owner's Mailpit.
+        builder.Services.Remove(builder.Services.Single(service => service.ServiceType == typeof(IHostedService)
+            && service.ImplementationType == typeof(VerificationMailWorker)));
         return builder;
     }
 

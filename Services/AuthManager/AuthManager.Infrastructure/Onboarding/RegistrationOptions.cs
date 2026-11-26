@@ -20,6 +20,9 @@ internal sealed class RegistrationOptions : IDisposable
         var section = config.GetSection("OnboardingRegistration");
         var enable = Flag(section["Enabled"]);
         var mailpit = Flag(section["VerificationMailpitEnabled"]);
+        // Registration currently has one supported outbox delivery adapter.
+        // Refuse startup rather than accept addresses whose mail cannot be sent.
+        if (enable && !mailpit) throw InvalidConfiguration();
         if (mailpit && (!enable || !environment.IsEnvironment("LocalStack")))
             throw InvalidConfiguration();
         if (!enable) return new();
@@ -42,6 +45,12 @@ internal sealed class RegistrationOptions : IDisposable
             page = new Uri(browser, path!);
         }
 
+        return CreateEnabledOptions(section, deployment!, active!, mailpit, page);
+    }
+
+    private static RegistrationOptions CreateEnabledOptions(IConfigurationSection section, string deployment,
+        string active, bool mailpit, Uri? page)
+    {
         var keys = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         try
         {
@@ -66,11 +75,11 @@ internal sealed class RegistrationOptions : IDisposable
                     throw;
                 }
             }
-            if (!keys.ContainsKey(active!)) throw InvalidConfiguration();
+            if (!keys.ContainsKey(active)) throw InvalidConfiguration();
             return new()
             {
                 Enabled = true, MailpitEnabled = mailpit, VerificationPage = page,
-                Deployment = deployment!, ActiveKeyId = active!, Keys = keys
+                Deployment = deployment, ActiveKeyId = active, Keys = keys
             };
         }
         catch
