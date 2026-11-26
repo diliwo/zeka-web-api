@@ -724,7 +724,7 @@ public sealed class RegistrationTransportTests(RegistrationPostgreSqlFixture fix
             ["BrowserSession:Limits:PerAddress"] = "10", ["BrowserSession:Limits:Aggregate"] = "10",
             ["BrowserSession:Limits:MaxPartitions"] = "16", ["BrowserSession:Limits:WindowSeconds"] = "600",
             ["OnboardingRegistration:Enabled"] = "true",
-            ["OnboardingRegistration:VerificationMailpitEnabled"] = mail ? "true" : "false",
+            ["OnboardingRegistration:VerificationMailpitEnabled"] = "true",
             ["OnboardingRegistration:Deployment"] = "zek27-native-release",
             ["OnboardingRegistration:ActiveKeyId"] = "fixture-v1",
             ["OnboardingRegistration:VerificationKeyFiles:fixture-v1"] = RequiredPath("ZEKA_ZEK27_VERIFICATION_KEY_FILE"),
@@ -747,6 +747,11 @@ public sealed class RegistrationTransportTests(RegistrationPostgreSqlFixture fix
         builder.ConfigureMicrosoftIdentity();
         builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
         builder.Services.AddVerificationRegistration(builder.Configuration, builder.Environment);
+        // Keep transport-only witnesses isolated from SMTP; the delivery witness
+        // alone starts the real worker against its admitted private sink.
+        if (!mail)
+            builder.Services.Remove(builder.Services.Single(service => service.ServiceType == typeof(IHostedService)
+                && service.ImplementationType == typeof(VerificationMailWorker)));
         return builder;
     }
 

@@ -253,6 +253,7 @@ internal sealed class RegistrationServiceInputs : IDisposable
     public RegistrationServiceInputs(bool enabled = true, AuthDbContext? database = null)
     {
         inputs.Values["OnboardingRegistration:Enabled"] = enabled.ToString();
+        inputs.Values["OnboardingRegistration:VerificationMailpitEnabled"] = enabled.ToString();
         Options = inputs.Read();
         Tokens = new VerificationTokenService(Options);
         identityStore.Setup(value => value.Dispose());

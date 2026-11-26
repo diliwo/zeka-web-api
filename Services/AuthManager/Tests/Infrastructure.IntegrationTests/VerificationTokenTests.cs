@@ -109,7 +109,7 @@ public sealed class VerificationTokenTests
         private readonly DirectoryInfo directory = Directory.CreateTempSubdirectory("zeka-known-vector-");
 
         public RegistrationOptions Options(string keyId, bool retainOld = true, string deployment = "unit-fixture",
-            string environment = "LocalStack", bool mailpit = false)
+            string environment = "LocalStack", bool mailpit = true)
         {
             var old = Path.Combine(directory.FullName, "vector-old.bin");
             var next = Path.Combine(directory.FullName, "vector-next.bin");
@@ -122,7 +122,9 @@ public sealed class VerificationTokenTests
                 ["OnboardingRegistration:Deployment"] = deployment,
                 ["OnboardingRegistration:ActiveKeyId"] = keyId,
                 ["OnboardingRegistration:VerificationKeyFiles:next"] = next,
-                ["OnboardingRegistration:VerificationMailpitEnabled"] = mailpit.ToString()
+                ["OnboardingRegistration:VerificationMailpitEnabled"] = mailpit.ToString(),
+                ["OnboardingRegistration:VerificationPagePath"] = "/verify/email",
+                ["BrowserSession:Origin"] = "https://app.example.invalid"
             });
             if (retainOld) builder.Configuration["OnboardingRegistration:VerificationKeyFiles:v"] = old;
             return RegistrationOptions.Read(builder.Configuration, builder.Environment);

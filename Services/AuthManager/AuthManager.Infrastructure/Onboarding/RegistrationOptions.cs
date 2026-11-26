@@ -20,6 +20,9 @@ internal sealed class RegistrationOptions : IDisposable
         var section = config.GetSection("OnboardingRegistration");
         var enable = Flag(section["Enabled"]);
         var mailpit = Flag(section["VerificationMailpitEnabled"]);
+        // Registration currently has one supported outbox delivery adapter.
+        // Refuse startup rather than accept addresses whose mail cannot be sent.
+        if (enable && !mailpit) throw InvalidConfiguration();
         if (mailpit && (!enable || !environment.IsEnvironment("LocalStack")))
             throw InvalidConfiguration();
         if (!enable) return new();
