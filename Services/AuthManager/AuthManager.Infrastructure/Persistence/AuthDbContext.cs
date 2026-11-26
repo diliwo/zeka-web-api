@@ -1,4 +1,4 @@
-﻿using AuthManager.Infrastructure.Identity.Models;
+using AuthManager.Infrastructure.Identity.Models;
 using AuthManager.Infrastructure.Persistence.Configurations;
 using AuthManager.Core.Organisations;
 using Microsoft.AspNetCore.Identity;
@@ -15,8 +15,13 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     internal bool LifecycleOnly { get; set; }
     internal System.Data.Common.DbTransaction? LifecycleTransaction { get; set; }
 
-    protected override void OnConfiguring(DbContextOptionsBuilder builder) =>
+    internal AuthOwnerSqlReceipt? OwnerSqlReceipt { get; } = AuthOwnerSqlReceipt.CreateIfEnabled();
+
+    protected override void OnConfiguring(DbContextOptionsBuilder builder)
+    {
         builder.AddInterceptors(new Lifecycle.LifecycleCommandGuard(this));
+        if (OwnerSqlReceipt is not null) builder.AddInterceptors(OwnerSqlReceipt);
+    }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     { GuardLifecycleWrites(); return base.SaveChanges(acceptAllChangesOnSuccess); }
@@ -88,6 +93,10 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
     public DbSet<BrowserSessionFamily> BrowserSessionFamilies => Set<BrowserSessionFamily>();
     public DbSet<BrowserRefreshCredential> BrowserRefreshCredentials => Set<BrowserRefreshCredential>();
+    public DbSet<EmailVerificationChallenge> EmailVerificationChallenges => Set<EmailVerificationChallenge>();
+    public DbSet<OnboardingGrant> OnboardingGrants => Set<OnboardingGrant>();
+    public DbSet<VerificationMailOutboxMessage> VerificationMailOutboxMessages => Set<VerificationMailOutboxMessage>();
+    public DbSet<OnboardingOperationReceipt> OnboardingOperationReceipts => Set<OnboardingOperationReceipt>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<Organisation> Organisations => Set<Organisation>();
     public DbSet<TimeZoneConfigurationAudit> TimeZoneConfigurationAudits => Set<TimeZoneConfigurationAudit>();
@@ -120,6 +129,11 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
         BrowserSessionConfiguration.Configure(modelBuilder);
         Lifecycle.LifecycleMapping.Configure(modelBuilder, this);
         modelBuilder.ApplyConfiguration(new UserConfiguration());
+        var registration = new OnboardingRegistrationConfiguration();
+        modelBuilder.ApplyConfiguration<EmailVerificationChallenge>(registration);
+        modelBuilder.ApplyConfiguration<VerificationMailOutboxMessage>(registration);
+        modelBuilder.ApplyConfiguration<OnboardingGrant>(registration);
+        modelBuilder.ApplyConfiguration<OnboardingOperationReceipt>(registration);
         modelBuilder.ApplyConfiguration(new IdempotencyRecordConfiguration());
         modelBuilder.ApplyConfiguration(new AuditEntryConfiguration());
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());

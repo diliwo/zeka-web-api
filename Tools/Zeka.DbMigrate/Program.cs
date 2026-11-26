@@ -22,7 +22,9 @@ EngineResult result;
 try
 {
     var credential = await StandardInputCredentialSource.ReadAsync();
-    result = await MigrationEngine.ExecuteAsync(options, credential, sourceCommit, startedAt);
+    result = AuthOnboardingMigrationExecutor.Handles(options)
+        ? await AuthOnboardingMigrationExecutor.ExecuteAsync(options, credential, sourceCommit, startedAt)
+        : await MigrationEngine.ExecuteAsync(options, credential, sourceCommit, startedAt);
 }
 catch (CredentialSourceException)
 {

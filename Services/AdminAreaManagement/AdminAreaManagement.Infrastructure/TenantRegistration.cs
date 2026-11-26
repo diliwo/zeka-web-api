@@ -1,3 +1,5 @@
+using Zeka.WorkerCredentials;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -11,6 +13,12 @@ public static class TenantRegistration
 {
     public static IServiceCollection AddTenantEnforcement(this IServiceCollection services, IConfiguration configuration)
     {
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IProtectedWorkerCredentialReader, LinuxProtectedWorkerCredentialReader>();
+        services.TryAddSingleton<IWorkerCredentialProvider>(sp => new ProtectedWorkerCredentialProvider(
+            sp.GetRequiredService<IProtectedWorkerCredentialReader>(),
+            WorkerCredentialOptions.Read(configuration, WorkerCredentialEncoding.AdminAreaProfile),
+            sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<ProtectedWorkerCredentialProvider>>()));
         services.TryAddScoped<TenantContextScope>();
         services.TryAddScoped<ITenantContextAccessor>(sp => sp.GetRequiredService<TenantContextScope>());
         services.TryAddScoped<ITenantContextInitializer>(sp => sp.GetRequiredService<TenantContextScope>());

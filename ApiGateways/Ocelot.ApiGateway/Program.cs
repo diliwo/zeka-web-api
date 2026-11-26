@@ -64,7 +64,12 @@ namespace Zeka.Gateway
             ("POST", "/api/v1/browser-session/sign-in"),
             ("POST", "/api/v1/browser-session/restore"),
             ("POST", "/api/v1/browser-session/logout"),
+            ("POST", "/api/v1/browser-session/onboarding/registrations"),
+            ("POST", "/api/v1/browser-session/onboarding/registrations/resend"),
+            ("POST", "/api/v1/browser-session/onboarding/registrations/email-verification/exchange"),
             ("GET", "/api/v1/browser-organisations/eligible"),
+            ("POST", "/api/v1/browser-session/organisations"),
+            ("GET", "/api/v1/browser-organisations/{organisationId}/access"),
             ("GET", "/api/v1/tenant-access/{organisationId}")
         ];
 
@@ -170,10 +175,8 @@ namespace Zeka.Gateway
                             return Task.CompletedTask;
                         });
                         var path = http.Request.Path.Value!;
-                        var selection = path.StartsWith("/api/v1/tenant-access/", StringComparison.Ordinal)
-                            && Guid.TryParseExact(path["/api/v1/tenant-access/".Length..], "D", out var id) && id != Guid.Empty;
                         var exact = Routes.Any(route => route.Method == http.Request.Method &&
-                            (route.Path == path || (route.Path == Routes[^1].Path && selection)));
+                            MatchesRoute(route.Path, path));
                         if (!exact || http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>()?.RawTarget?.Contains('%') == true)
                         { http.Response.StatusCode = 404; return; }
                         if (!policy.Valid || !http.Request.IsHttps || http.Request.Scheme + "://" + http.Request.Host != policy.Origin)
@@ -197,6 +200,18 @@ namespace Zeka.Gateway
                     branch.UseCors(Prefix);
                 });
         }
+
+        private static bool MatchesRoute(string template, string path) => template switch
+        {
+            "/api/v1/tenant-access/{organisationId}" => GuidSegment(path, "/api/v1/tenant-access/", ""),
+            "/api/v1/browser-organisations/{organisationId}/access" => GuidSegment(path, "/api/v1/browser-organisations/", "/access"),
+            _ => template == path
+        };
+
+        private static bool GuidSegment(string path, string prefix, string suffix)
+            => path.Length == prefix.Length + 36 + suffix.Length
+                && path.StartsWith(prefix, StringComparison.Ordinal) && path.EndsWith(suffix, StringComparison.Ordinal)
+                && Guid.TryParseExact(path.Substring(prefix.Length, 36), "D", out var id) && id != Guid.Empty;
 
         private static string? Canonical(System.Net.IPAddress? address) => address?.AddressFamily is
             System.Net.Sockets.AddressFamily.InterNetwork or System.Net.Sockets.AddressFamily.InterNetworkV6

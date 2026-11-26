@@ -8,6 +8,12 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
 
+  <!-- Owner-native release witnesses require explicit admission and are NOT_EXECUTED
+       by ordinary CI; all isolated registration and security tests remain automatic. -->
+  <PropertyGroup Condition="'$(ZekaOperatorWitnesses)' == 'true'">
+    <DefineConstants>$(DefineConstants);ZEKA_OPERATOR_WITNESSES</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="AutoFixture" Version="4.18.1" />
     <PackageReference Include="FluentAssertions" Version="6.12.1" />
@@ -46,6 +52,13 @@
          without referencing another service's Application, Domain, or persistence assemblies. -->
     <Compile Include="../../../AdminAreaManagement/AdminAreaManagement.API/TenantAuthentication.cs" Link="AdminAreaBearerRegistration.cs" />
     <Compile Include="../../../ClientManagement/Client.API/TenantAuthentication.cs" Link="ClientBearerRegistration.cs" />
+    <!-- Compile the Client challenge logger and its literal source dependencies in this test assembly. -->
+    <Compile Include="../../../ClientManagement/Client.API/Services/AuthDependencyUnavailableLog.cs" Link="ClientAuthDependencyUnavailableLog.cs" />
+    <Compile Include="../../../ClientManagement/Client.Application/Common/Authorization/TenantAccessDiagnostics.cs" Link="ClientTenantAccessDiagnostics.cs" />
+    <Compile Include="../../../ClientManagement/Client.Application/Common/Authorization/TenantAccess.cs" Link="ClientTenantAccess.cs" />
+    <Compile Include="../../../ClientManagement/Client.Application/ActionWrites/ActionWriteAuthority.cs" Link="ClientActionWriteAuthority.cs" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
   <ItemGroup><Compile Include="../../../../Shared/Authentication.TestSupport/RealHostStartupTests.cs" Link="RealHostStartupTests.cs" /></ItemGroup>
   <ItemGroup>

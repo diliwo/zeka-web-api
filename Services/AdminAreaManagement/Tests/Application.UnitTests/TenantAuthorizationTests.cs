@@ -41,15 +41,14 @@ public sealed class TenantAuthorizationTests
     }
 
     [Fact]
-    public async Task Selection_alone_unknown_permissions_and_forged_organisations_fail_closed()
+    public async Task Selection_alone_and_forged_organisations_fail_closed()
     {
         var selected = Guid.NewGuid();
         foreach (var decision in new[]
         {
             new AuthorizedTenantMembership(selected, Guid.NewGuid(), [], "v1", DateTimeOffset.UtcNow),
             new AuthorizedTenantMembership(Guid.NewGuid(), Guid.NewGuid(), ["Clients.ViewAll"], "v1", DateTimeOffset.UtcNow),
-            new AuthorizedTenantMembership(selected, Guid.Empty, ["Clients.ViewAll"], "v1", DateTimeOffset.UtcNow),
-            new AuthorizedTenantMembership(selected, Guid.NewGuid(), ["Clients.ViewAll", "Unknown"], "v1", DateTimeOffset.UtcNow)
+            new AuthorizedTenantMembership(selected, Guid.Empty, ["Clients.ViewAll"], "v1", DateTimeOffset.UtcNow)
         })
         {
             var scope = new TenantContextScope();

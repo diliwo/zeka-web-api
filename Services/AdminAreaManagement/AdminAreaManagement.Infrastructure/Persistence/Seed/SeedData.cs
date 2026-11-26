@@ -32,18 +32,6 @@ public static class SeedData
             new School { Id = 3, Name = "International University of Applied Science", Locality = "Berlin", TenantName = "Zeka" }
         );
 
-        modelBuilder.Entity<StaffMember>().HasData(
-            new StaffMember { Id = 1, FirstName = "John", LastName = "Doe", UserName = "Cambridge", TeamId = 1, TenantName = "Zeka" },
-            new StaffMember { Id = 2, FirstName = "Helen", LastName = "Ripley", UserName = "hripley", TeamId = 3, TenantName = "Zeka" },
-            new StaffMember { Id = 3, FirstName = "Adama", LastName = "Rezegova", UserName = "Cambridge", TeamId = 2, TenantName = "Zeka" }
-        );
-
-        modelBuilder.Entity<Team>().HasData(
-            new Team { Id = 1, Name = "School & Education Service", Acronym = "SES", TenantName = "Zeka" },
-            new Team { Id = 2, Name = "Imigration Service", Acronym = "IS" , TenantName = "Zeka"},
-            new Team { Id = 3, Name = "Socio-Professional Integration Service", Acronym = "SPI" , TenantName = "Zeka" }
-        );
-
         modelBuilder.Entity<TrainingField>().HasData(
             new TrainingField { Id = 1, Name = "Political Sociology" , TenantName = "Zeka" },
             new TrainingField { Id = 2, Name = "Information Technology" , TenantName = "Zeka" },

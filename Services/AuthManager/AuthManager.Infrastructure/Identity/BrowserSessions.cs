@@ -134,14 +134,38 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
         {
             if (subjectId == Guid.Empty || sessionId == Guid.Empty) return Denied();
             await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
-            if (await LockUserAsync(subjectId, cancellationToken) is null) return Denied();
-            var family = await LockFamilyAsync(sessionId, cancellationToken);
-            if (family is null || family.UserId != subjectId) return Denied();
-            var active = await ActiveAsync(family, clock.GetUtcNow(), cancellationToken);
-            if (!active) await RevokeAsync(family, "session_invalidated", cancellationToken);
+            var observed = await ObserveCurrentSessionAsync(subjectId, sessionId, requirePasswordIdentity: false, cancellationToken);
+            if (observed == SessionObservation.Missing) return Denied();
             await transaction.CommitAsync(cancellationToken);
-            return new() { Outcome = active ? BrowserSessionOutcome.Success : BrowserSessionOutcome.Unauthenticated };
+            return new() { Outcome = observed == SessionObservation.Active
+                ? BrowserSessionOutcome.Success : BrowserSessionOutcome.Unauthenticated };
         }, cancellationToken)).Outcome;
+
+    // A creation attempt already owns the transaction. Reuse the same current-session
+    // locks, stamp, expiry and active-user policy rather than nesting a session transaction.
+    internal async Task<bool> ValidateForProvisioningAsync(Guid subjectId, Guid sessionId, CancellationToken cancellationToken)
+        => await ObserveCurrentSessionAsync(subjectId, sessionId, requirePasswordIdentity: true, cancellationToken)
+            == SessionObservation.Active;
+
+    private enum SessionObservation { Missing, Inactive, Active }
+
+    private async Task<SessionObservation> ObserveCurrentSessionAsync(Guid subjectId, Guid sessionId,
+        bool requirePasswordIdentity, CancellationToken cancellationToken)
+    {
+        if (database.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("BROWSER_SESSION_TRANSACTION_REQUIRED");
+        if (subjectId == Guid.Empty || sessionId == Guid.Empty) return SessionObservation.Missing;
+        var user = await LockUserAsync(subjectId, cancellationToken);
+        if (user is null) return SessionObservation.Missing;
+        var family = await LockFamilyAsync(sessionId, cancellationToken);
+        if (family is null || family.UserId != subjectId) return SessionObservation.Missing;
+        // A service-principal session cannot become a browser creator. Existing genuine
+        // password sign-in requires this Identity value; worker issuance deliberately has none.
+        if (requirePasswordIdentity && string.IsNullOrWhiteSpace(user.PasswordHash)) return SessionObservation.Missing;
+        var active = await ActiveAsync(family, clock.GetUtcNow(), cancellationToken);
+        if (!active) await RevokeAsync(family, "session_invalidated", cancellationToken);
+        return active ? SessionObservation.Active : SessionObservation.Inactive;
+    }
 
     private async Task<bool> ActiveAsync(BrowserSessionFamily family, DateTimeOffset now, CancellationToken cancellationToken)
     {
@@ -153,8 +177,8 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
         var affected = database.BrowserSessionFamilies.Where(x => x.UserId == family.UserId && x.RevokedAtUtc == null);
         if (user is not null && Eligible(user, now) && !string.IsNullOrEmpty(user.SecurityStamp))
             affected = affected.Where(x => x.SecurityStamp == family.SecurityStamp);
-        await affected
-            .ExecuteUpdateAsync(set => set.SetProperty(x => x.RevokedAtUtc, (DateTimeOffset?)now), cancellationToken);
+        await AuthOwnerSqlReceipt.ObserveAuthUpdateAsync(database, () => affected
+            .ExecuteUpdateAsync(set => set.SetProperty(x => x.RevokedAtUtc, (DateTimeOffset?)now), cancellationToken));
         family.RevokedAtUtc = now;
         await EventAsync(family.UserId, family.Id, "identity_invalidated", cancellationToken);
         return false;
@@ -182,16 +206,19 @@ public sealed class BrowserSessions(AuthDbContext database, UserManager<User> us
 
     private async Task<BrowserSessionFamily?> LockFamilyAsync(Guid id, CancellationToken cancellationToken)
     {
-        var family = await database.BrowserSessionFamilies.FromSqlInterpolated(
-            $"SELECT * FROM \"BrowserSessionFamilies\" WHERE \"Id\" = {id} FOR UPDATE")
-            .SingleOrDefaultAsync(cancellationToken);
+        var family = await AuthOwnerSqlReceipt.ObserveAuthQueryAsync(database, () =>
+            database.BrowserSessionFamilies.FromSqlInterpolated(
+                $"SELECT * FROM \"BrowserSessionFamilies\" WHERE \"Id\" = {id} FOR UPDATE")
+                .SingleOrDefaultAsync(cancellationToken));
         if (family is not null) await database.Entry(family).ReloadAsync(cancellationToken);
         return family;
     }
     private async Task<User?> LockUserAsync(Guid id, CancellationToken cancellationToken)
     {
-        var user = await database.Users.FromSqlInterpolated(
-            $"SELECT * FROM \"AspNetUsers\" WHERE \"Id\" = {id} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
+        var user = await AuthOwnerSqlReceipt.ObserveAuthQueryAsync(database, () =>
+            database.Users.FromSqlInterpolated(
+                $"SELECT * FROM \"AspNetUsers\" WHERE \"Id\" = {id} FOR UPDATE")
+                .SingleOrDefaultAsync(cancellationToken));
         if (user is not null) await database.Entry(user).ReloadAsync(cancellationToken);
         return user;
     }

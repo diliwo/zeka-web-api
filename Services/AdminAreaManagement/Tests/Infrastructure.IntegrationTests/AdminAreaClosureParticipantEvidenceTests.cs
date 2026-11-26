@@ -20,6 +20,7 @@ using Xunit;
 using Zeka.Contracts.Staff.V1;
 using Zeka.Extensions.EventBus;
 using Zeka.Extensions.EventBus.Abstractions;
+using Zeka.Extensions.EventBus.RabbitMq;
 using Zeka.Extensions.MultiTenancy.Abstractions;
 using Zeka.Lifecycle.Contracts;
 
@@ -929,17 +930,21 @@ public sealed class AdminAreaClosureParticipantEvidenceTests(PostgreSqlRlsRuntim
         public Task PublishAsync(Event message) { Calls++; return Task.CompletedTask; }
     }
 
-    private sealed class BlockingPublisher : IEventBus
+    private sealed class BlockingPublisher : IOwnedEventBus
     {
+        private readonly PublicationLifecycle lifecycle = new(new PublisherFailStopOptions());
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Calls { get; private set; }
-        public Task PublishAsync(Event message)
+        public bool ProcessFailStopEnabled => true; // Controlled fixture capability; no process FailFast.
+        public IPublicationAttempt BeginPublication(Event message) => lifecycle.Begin(attempt =>
         {
+            attempt.CommitSend();
             Calls++;
             Started.TrySetResult();
             return Release.Task;
-        }
+        });
+        public Task PublishAsync(Event message) => BeginPublication(message).Completion;
     }
 
     private sealed record Identity(string SubjectId, Guid SelectedOrganisationId) : IOperationIdentity;

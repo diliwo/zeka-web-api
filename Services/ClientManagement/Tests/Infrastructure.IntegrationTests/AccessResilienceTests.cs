@@ -13,6 +13,7 @@ namespace Infrastructure.IntegrationTests;
 
 [Trait("Issue", "46")]
 [Trait("Evidence", "ApplicationConformance")]
+[Collection(ClientAuthorityTimingCollection.Name)]
 public sealed class AccessResilienceTests
 {
     [Theory]
@@ -109,6 +110,9 @@ public sealed class AccessResilienceTests
     [Fact]
     public async Task Metrics_and_traces_record_retry_latency_and_failure_without_identity_or_body()
     {
+        using var probe = new Activity("tenant-access-metrics-probe").SetIdFormat(ActivityIdFormat.W3C).Start();
+        var probeTrace = probe.TraceId;
+        var sync = new object();
         var tags = new List<KeyValuePair<string, object?>>();
         var instruments = new HashSet<string>();
         Activity? completed = null;
@@ -116,29 +120,59 @@ public sealed class AccessResilienceTests
         listener.InstrumentPublished = (instrument, meter) =>
         { if (instrument.Meter.Name == CurrentTenantAccessClient.DiagnosticsName) meter.EnableMeasurementEvents(instrument); };
         listener.SetMeasurementEventCallback<long>((instrument, value, values, _) =>
-        { lock (tags) { instruments.Add(instrument.Name); tags.AddRange(values.ToArray()); } });
+        {
+            if (Activity.Current?.TraceId != probeTrace) return;
+            lock (sync) { instruments.Add(instrument.Name); tags.AddRange(values.ToArray()); }
+        });
         listener.SetMeasurementEventCallback<double>((instrument, value, values, _) =>
-        { lock (tags) { instruments.Add(instrument.Name); tags.AddRange(values.ToArray()); } });
+        {
+            if (Activity.Current?.TraceId != probeTrace) return;
+            lock (sync) { instruments.Add(instrument.Name); tags.AddRange(values.ToArray()); }
+        });
         listener.Start();
         using var traces = new ActivityListener
         {
             ShouldListenTo = source => source.Name == CurrentTenantAccessClient.DiagnosticsName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStopped = activity => completed = activity
+            ActivityStopped = activity =>
+            {
+                if (activity.TraceId != probeTrace || activity.OperationName != "tenant_access.resolve") return;
+                lock (sync) completed = activity;
+            }
         };
         ActivitySource.AddActivityListener(traces);
         using var http = Client(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
             { Content = new StringContent("private-response-body") })));
         await new CurrentTenantAccessClient(http, new Credential()).ResolveAsync("private-subject", Guid.NewGuid(), default);
-        Assert.Contains("tenant_access.attempts", instruments);
-        Assert.Contains("tenant_access.authority_failures", instruments);
-        Assert.Contains("tenant_access.duration", instruments);
-        Assert.NotNull(completed);
-        Assert.Equal("Unavailable", completed!.GetTagItem("outcome"));
-        Assert.Equal(2, completed.GetTagItem("attempt.count"));
-        tags.AddRange(completed.TagObjects);
-        Assert.All(tags, tag => Assert.Contains(tag.Key, new[] { "attempt", "attempt.count", "reason", "outcome", "contract.version" }));
-        Assert.DoesNotContain(tags, tag => (tag.Value?.ToString() ?? "").Contains("private", StringComparison.Ordinal));
+
+        // A different request must not replace the probe's final activity or measurements.
+        var otherOrganisation = Guid.NewGuid();
+        using (var other = new Activity("unrelated-authority-call").SetParentId(
+            ActivityTraceId.CreateRandom(), ActivitySpanId.CreateRandom(), ActivityTraceFlags.Recorded).Start())
+        using (var otherHttp = Client(new Handler((_, _) => Task.FromResult(Allowed(otherOrganisation)))))
+        {
+            Assert.Equal(TenantAccessOutcome.Authorized,
+                (await new CurrentTenantAccessClient(otherHttp, new Credential()).ResolveAsync("subject", otherOrganisation, default)).Outcome);
+        }
+
+        string[] observedInstruments;
+        KeyValuePair<string, object?>[] observedTags;
+        Activity? observedActivity;
+        lock (sync)
+        {
+            observedInstruments = instruments.ToArray();
+            observedTags = tags.ToArray();
+            observedActivity = completed;
+        }
+        Assert.Contains("tenant_access.attempts", observedInstruments);
+        Assert.Contains("tenant_access.authority_failures", observedInstruments);
+        Assert.Contains("tenant_access.duration", observedInstruments);
+        Assert.NotNull(observedActivity);
+        Assert.Equal("Unavailable", observedActivity!.GetTagItem("outcome"));
+        Assert.Equal(2, observedActivity.GetTagItem("attempt.count"));
+        observedTags = observedTags.Concat(observedActivity.TagObjects).ToArray();
+        Assert.All(observedTags, tag => Assert.Contains(tag.Key, new[] { "attempt", "attempt.count", "reason", "outcome", "contract.version" }));
+        Assert.DoesNotContain(observedTags, tag => (tag.Value?.ToString() ?? "").Contains("private", StringComparison.Ordinal));
     }
 
     private static HttpClient Client(HttpMessageHandler handler) => new(handler) { BaseAddress = new("https://auth.invalid/") };
@@ -161,9 +195,16 @@ public sealed class AccessResilienceTests
             ContractVersion = invalid == "version" ? 2 : 1, SubjectId = "subject", OrganisationId = organisation,
             OrganisationMembershipId = invalid == "membership" ? Guid.Empty : Guid.NewGuid(),
             EffectivePermissionCodes = invalid == "duplicate" ? new[] { "ReferenceData.View", "ReferenceData.View" }
-                : new[] { invalid == "permission" ? "unknown" : "ReferenceData.View" },
+                : new[] { invalid == "permission" ? "invalid permission" : "ReferenceData.View" },
             DecisionVersion = invalid == "decision" ? "" : "1",
             ObservedAtUtc = invalid == "observation" ? default : DateTimeOffset.UtcNow
         })
     };
+}
+
+// Measure the existing authority budgets without concurrent container/bootstrap fixtures.
+[CollectionDefinition(ClientAuthorityTimingCollection.Name, DisableParallelization = true)]
+public sealed class ClientAuthorityTimingCollection
+{
+    public const string Name = "Client authority deadline isolation";
 }

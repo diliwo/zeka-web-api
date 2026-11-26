@@ -19,20 +19,6 @@ public sealed class TenantDatabase : IAsyncLifetime
         await using var deployment = new DeploymentDbContext(
             new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(ConnectionString).Options);
         var migrator = deployment.GetService<IMigrator>();
-        await migrator.MigrateAsync("20250427103057_Initial Migration");
-        var organisation = Guid.NewGuid();
-        await deployment.Database.ExecuteSqlInterpolatedAsync($"""
-            UPDATE "StaffMembers" SET "UserName" = 'jdoe' WHERE "Id" = 1;
-            CREATE TABLE "__OrganisationTenantMap" ("TenantName" text PRIMARY KEY, "OrganisationId" uuid NOT NULL UNIQUE);
-            INSERT INTO "__OrganisationTenantMap" VALUES ('Zeka', {organisation});
-            """);
-        await migrator.MigrateAsync("20260904124303_OrganisationTenantConstraints");
-        // Explicit synthetic membership identities for the three historical fixture records.
-        await deployment.Database.ExecuteSqlInterpolatedAsync($"""
-            CREATE TABLE "__StaffMembershipMap" ("LocalId" integer PRIMARY KEY, "OrganisationId" uuid NOT NULL, "OrganisationMembershipId" uuid NOT NULL);
-            INSERT INTO "__StaffMembershipMap" VALUES
-              (1, {organisation}, {Guid.NewGuid()}), (2, {organisation}, {Guid.NewGuid()}), (3, {organisation}, {Guid.NewGuid()});
-            """);
         await migrator.MigrateAsync("20260910165920_ExplicitTenantEnforcement");
     }
     public Task DisposeAsync() => postgres.DisposeAsync().AsTask();

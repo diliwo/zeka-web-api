@@ -35,13 +35,6 @@ public sealed class CityPostgreSqlFixture : IAsyncLifetime
             new DbContextOptionsBuilder<DeploymentDbContext>().UseNpgsql(connectionString.ConnectionString).Options);
         var migrator = context.GetService<IMigrator>();
         await migrator.MigrateAsync("20250427103057_Initial Migration");
-        // Existing issue #43 fixture remediation, confined to this disposable database.
-        var organisationId = Guid.NewGuid();
-        await context.Database.ExecuteSqlInterpolatedAsync($"""
-            UPDATE "StaffMembers" SET "UserName" = 'jdoe' WHERE "Id" = 1;
-            CREATE TABLE "__OrganisationTenantMap" ("TenantName" text PRIMARY KEY, "OrganisationId" uuid NOT NULL UNIQUE);
-            INSERT INTO "__OrganisationTenantMap" VALUES ('Zeka', {organisationId});
-            """);
         await migrator.MigrateAsync(PreviousMigration);
         // Most behavioral tests own their City fixtures. Keep the historical seeds in a dedicated migration test.
         if (!keepSeedCities) await context.Database.ExecuteSqlRawAsync("DELETE FROM \"Cities\"");

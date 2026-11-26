@@ -14,6 +14,7 @@ using Xunit;
 namespace Infrastructure.IntegrationTests;
 
 [Trait("Issue", "81")]
+[Collection(ClientAuthorityTimingCollection.Name)]
 public sealed class Issue81AuthorityHttpTests
 {
     [Fact]
@@ -94,9 +95,10 @@ public sealed class Issue81AuthorityHttpTests
             await Task.Delay(Timeout.InfiniteTimeSpan, token);
             return Response(HttpStatusCode.OK, "{}");
         });
+        var authority = provider.GetRequiredService<IActionAuthorityReads>();
         var watch = Stopwatch.StartNew();
         var denied = await Assert.ThrowsAsync<TenantAccessException>(() =>
-            provider.GetRequiredService<IActionAuthorityReads>().EligibilityAsync(
+            authority.EligibilityAsync(
                 Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), default));
         watch.Stop();
         Assert.Equal(AccessFailure.Unavailable, denied.Failure);

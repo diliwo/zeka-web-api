@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "zeka-m1-database-configuration/v1",
+  "project": "zeka-m1",
+  "environment": "LocalStack",
+  "databaseHost": "postgres",
+  "databasePort": 5432,
+  "services": {
+    "auth": {
+      "database": "zeka_m1_auth",
+      "owner": "zeka_auth_owner",
+      "migrator": "zeka_auth_migrator",
+      "runtime": "zeka_auth_runtime",
+      "connectionStringKey": "Default"
+    },
+    "adminarea": {
+      "database": "zeka_m1_adminarea",
+      "owner": "zeka_adminarea_owner",
+      "migrator": "zeka_adminarea_migrator",
+      "runtime": "zeka_adminarea_runtime",
+      "connectionStringKey": "ClientApiConnection"
+    },
+    "client": {
+      "database": "zeka_m1_client",
+      "owner": "zeka_client_owner",
+      "migrator": "zeka_client_migrator",
+      "runtime": "zeka_client_runtime",
+      "connectionStringKey": "ClientApiConnection"
+    }
+  },
+  "delivery": {
+    "runtimeComponent": "{service}/database.LocalStack.json",
+    "containerPath": "/run/secrets/runtime-config.json",
+    "readOnly": true,
+    "applicationReady": false
+  },
+  "authentication": {
+    "issuer": "https://auth.zeka-m1.test:19443",
+    "jwksUri": "https://auth.zeka-m1.test:19443/.well-known/jwks.json",
+    "audience": {
+      "requiredInput": "one explicit common single-token audience; no generated default"
+    },
+    "browserOrigin": {
+      "requiredInput": "explicit approved HTTPS browser Origin, separate from issuer and Host"
+    },
+    "requiredBeforeApplicationConfiguration": [
+      "actual trusted TLS listener at 19443",
+      "owner hosts-file mapping and internal DNS alias",
+      "admitted audience/browser Origin/session lifetime policy",
+      "distinct worker enrolment and valid renewable session-bound credential"
+    ]
+  }
+}

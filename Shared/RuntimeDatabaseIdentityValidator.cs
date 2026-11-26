@@ -1,3 +1,4 @@
+using Zeka.OwnerSqlEvidence;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
 
@@ -23,7 +24,7 @@ public sealed class RuntimeDatabaseIdentityValidator(string connectionString, st
                         or pg_catalog.has_parameter_privilege(current_user,parameter.parname,'ALTER SYSTEM'))
             from pg_catalog.pg_roles r where r.rolname=current_user
             """;
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var reader = await OwnerSqlExecution.ExecuteReaderAsync(command, cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)
             || reader.GetString(0) != expectedRole || reader.GetString(1) != expectedRole
             || !reader.GetBoolean(2) || reader.GetBoolean(3) || reader.GetBoolean(4)
@@ -32,6 +33,7 @@ public sealed class RuntimeDatabaseIdentityValidator(string connectionString, st
             || !reader.GetBoolean(11) || !reader.GetBoolean(12)
             || await reader.ReadAsync(cancellationToken))
             throw new InvalidOperationException("The configured database credential is not the approved restricted runtime identity.");
+        await OwnerSqlExecution.CompleteReaderAsync(reader, cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

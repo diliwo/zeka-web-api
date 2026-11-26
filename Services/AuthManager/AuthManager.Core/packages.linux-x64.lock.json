@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0": {
+      "Zeka.Extensions.MultiTenancy.Abstractions": {
+        "type": "Direct",
+        "requested": "[2.0.0-preview.1, )",
+        "resolved": "2.0.0-preview.1",
+        "contentHash": "gHNc0w6UNCpMKo6UBEyuLu1WCRaUjL13gw1xFc5anKyP+vDlJCSgdpnnafxzrrtmGK/IK8jQ2xGcg/j2864vOw=="
+      }
+    },
+    "net8.0/linux-x64": {}
+  }
+}

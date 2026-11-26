@@ -61,6 +61,18 @@ public sealed class OrganisationMembershipTests
         PermissionSet.SystemPermissionSets.Should().OnlyContain(value => value.IsSystem);
     }
 
+    [Fact]
+    public void Owner_cannot_suspend_or_depart_independently_of_a_coordinated_ownership_operation()
+    {
+        var owner = OrganisationMembership.CreateOwner(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), JoinedAt);
+        owner.Suspend(JoinedAt.AddMinutes(1)).Should().BeFalse();
+        owner.Leave(JoinedAt.AddMinutes(2)).Should().BeFalse();
+        owner.Status.Should().Be(MembershipStatus.Active);
+        owner.SuspendedAtUtc.Should().BeNull();
+        owner.EndedAtUtc.Should().BeNull();
+        owner.ConcurrencyVersion.Should().Be(1);
+    }
+
     private static OrganisationMembership CreateMembership() =>
         OrganisationMembership.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), PermissionSet.MemberId, JoinedAt);

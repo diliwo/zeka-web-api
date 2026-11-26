@@ -107,12 +107,12 @@ public sealed class PostgreSqlRlsRuntimeDatabase : IAsyncLifetime
         await deployment.Database.ExecuteSqlRawAsync("SET ROLE zeka_adminarea_owner");
         var migrator = deployment.GetService<IMigrator>();
         await migrator.MigrateAsync("20250427103057_Initial Migration");
+        await LegacyAdminAreaRows.SeedAsync(deployment);
         var organisation = Guid.NewGuid();
         SeedOrganisation = organisation;
         await deployment.Database.ExecuteSqlInterpolatedAsync($"""
-            UPDATE "StaffMembers" SET "UserName" = 'jdoe' WHERE "Id" = 1;
             CREATE TABLE "__OrganisationTenantMap" ("TenantName" text PRIMARY KEY, "OrganisationId" uuid NOT NULL UNIQUE);
-            INSERT INTO "__OrganisationTenantMap" VALUES ('Zeka', {organisation});
+            INSERT INTO "__OrganisationTenantMap" VALUES ('Legacy', {organisation});
             """);
         await migrator.MigrateAsync("20260904124303_OrganisationTenantConstraints");
         await deployment.Database.ExecuteSqlInterpolatedAsync($"""

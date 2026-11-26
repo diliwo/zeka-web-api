@@ -125,8 +125,12 @@ public sealed class AssigneeEligibilityResolverTests(PostgreSqlFixture postgres)
         var now = DateTimeOffset.UtcNow.AddSeconds(1);
         switch (condition)
         {
-            case "actor_suspended": state.ActorMembership.Suspend(now); break;
-            case "actor_left": state.ActorMembership.Leave(now); break;
+            case "actor_suspended":
+            case "actor_left":
+                // Security-negative fixture: persist a legacy/corrupt Owner row without weakening domain transitions.
+                state.Database.Entry(state.ActorMembership).Property(x => x.Status).CurrentValue =
+                    condition == "actor_suspended" ? MembershipStatus.Suspended : MembershipStatus.Left;
+                break;
             case "actor_no_edit":
                 state.Database.Entry(state.ActorMembership).Property(x => x.PermissionSetId).CurrentValue = PermissionSet.LimitedViewerId;
                 break;
@@ -153,6 +157,13 @@ public sealed class AssigneeEligibilityResolverTests(PostgreSqlFixture postgres)
                 break;
         }
         await state.Database.SaveChangesAsync();
+        if (condition is "actor_suspended" or "actor_left")
+        {
+            var expectedStatus = condition == "actor_suspended" ? MembershipStatus.Suspended : MembershipStatus.Left;
+            Assert.Equal(expectedStatus, await state.Database.OrganisationMemberships.AsNoTracking()
+                .Where(membership => membership.Id == state.ActorMembership.Id)
+                .Select(membership => membership.Status).SingleAsync());
+        }
         Assert.Null(await state.ResolveAsync());
         Assert.Null(await state.ResolveAsync());
     }

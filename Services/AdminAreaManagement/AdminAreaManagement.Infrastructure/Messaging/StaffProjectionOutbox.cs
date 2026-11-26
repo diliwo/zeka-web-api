@@ -75,8 +75,17 @@ public sealed class StaffProjectionOutbox(ApplicationDbContext database, ITenant
                     ?? throw new InvalidOperationException("Invalid staff outbox record.");
                 if (message.OrganisationId != tenant.Current.OrganisationId.Value || message.Id != row.EventId)
                     throw new TenantContextException(TenantFailure.Conflict);
-                // The legacy broker port has no cancellation argument; bound the wait. Duplicates are safe.
-                await publisher.PublishAsync(message).WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+                // Refuse BEFORE starting I/O when the bounded process-custody capability is absent.
+                if (publisher is not IOwnedEventBus owned || !owned.ProcessFailStopEnabled)
+                    throw new InvalidOperationException("Outbox dispatch requires explicit owner-approved M1 publisher fail-stop.");
+                var attempt = owned.BeginPublication(message);
+                // Cancellation requests closure, but NEVER releases this transaction before proven settlement.
+                // The independent watchdog terminates the whole process if bounded stop remains unproven.
+                using var stopOnCancellation = cancellationToken.Register(() => { _ = attempt.StopAsync(); });
+                await attempt.Completion;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (attempt.State != PublicationState.Closed)
+                    throw new InvalidOperationException("Publisher terminality was not proven.");
                 row.PublishedAtUtc = DateTimeOffset.UtcNow;
                 Publications.Add(1, new KeyValuePair<string, object?>("outcome", "published"));
             }

@@ -1,0 +1,464 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Xunit;
+using Zeka.AuthOwnerProvision;
+
+namespace Zeka.AuthOwnerProvision.Tests;
+
+public sealed class OwnerProtocolTests
+{
+    private static readonly string Source = new('a', 40);
+    private static readonly string Binary = new('b', 64);
+    private static readonly string DatabaseSource = new('c', 40);
+
+    [Fact]
+    public void Explicit_owner_scope_is_admitted_without_database_or_credentials_access()
+    {
+        var input = Parse(Valid());
+        Assert.Equal(input.SubjectId, OwnerProtocol.Admit(input, Binding()).Value.SubjectId);
+        Assert.DoesNotContain(input.OwnerPassword, input.ToString());
+        Assert.DoesNotContain(input.AuthRuntimeConnectionString, input.ToString());
+    }
+
+    [Theory]
+    [InlineData("schema", "wrong")]
+    [InlineData("scope", "C2")]
+    [InlineData("project", "historical")]
+    [InlineData("authorityKind", "VerifiedSubject")]
+    [InlineData("ownerDecisionId", "wrong")]
+    [InlineData("approvalCommentId", "wrong")]
+    [InlineData("ownerAccount", "another-owner")]
+    [InlineData("actualOwnerSid", "S-1-5-21-111-222-333-1002")]
+    [InlineData("expectedOwnerSid", "")]
+    [InlineData("actualOwnerProfile", "C:\\Users\\another")]
+    [InlineData("expectedOwnerProfile", "C:\\Users\\another")]
+    [InlineData("normalizedEmail", "OTHER@EXAMPLE.ORG")]
+    [InlineData("sourceCommit", "wrong")]
+    [InlineData("binarySha256", "wrong")]
+    [InlineData("databaseSourceCommit", "wrong")]
+    [InlineData("databaseName", "postgres")]
+    [InlineData("initializationId", "")]
+    [InlineData("subjectId", "00000000-0000-0000-0000-000000000000")]
+    public void Negative_header_fixture_is_rejected_without_side_effects(string field, string value)
+    {
+        var json = Valid(); json[field] = value;
+        Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+    }
+
+    [Theory]
+    [InlineData("Host=elsewhere;Database=zeka_m1_auth;Username=zeka_auth_runtime;Password=unit_fixture_not_live")]
+    [InlineData("Host=postgres;Database=postgres;Username=zeka_auth_runtime;Password=unit_fixture_not_live")]
+    [InlineData("Host=postgres;Database=zeka_m1_auth;Username=postgres;Password=unit_fixture_not_live")]
+    [InlineData("Host=postgres;Database=zeka_m1_auth;Username=zeka_auth_migrator;Password=unit_fixture_not_live")]
+    [InlineData("Host=postgres;Database=zeka_m1_auth;Username=zeka_auth_runtime;Password=unit_fixture_not_live;Options=-c role=postgres")]
+    public void Foreign_target_or_privilege_fixture_is_rejected_without_connection(string connection)
+    {
+        var json = Valid(); json["authRuntimeConnectionString"] = connection;
+        Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+    }
+
+    [Theory]
+    [InlineData("Host=postgres;Port=5433;Database=zeka_m1_auth;Username=zeka_auth_runtime;Password=unit_fixture_not_live")]
+    [InlineData("Host=postgres;Database=zeka_m1_auth;Username=zeka_auth_runtime;Password=")]
+    [InlineData("Host=postgres;Database=zeka_m1_auth;Username=zeka_auth_runtime;Password=unit_fixture_not_live;Search Path=public")]
+    [InlineData("not-a-connection-string")]
+    public void Port_password_search_path_and_malformed_connection_refusals_have_the_same_safe_code(string connection)
+    {
+        var json = Valid(); json["authRuntimeConnectionString"] = connection;
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal("RUNTIME_CONNECTION_REJECTED", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData("idempotency-null")]
+    [InlineData("idempotency-empty")]
+    [InlineData("idempotency-whitespace")]
+    [InlineData("idempotency-long")]
+    [InlineData("display-null")]
+    [InlineData("display-empty")]
+    [InlineData("display-whitespace")]
+    [InlineData("display-long")]
+    [InlineData("password-null")]
+    [InlineData("password-empty")]
+    [InlineData("password-long")]
+    [InlineData("processing-timeout")]
+    [InlineData("retention")]
+    public void Provisioning_shape_and_fixed_policy_are_checked_before_database_admission(string invalid)
+    {
+        var json = Valid();
+        switch (invalid)
+        {
+            case "idempotency-null": json["idempotencyKey"] = null; break;
+            case "idempotency-empty": json["idempotencyKey"] = ""; break;
+            case "idempotency-whitespace": json["idempotencyKey"] = " "; break;
+            case "idempotency-long": json["idempotencyKey"] = new string('i', 201); break;
+            case "display-null": json["displayName"] = null; break;
+            case "display-empty": json["displayName"] = ""; break;
+            case "display-whitespace": json["displayName"] = " "; break;
+            case "display-long": json["displayName"] = new string('d', 201); break;
+            case "password-null": json["ownerPassword"] = null; break;
+            case "password-empty": json["ownerPassword"] = ""; break;
+            case "password-long": json["ownerPassword"] = new string('x', 513); break;
+            case "processing-timeout": json["processingTimeoutSeconds"] = 119; break;
+            case "retention": json["retentionSeconds"] = 86399; break;
+        }
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal("PROVISIONING_INPUT_REJECTED", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData("sourceCommit", "SOURCE_BINDING_REJECTED")]
+    [InlineData("databaseSourceCommit", "DATABASE_BINDING_REJECTED")]
+    [InlineData("expectedOwnerSid", "OWNER_IDENTITY_REJECTED")]
+    public void Explicit_null_authority_values_are_refused_without_native_errors(string field, string code)
+    {
+        var json = Valid(); json[field] = null;
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal(code, error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData("agreements")]
+    [InlineData("requiredAgreements")]
+    [InlineData("emailVerified")]
+    [InlineData("ownerAttested")]
+    public void Undeclared_or_legal_agreement_input_is_not_a_C1_control(string member)
+    {
+        var json = Valid(); json[member] = new JsonArray();
+        Assert.Throws<OwnerToolException>(() => Parse(json));
+    }
+
+    [Fact]
+    public void Duplicate_members_and_oversized_input_are_rejected()
+    {
+        Assert.Throws<OwnerToolException>(() => OwnerProtocol.Parse(
+            Encoding.UTF8.GetBytes("{\"schema\":\"one\",\"schema\":\"two\"}")));
+        Assert.Throws<OwnerToolException>(() => OwnerProtocol.Parse(new byte[OwnerProtocol.MaximumInputBytes + 1]));
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("[{\"schema\":\"one\",\"schema\":\"two\"}]")]
+    [InlineData("{\"schema\": [ {\"nested\": [true, null]} ]}")]
+    public void Non_object_or_nested_ambiguous_stdin_is_never_an_owner_authority(string text)
+    {
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Parse(Encoding.UTF8.GetBytes(text)));
+        Assert.Equal("INPUT_SCHEMA_REJECTED", error.Code);
+    }
+
+    [Theory]
+    [InlineData("S-1-5-21-0-0-0-0")]
+    [InlineData("S-1-5-21-111-222-333-4294967295")]
+    [InlineData("S-1-5-21-\u0661-\u0662-\u0663-\u0664")]
+    public void Existing_sid_digit_formats_remain_admitted(string sid)
+    {
+        var json = Valid(); json["expectedOwnerSid"] = sid; json["actualOwnerSid"] = sid;
+        Assert.Equal(sid, OwnerProtocol.Admit(Parse(json), Binding()).Value.ExpectedOwnerSid);
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(128)]
+    public void Initialization_identifier_length_boundaries_are_admitted(int length)
+    {
+        var json = Valid(); json["initializationId"] = new string('A', length);
+        Assert.Equal(length, OwnerProtocol.Admit(Parse(json), Binding()).Value.InitializationId.Length);
+    }
+
+    [Theory]
+    [InlineData(15)]
+    [InlineData(129)]
+    public void Initialization_identifier_outside_length_boundaries_is_rejected(int length)
+    {
+        var json = Valid(); json["initializationId"] = new string('A', length);
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal("DATABASE_BINDING_REJECTED", error.Code);
+    }
+
+    [Theory]
+    [InlineData('0')]
+    [InlineData('f')]
+    public void Lowercase_hex_boundaries_remain_admitted(char value)
+    {
+        var source = new string(value, 40); var binary = new string(value, 64);
+        var json = Valid(); json["sourceCommit"] = source; json["binarySha256"] = binary;
+        json["databaseSourceCommit"] = source;
+        var binding = new AssemblyBinding(source, "0.1.0+" + source, binary);
+        Assert.Equal(source, OwnerProtocol.Admit(Parse(json), binding).Value.SourceCommit);
+    }
+
+    [Theory]
+    [InlineData("sourceCommit", 39, "SOURCE_BINDING_REJECTED")]
+    [InlineData("sourceCommit", 41, "SOURCE_BINDING_REJECTED")]
+    [InlineData("binarySha256", 63, "SOURCE_BINDING_REJECTED")]
+    [InlineData("binarySha256", 65, "SOURCE_BINDING_REJECTED")]
+    [InlineData("databaseSourceCommit", 39, "DATABASE_BINDING_REJECTED")]
+    [InlineData("databaseSourceCommit", 41, "DATABASE_BINDING_REJECTED")]
+    public void Hash_length_near_misses_keep_the_existing_rejection_code(string field, int length, string code)
+    {
+        var json = Valid(); json[field] = new string('a', length);
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(Parse(json), Binding()));
+        Assert.Equal(code, error.Code);
+    }
+
+    [Theory]
+    [InlineData("expectedOwnerSid", "OWNER_IDENTITY_REJECTED")]
+    [InlineData("initializationId", "DATABASE_BINDING_REJECTED")]
+    [InlineData("sourceCommit", "SOURCE_BINDING_REJECTED")]
+    [InlineData("binarySha256", "SOURCE_BINDING_REJECTED")]
+    [InlineData("databaseSourceCommit", "DATABASE_BINDING_REJECTED")]
+    public void Pathological_near_match_fields_fail_closed_inside_the_stdin_limit(string field, string code)
+    {
+        var json = Valid();
+        var value = field == "expectedOwnerSid"
+            ? "S-1-5-21-" + new string('9', 30000) + "-1-1-1!"
+            : new string('a', 60000) + "!";
+        json[field] = value;
+        if (field == "expectedOwnerSid") json["actualOwnerSid"] = value;
+        var bytes = Encoding.UTF8.GetBytes(json.ToJsonString());
+        Assert.InRange(bytes.Length, 1, OwnerProtocol.MaximumInputBytes);
+        var input = OwnerProtocol.Parse(bytes);
+        var error = Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(input, Binding()));
+        Assert.Equal(code, error.Code);
+    }
+
+    [Fact]
+    public void Assembly_informational_version_and_hash_are_both_required()
+    {
+        var input = Parse(Valid());
+        Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(input, Binding() with { InformationalVersion = "unknown" }));
+        Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(input, Binding() with { BinarySha256 = new string('d', 64) }));
+        Assert.Throws<OwnerToolException>(() => OwnerProtocol.Admit(input, Binding() with { SourceCommit = new string('d', 40) }));
+    }
+
+    [Fact]
+    public void Existing_database_marker_uses_initialization_source_not_new_binary_source()
+    {
+        var input = Parse(Valid());
+        var role = JsonSerializer.Serialize(new { schema = "zeka-m1-role/v1",
+            initializationId = input.InitializationId, service = "auth", kind = "runtime",
+            sourceCommit = DatabaseSource });
+        RuntimeAdmission.ValidateMarkers(input, role,
+            $"zeka-m1-database/v1:{input.InitializationId}:auth:{DatabaseSource}");
+        Assert.Throws<OwnerToolException>(() => RuntimeAdmission.ValidateMarkers(input,
+            role.Replace(DatabaseSource, Source),
+            $"zeka-m1-database/v1:{input.InitializationId}:auth:{DatabaseSource}"));
+    }
+
+    [Theory]
+    [InlineData("schema")]
+    [InlineData("initializationId")]
+    [InlineData("service")]
+    [InlineData("kind")]
+    [InlineData("sourceCommit")]
+    [InlineData("database")]
+    [InlineData("extra")]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    [InlineData("undeclared-replacement")]
+    [InlineData("wrong-value-kind")]
+    [InlineData("array")]
+    [InlineData("null")]
+    [InlineData("malformed")]
+    public void Runtime_marker_scope_and_structure_fail_closed_without_connecting(string defect)
+    {
+        var input = Parse(Valid());
+        var role = new JsonObject
+        {
+            ["schema"] = "zeka-m1-role/v1", ["initializationId"] = input.InitializationId,
+            ["service"] = "auth", ["kind"] = "runtime", ["sourceCommit"] = DatabaseSource
+        };
+        var database = $"zeka-m1-database/v1:{input.InitializationId}:auth:{DatabaseSource}";
+        if (role.ContainsKey(defect)) role[defect] = "not-the-admitted-value";
+        if (defect == "database") database += ":unadmitted";
+        if (defect == "extra") role["unexpected"] = true;
+        if (defect == "missing") role.Remove("kind");
+        if (defect == "undeclared-replacement") { role.Remove("kind"); role["unexpected"] = "runtime"; }
+        if (defect == "wrong-value-kind") role["service"] = 1;
+        var text = defect switch
+        {
+            // Five entries, but only four distinct names; no missing-property fallback is accepted.
+            "duplicate" => "{\"schema\":\"zeka-m1-role/v1\",\"schema\":\"zeka-m1-role/v1\","
+                + $"\"initializationId\":\"{input.InitializationId}\",\"service\":\"auth\",\"sourceCommit\":\"{DatabaseSource}\"}}",
+            "array" => "[]", "null" => "null", "malformed" => "{", _ => role.ToJsonString()
+        };
+        var error = Assert.Throws<OwnerToolException>(() => RuntimeAdmission.ValidateMarkers(input, text, database));
+        Assert.Equal("RUNTIME_INITIALIZATION_REJECTED", error.Code);
+        Assert.Equal("Owner provisioning rejected.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public void Runtime_marker_member_order_does_not_change_the_exact_scope_contract()
+    {
+        var input = Parse(Valid());
+        var reordered = JsonSerializer.Serialize(new { sourceCommit = DatabaseSource, kind = "runtime",
+            service = "auth", initializationId = input.InitializationId, schema = "zeka-m1-role/v1" });
+        RuntimeAdmission.ValidateMarkers(input, reordered,
+            $"zeka-m1-database/v1:{input.InitializationId}:auth:{DatabaseSource}");
+    }
+
+    [Fact]
+    public async Task Rejected_argv_receipt_never_echoes_secret_or_native_error()
+    {
+        using var input = new MemoryStream();
+        using var output = new StringWriter();
+        var exit = await Program.ExecuteAsync(["unit_fixture_private_value"], input, output);
+        Assert.Equal(2, exit);
+        Assert.DoesNotContain("unit_fixture_private_value", output.ToString());
+        Assert.DoesNotContain("Exception", output.ToString());
+        using var receipt = JsonDocument.Parse(output.ToString());
+        Assert.Equal("ARGUMENTS_REJECTED", receipt.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Rejected_stdin_receipt_never_serializes_the_private_body()
+    {
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(Valid().ToJsonString()));
+        using var output = new StringWriter();
+        var exit = await Program.ExecuteAsync([], input, output);
+        Assert.Equal(2, exit);
+        Assert.DoesNotContain("unit_fixture_not_live", output.ToString());
+        Assert.DoesNotContain("authRuntimeConnectionString", output.ToString());
+        Assert.DoesNotContain("ownerPassword", output.ToString());
+    }
+
+    [Fact]
+    public async Task Broken_receipt_channel_returns_fixed_exit_without_an_unhandled_exception()
+    {
+        using var input = new MemoryStream();
+        using var output = new RejectedWriter();
+        Assert.Equal(6, await Program.ExecuteAsync(["unit_fixture_private"], input, output));
+    }
+
+    [Theory]
+    [InlineData(65536, "INPUT_SCHEMA_REJECTED")]
+    [InlineData(65537, "INPUT_SIZE_REJECTED")]
+    public async Task Stdin_size_is_checked_before_parsing_and_never_enters_database_admission(int length, string code)
+    {
+        using var input = new MemoryStream(Enumerable.Repeat((byte)' ', length).ToArray());
+        using var output = new StringWriter();
+        Assert.Equal(2, await Program.ExecuteAsync([], input, output));
+        AssertAdmissionReceipt(output, code, 2);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    public async Task Invalid_stdin_produces_only_the_original_admission_refusal(string text)
+    {
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(text));
+        using var output = new StringWriter();
+        Assert.Equal(2, await Program.ExecuteAsync([], input, output));
+        AssertAdmissionReceipt(output, text.Length == 0 ? "INPUT_SIZE_REJECTED" : "INPUT_SCHEMA_REJECTED", 2);
+    }
+
+    [Fact]
+    public async Task Input_read_failure_has_a_safe_admission_receipt_and_no_native_detail()
+    {
+        using var input = new RejectedReadStream();
+        using var output = new StringWriter();
+        Assert.Equal(3, await Program.ExecuteAsync([], input, output));
+        Assert.Equal(1, input.Reads);
+        AssertAdmissionReceipt(output, "OWNER_PROVISIONING_FAILED", 3);
+        Assert.DoesNotContain("unit_fixture_private_read_detail", output.ToString());
+    }
+
+    [Fact]
+    public async Task Caller_cancellation_stops_stdin_before_parsing_or_database_admission()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(Valid().ToJsonString()));
+        using var output = new StringWriter();
+        Assert.Equal(124, await Program.ExecuteAsync([], input, output, cancellation.Token));
+        AssertAdmissionReceipt(output, "OWNER_PROVISIONING_DEADLINE", 124);
+    }
+
+    [Fact]
+    public async Task Failed_receipt_flush_returns_channel_exit_and_preserves_the_first_refusal()
+    {
+        using var input = new RejectedReadStream();
+        using var output = new RejectedFlushWriter();
+        Assert.Equal(6, await Program.ExecuteAsync(["unit_fixture_private"], input, output));
+        Assert.Equal(0, input.Reads);
+        Assert.Equal(1, output.Flushes);
+        AssertAdmissionReceipt(output, "ARGUMENTS_REJECTED", 2);
+        Assert.DoesNotContain("unit_fixture_private_flush_detail", output.ToString());
+    }
+
+    [Fact]
+    public async Task Normal_CLI_entry_point_refuses_arguments_before_reading_standard_input()
+    {
+        Assert.Equal(2, await Program.Main(["unit_fixture_private"]));
+    }
+
+    private static void AssertAdmissionReceipt(StringWriter output, string code, int exit)
+    {
+        using var receipt = JsonDocument.Parse(output.ToString());
+        Assert.Equal("BLOCKED", receipt.RootElement.GetProperty("status").GetString());
+        Assert.Equal("admission", receipt.RootElement.GetProperty("stage").GetString());
+        Assert.Equal(code, receipt.RootElement.GetProperty("code").GetString());
+        Assert.Equal(exit, receipt.RootElement.GetProperty("exitCode").GetInt32());
+        Assert.Equal(JsonValueKind.Null, receipt.RootElement.GetProperty("sourceCommit").ValueKind);
+        Assert.Equal(JsonValueKind.Null, receipt.RootElement.GetProperty("binarySha256").ValueKind);
+        Assert.False(receipt.RootElement.TryGetProperty("postgresDiagnostic", out _));
+    }
+
+    private sealed class RejectedReadStream : MemoryStream
+    {
+        internal int Reads;
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Reads++;
+            return ValueTask.FromException<int>(new IOException("unit_fixture_private_read_detail"));
+        }
+    }
+
+    private sealed class RejectedFlushWriter : StringWriter
+    {
+        internal int Flushes;
+        public override Task FlushAsync()
+        {
+            Flushes++;
+            return Task.FromException(new IOException("unit_fixture_private_flush_detail"));
+        }
+    }
+
+    private sealed class RejectedWriter : StringWriter
+    {
+        public override Task WriteLineAsync(string? value) =>
+            Task.FromException(new IOException("unit_fixture_private_native_detail"));
+    }
+    private static AssemblyBinding Binding() => new(Source, "0.1.0+" + Source, Binary);
+    private static OwnerInput Parse(JsonObject json) =>
+        OwnerProtocol.Parse(Encoding.UTF8.GetBytes(json.ToJsonString()));
+    private static JsonObject Valid() => new()
+    {
+        ["schema"] = OwnerProtocol.InputSchema, ["scope"] = "LocalSyntheticM1OwnerProvision",
+        ["project"] = "zeka-m1", ["authorityKind"] = "OwnerAttestedLocalSynthetic",
+        ["ownerDecisionId"] = OwnerProtocol.OwnerDecision, ["approvalCommentId"] = "6529021741",
+        ["ownerAccount"] = OwnerProtocol.ApprovedOwner,
+        ["expectedOwnerSid"] = "S-1-5-21-111-222-333-1001",
+        ["actualOwnerSid"] = "S-1-5-21-111-222-333-1001",
+        ["expectedOwnerProfile"] = OwnerProtocol.ApprovedProfile,
+        ["actualOwnerProfile"] = OwnerProtocol.ApprovedProfile,
+        ["normalizedEmail"] = OwnerProtocol.ApprovedEmail,
+        ["sourceCommit"] = Source, ["binarySha256"] = Binary,
+        ["databaseSourceCommit"] = DatabaseSource, ["databaseName"] = "zeka_m1_auth",
+        ["initializationId"] = "11111111-2222-3333-4444-555555555555",
+        ["subjectId"] = "11111111-2222-3333-4444-666666666666",
+        ["displayName"] = "Local synthetic owner organisation", ["slug"] = null,
+        ["idempotencyKey"] = "unit-fixture-owner-operation",
+        ["processingTimeoutSeconds"] = 120, ["retentionSeconds"] = 86400,
+        ["authRuntimeConnectionString"] = "Host=postgres;Port=5432;Database=zeka_m1_auth;Username=zeka_auth_runtime;Password=unit_fixture_not_live",
+        ["ownerPassword"] = "unit_fixture_not_live"
+    };
+}

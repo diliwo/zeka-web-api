@@ -1,3 +1,4 @@
+using Zeka.OwnerSqlEvidence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -23,7 +24,7 @@ internal static class TenantContextInitializer
         parameter.ParameterName = "organisation_id";
         parameter.Value = organisationId.ToString("D");
         command.Parameters.Add(parameter);
-        if (!Equals(await command.ExecuteScalarAsync(cancellationToken), parameter.Value))
+        if (!Equals(await OwnerSqlExecution.ExecuteScalarAsync(command, cancellationToken), parameter.Value))
         {
             throw new InvalidOperationException("Tenant context initialization failed.");
         }

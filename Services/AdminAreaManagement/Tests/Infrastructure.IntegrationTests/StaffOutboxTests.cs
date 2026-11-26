@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Xunit;
 using Zeka.Extensions.EventBus;
 using Zeka.Extensions.EventBus.Abstractions;
+using Zeka.Extensions.EventBus.RabbitMq;
 using Zeka.Extensions.MultiTenancy.Abstractions;
 
 namespace Infrastructure.IntegrationTests;
@@ -90,8 +91,11 @@ public sealed class StaffOutboxTests(TenantDatabase fixture) : IClassFixture<Ten
     private static IConfiguration Configuration(Guid organisation) => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?> { ["TenantWorker:OrganisationIds:0"] = organisation.ToString() }).Build();
 
-    private sealed class Publisher : IEventBus
+    private sealed class Publisher : IOwnedEventBus
     {
+        private readonly PublicationLifecycle lifecycle = new(new PublisherFailStopOptions());
+        public bool ProcessFailStopEnabled => true; // Model only; tests do not kill this runner.
+        public IPublicationAttempt BeginPublication(Event message) => lifecycle.Begin(_ => PublishAsync(message));
         public bool Fail { get; set; }
         public int Calls { get; private set; }
         public Task PublishAsync(Event message)

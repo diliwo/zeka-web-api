@@ -27,6 +27,41 @@ public sealed class GatewayLocalStackHealthTests
     private const string CsrfPath = "/api/v1/browser-session/csrf";
 
     [Fact]
+    public async Task Production_route_file_satisfies_the_same_exact_browser_allowlist()
+    {
+        var repository = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repository is not null && !File.Exists(Path.Combine(repository.FullName, "ApiGateways/Ocelot.ApiGateway/ocelot.json")))
+            repository = repository.Parent;
+        Assert.NotNull(repository);
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "LocalStack", Args = [] });
+        builder.Configuration.Sources.Clear();
+        builder.Logging.ClearProviders();
+        builder.Configuration.AddJsonFile(Path.Combine(repository!.FullName, "ApiGateways/Ocelot.ApiGateway/ocelot.json"));
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["GatewayBrowserTransport:Origin"] = Origin,
+            ["GatewayBrowserTransport:DownstreamOrigin"] = "https://auth.example.invalid",
+            ["GatewayBrowserTransport:ClientPeers:0"] = "127.0.0.1"
+        });
+        BrowserTransport.Add(builder);
+        await using var app = builder.Build();
+        var routes = app.Services.GetRequiredService<IOptions<FileConfiguration>>().Value.Routes
+            .Where(route => route.Key?.StartsWith("GatewayBrowserTransport:") == true).ToArray();
+        Assert.Equal(11, routes.Length);
+        Assert.All(routes, route => Assert.Equal("https", route.DownstreamScheme));
+        foreach (var path in new[]
+        {
+            "/api/v1/browser-session/onboarding/registrations/resend",
+            "/api/v1/browser-session/onboarding/registrations/email-verification/exchange"
+        })
+        {
+            var route = Assert.Single(routes, route => route.UpstreamPathTemplate == path);
+            Assert.Equal(path, route.DownstreamPathTemplate);
+            Assert.Equal(new[] { "POST" }, route.UpstreamHttpMethod);
+        }
+    }
+
+    [Fact]
     public async Task LocalStack_registers_the_gateway_check_and_status_only_health_routes()
     {
         await using var host = await StartAsync();
@@ -37,7 +72,7 @@ public sealed class GatewayLocalStackHealthTests
         await AssertHealthAsync(host.Http, "/health/live", HttpStatusCode.OK);
         await AssertHealthAsync(host.Http, "/health/ready", HttpStatusCode.OK);
         Assert.Empty(host.Received);
-        Assert.Equal(6, host.Routes.Routes.Count(route => route.Key!.StartsWith("GatewayBrowserTransport:")));
+        Assert.Equal(11, host.Routes.Routes.Count(route => route.Key!.StartsWith("GatewayBrowserTransport:")));
         Assert.All(host.Routes.Routes.Where(route => route.Key!.StartsWith("GatewayBrowserTransport:")), route =>
         {
             Assert.Equal("https", route.DownstreamScheme);
@@ -185,6 +220,7 @@ public sealed class GatewayLocalStackHealthTests
     [InlineData(CsrfPath)]
     [InlineData("/api/v1/browser-organisations/eligible")]
     [InlineData("/api/v1/tenant-access/11111111-1111-1111-1111-111111111111")]
+    [InlineData("/api/v1/browser-organisations/11111111-1111-1111-1111-111111111111/access")]
     public async Task Valid_HTTPS_browser_transport_forwards_the_canonical_peer_and_existing_credentials(string path)
     {
         await using var host = await StartAsync(configure: values =>
@@ -198,6 +234,39 @@ public sealed class GatewayLocalStackHealthTests
         Assert.Equal(path, received.Path);
         Assert.Equal("127.0.0.1", received.ForwardedFor);
         Assert.Equal("Bearer synthetic-forwarded-value", received.Authorization);
+    }
+
+    [Theory]
+    [InlineData("/api/v1/browser-session/onboarding/registrations/resend")]
+    [InlineData("/api/v1/browser-session/organisations")]
+    [InlineData("/api/v1/browser-session/onboarding/registrations/email-verification/exchange")]
+    public async Task Verification_POST_routes_preserve_the_exact_Gateway_transport_boundary(string path)
+    {
+        await using var host = await StartAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Post, path);
+        request.Headers.Add("Origin", Origin);
+        using var response = await host.Https.SendAsync(request);
+        // This destination observes only the Gateway guard; Auth owns JSON/CSRF and token validation.
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+        var received = Assert.Single(host.Received);
+        Assert.Equal(path, received.Path);
+        Assert.Equal("127.0.0.1", received.ForwardedFor);
+        foreach (var input in new[] { "query", "origin", "forwarded" })
+        {
+            using var rejected = new HttpRequestMessage(HttpMethod.Post, input == "query" ? path + "?token=invalid" : path);
+            rejected.Headers.Add("Origin", input == "origin" ? "https://other.example.invalid" : Origin);
+            if (input == "forwarded") rejected.Headers.Add("X-Forwarded-For", "127.0.0.1");
+            using var denied = await host.Https.SendAsync(rejected);
+            var expected = input == "query" ? HttpStatusCode.BadRequest
+                : input == "origin" ? HttpStatusCode.Forbidden : HttpStatusCode.ServiceUnavailable;
+            Assert.Equal(expected, denied.StatusCode);
+            Assert.Equal("no-store", denied.Headers.CacheControl?.ToString());
+            Assert.Empty(await denied.Content.ReadAsStringAsync());
+            Assert.False(denied.Headers.Contains("Set-Cookie"));
+        }
+        Assert.Single(host.Received);
     }
 
     [Theory]
@@ -232,6 +301,16 @@ public sealed class GatewayLocalStackHealthTests
     [InlineData("GET", "/api/v1/tenant-access/00000000-0000-0000-0000-000000000000")]
     [InlineData("GET", "/api/v1/tenant-access/not-a-guid")]
     [InlineData("GET", "/api/v1/browser-session/csrf%2f")]
+    [InlineData("GET", "/api/v1/browser-session/onboarding/registrations/resend")]
+    [InlineData("GET", "/api/v1/browser-session/onboarding/registrations/email-verification/exchange")]
+    [InlineData("HEAD", "/api/v1/browser-session/onboarding/registrations/email-verification/exchange")]
+    [InlineData("POST", "/api/v1/browser-session/onboarding/registrations/unapproved")]
+    [InlineData("GET", "/api/v1/browser-session/organisations")]
+    [InlineData("POST", "/api/v1/browser-organisations/11111111-1111-1111-1111-111111111111/access")]
+    [InlineData("GET", "/api/v1/browser-organisations/00000000-0000-0000-0000-000000000000/access")]
+    [InlineData("GET", "/api/v1/browser-organisations/not-a-guid/access")]
+    [InlineData("GET", "/api/v1/browser-organisations/11111111-1111-1111-1111-111111111111/access/extra")]
+    [InlineData("GET", "/api/v1/browser-organisations/11111111-1111-1111-1111-111111111111/access/")]
     public async Task Only_exact_reviewed_browser_method_paths_are_admitted(string method, string path)
     {
         await using var host = await StartAsync();
@@ -369,7 +448,12 @@ public sealed class GatewayLocalStackHealthTests
         {
             ("GET", CsrfPath), ("POST", "/api/v1/browser-session/sign-in"),
             ("POST", "/api/v1/browser-session/restore"), ("POST", "/api/v1/browser-session/logout"),
-            ("GET", "/api/v1/browser-organisations/eligible"), ("GET", "/api/v1/tenant-access/{organisationId}")
+            ("POST", "/api/v1/browser-session/onboarding/registrations"),
+            ("POST", "/api/v1/browser-session/onboarding/registrations/resend"),
+            ("POST", "/api/v1/browser-session/onboarding/registrations/email-verification/exchange"),
+            ("GET", "/api/v1/browser-organisations/eligible"), ("GET", "/api/v1/tenant-access/{organisationId}"),
+            ("POST", "/api/v1/browser-session/organisations"),
+            ("GET", "/api/v1/browser-organisations/{organisationId}/access")
         };
         for (var index = 0; index < routes.Length; index++)
         {
@@ -385,13 +469,14 @@ public sealed class GatewayLocalStackHealthTests
             values[prefix + "HttpHandlerOptions:UseTracing"] = "false";
             values[prefix + "HttpHandlerOptions:UseProxy"] = "false";
         }
-        values["Routes:6:Key"] = "legacy";
-        values["Routes:6:UpstreamPathTemplate"] = "/legacy";
-        values["Routes:6:DownstreamPathTemplate"] = "/legacy";
-        values["Routes:6:UpstreamHttpMethod:0"] = "GET";
-        values["Routes:6:DownstreamScheme"] = "https";
-        values["Routes:6:DownstreamHostAndPorts:0:Host"] = "legacy.example.invalid";
-        values["Routes:6:DownstreamHostAndPorts:0:Port"] = "443";
+        var legacy = $"Routes:{routes.Length}:";
+        values[legacy + "Key"] = "legacy";
+        values[legacy + "UpstreamPathTemplate"] = "/legacy";
+        values[legacy + "DownstreamPathTemplate"] = "/legacy";
+        values[legacy + "UpstreamHttpMethod:0"] = "GET";
+        values[legacy + "DownstreamScheme"] = "https";
+        values[legacy + "DownstreamHostAndPorts:0:Host"] = "legacy.example.invalid";
+        values[legacy + "DownstreamHostAndPorts:0:Port"] = "443";
         return values;
     }
 

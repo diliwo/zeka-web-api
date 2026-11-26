@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>zeka-auth-owner-provision</AssemblyName>
+    <Version>0.1.0</Version>
+    <ZekaSourceSha Condition="'$(ZekaSourceSha)' == ''">unknown</ZekaSourceSha>
+    <InformationalVersion>0.1.0+$(ZekaSourceSha)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <AssemblyMetadata Include="SourceCommit" Value="$(ZekaSourceSha)" />
+    <InternalsVisibleTo Include="Zeka.AuthOwnerProvision.Tests" />
+    <ProjectReference Include="../../Services/AuthManager/AuthManager.Infrastructure/AuthManager.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../Deployments/local-stack/Invoke-OwnerFirstAdmin.ps1" Link="OperatorBoundary/Invoke-OwnerFirstAdmin.ps1" />
+    <Content Include="Prepare-OwnerHelperBuildContext.ps1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../Shared/SafePostgresDiagnostics.cs" Link="Diagnostics/SafePostgresDiagnostics.cs" />
+    <Compile Include="../Shared/SafePostgresCommandInterceptor.cs" Link="Diagnostics/SafePostgresCommandInterceptor.cs" />
+  </ItemGroup>
+  <ItemGroup><Compile Include="../Shared/OwnerSqlExecution.cs" Link="Evidence/OwnerSqlExecution.cs" /></ItemGroup>
+</Project>

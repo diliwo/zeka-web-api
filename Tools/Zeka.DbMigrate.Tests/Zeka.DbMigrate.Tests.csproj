@@ -6,6 +6,11 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
+  <!-- Explicit owner-run witnesses retain their assertions and input guards.
+       Default CI does not execute them (NOT_EXECUTED), not a passing witness. -->
+  <PropertyGroup Condition="'$(ZekaOperatorWitnesses)' == 'true'">
+    <DefineConstants>$(DefineConstants);ZEKA_OPERATOR_WITNESSES</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.6.0" />
     <PackageReference Include="xunit" Version="2.4.2" />
@@ -14,6 +19,17 @@
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.14.0" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../Zeka.DbMigrate/Zeka.DbMigrate.csproj" />
+    <ProjectReference Include="../Zeka.DbMigrate/Zeka.DbMigrate.csproj" Aliases="global,DbMigrator" />
+    <ProjectReference Include="../Zeka.LocalStack.DatabaseSetup/Zeka.LocalStack.DatabaseSetup.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="LocalStackConfiguration/Test-DatabaseBootstrap.ps1" />
+    <Content Include="LocalStackConfiguration/Test-W3NativeDiagnostics.ps1" />
+    <Content Include="LocalStackConfiguration/Test-W3AtomicWrite.ps1" />
+    <Content Include="LocalStackConfiguration/PowerShellLineCoverage.ps1" />
+    <Content Include="LocalStackConfiguration/Test-PowerShellLineCoverage.ps1" />
+    <Content Include="LocalStackConfiguration/Test-AuthHttpsConfiguration.ps1" />
+    <Content Include="LocalStackConfiguration/PowerShellCoverageChild.ps1" />
+    <Content Include="LocalStackConfiguration/Test-PowerShellCoverageChild.ps1" />
   </ItemGroup>
 </Project>

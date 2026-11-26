@@ -1,3 +1,5 @@
+using Zeka.WorkerCredentials;
+using Zeka.WorkerCredentials.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -30,6 +32,7 @@ using Xunit;
 using Zeka.Contracts.Staff.V1;
 using Zeka.Extensions.EventBus;
 using Zeka.Extensions.EventBus.Abstractions;
+using Zeka.Extensions.EventBus.RabbitMq;
 using Zeka.Extensions.MultiTenancy.Abstractions;
 using Zeka.Extensions.MultiTenancy.AspNetCore;
 using Zeka.PersistenceSecurity;
@@ -218,7 +221,8 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
         evidence.Clear();
 
         var worker = new StaffProjectionRetryWorker(provider.GetRequiredService<IServiceScopeFactory>(), configuration,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<StaffProjectionRetryWorker>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<StaffProjectionRetryWorker>.Instance,
+            WorkerCredentialFixture.For([organisation], WorkerCredentialEncoding.AdminAreaProfile));
         Assert.False(await worker.DispatchCycleAsync(default));
         Assert.Single(publisher.Messages);
         AssertCompleteAttempts(evidence, TenantAttemptCommandCategory.EfRead, expectedAttempts: 1,
@@ -418,7 +422,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
                 ? database.SingleConnectionRuntimeString
                 : database.RuntimeConnectionString,
             ["TenantAuthorization:AuthManagementUrl"] = "https://auth.invalid/",
-            ["TenantWorker:SubjectId"] = "worker",
+            ["TenantWorker:SubjectId"] = WorkerCredentialFixture.Subject.ToString("D"),
             ["TenantWorker:BearerToken"] = "synthetic-test-token",
             ["TenantWorker:OrganisationIds:0"] = organisation.ToString(),
             ["FileServerPath"] = Path.GetTempPath()
@@ -571,7 +575,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
     private sealed class Access(Guid organisation, bool allow) : ICurrentTenantAccess
     {
         public Task<TenantAccessDecision> ResolveAsync(string authenticatedSubjectId, Guid selectedOrganisationId,
-            CancellationToken cancellationToken) => Task.FromResult(allow
+            CancellationToken cancellationToken) => Task.FromResult(allow && selectedOrganisationId == organisation
             ? new TenantAccessDecision(TenantAccessOutcome.Authorized, new(organisation, Guid.NewGuid(),
                 ["TeamConfiguration.View", "TeamConfiguration.ManageTeams"], "test", DateTimeOffset.UtcNow))
             : new TenantAccessDecision(TenantAccessOutcome.Denied));
@@ -621,7 +625,7 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
                 Content = JsonContent.Create(new
                 {
                     ContractVersion = 1,
-                    SubjectId = "worker",
+                    SubjectId = WorkerCredentialFixture.Subject.ToString("D"),
                     OrganisationId = Guid.Parse(request.RequestUri!.Segments.Last()),
                     OrganisationMembershipId = Guid.NewGuid(),
                     EffectivePermissionCodes = new[] { "TeamConfiguration.ManageStaffProfiles" },
@@ -631,14 +635,18 @@ public sealed class FirstSqlPathEvidenceTests(PostgreSqlRlsRuntimeDatabase datab
             });
     }
 
-    private sealed class Publisher : IEventBus
+    private sealed class Publisher : IOwnedEventBus
     {
+        private readonly PublicationLifecycle lifecycle = new(new PublisherFailStopOptions());
         public List<StaffProjectionChangedV1> Messages { get; } = [];
-        public Task PublishAsync(Event message)
+        public bool ProcessFailStopEnabled => true; // Controlled fixture capability; no process FailFast.
+        public IPublicationAttempt BeginPublication(Event message) => lifecycle.Begin(attempt =>
         {
+            attempt.CommitSend();
             Messages.Add((StaffProjectionChangedV1)message);
             return Task.CompletedTask;
-        }
+        });
+        public Task PublishAsync(Event message) => BeginPublication(message).Completion;
     }
 
     private sealed class ThrowingObserver : ITenantAttemptOrderObserver
