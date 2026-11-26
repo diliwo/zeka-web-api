@@ -45,6 +45,12 @@ internal sealed class RegistrationOptions : IDisposable
             page = new Uri(browser, path!);
         }
 
+        return CreateEnabledOptions(section, deployment!, active!, mailpit, page);
+    }
+
+    private static RegistrationOptions CreateEnabledOptions(IConfigurationSection section, string deployment,
+        string active, bool mailpit, Uri? page)
+    {
         var keys = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         try
         {
@@ -69,11 +75,11 @@ internal sealed class RegistrationOptions : IDisposable
                     throw;
                 }
             }
-            if (!keys.ContainsKey(active!)) throw InvalidConfiguration();
+            if (!keys.ContainsKey(active)) throw InvalidConfiguration();
             return new()
             {
                 Enabled = true, MailpitEnabled = mailpit, VerificationPage = page,
-                Deployment = deployment!, ActiveKeyId = active!, Keys = keys
+                Deployment = deployment, ActiveKeyId = active, Keys = keys
             };
         }
         catch
