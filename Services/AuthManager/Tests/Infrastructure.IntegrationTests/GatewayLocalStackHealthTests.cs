@@ -21,11 +21,8 @@ namespace Infrastructure.IntegrationTests;
 
 // Runs the production registration, options validation and middleware in Kestrel.
 // The fixture CA is trusted only by this client; no certificate trust store is changed.
-public sealed class GatewayLocalStackHealthTests
+public sealed class GatewayLocalStackHealthTests : GatewayTransportFixture
 {
-    private const string Origin = "https://browser.example.invalid";
-    private const string CsrfPath = "/api/v1/browser-session/csrf";
-
     [Fact]
     public async Task Production_route_file_satisfies_the_same_exact_browser_allowlist()
     {
@@ -338,7 +335,10 @@ public sealed class GatewayLocalStackHealthTests
         Assert.Empty(await response.Content.ReadAsStringAsync());
     }
 
+}
 
+public sealed class GatewayBeneficiaryTransportTests : GatewayTransportFixture
+{
     [Fact]
     public async Task Client_routes_use_separate_strict_https_and_forward_only_the_selected_authority()
     {
@@ -453,8 +453,14 @@ public sealed class GatewayLocalStackHealthTests
         request.Headers.Add("X-Organisation-Id", organisation);
         return request;
     }
+}
 
-    private static async Task AssertHealthAsync(HttpClient client, string path, HttpStatusCode expected)
+public abstract class GatewayTransportFixture
+{
+    protected const string Origin = "https://browser.example.invalid";
+    protected const string CsrfPath = "/api/v1/browser-session/csrf";
+
+    protected static async Task AssertHealthAsync(HttpClient client, string path, HttpStatusCode expected)
     {
         using var response = await client.GetAsync(path);
         Assert.Equal(expected, response.StatusCode);
@@ -463,7 +469,7 @@ public sealed class GatewayLocalStackHealthTests
         Assert.False(response.Headers.Contains("Set-Cookie"));
     }
 
-    private static async Task<Host> StartAsync(string environment = "LocalStack",
+    protected static async Task<Host> StartAsync(string environment = "LocalStack",
         Action<Dictionary<string, string?>>? configure = null, Action<FileConfiguration>? mutateRoutes = null,
         Func<HealthStatus>? dependency = null, bool throwAtDestination = false)
     {
@@ -597,9 +603,9 @@ public sealed class GatewayLocalStackHealthTests
         return values;
     }
 
-    private sealed record Received(string Path, string ForwardedFor, string Authorization, string Organisation, string Cookie);
+    protected sealed record Received(string Path, string ForwardedFor, string Authorization, string Organisation, string Cookie);
 
-    private sealed record Host(WebApplication App, FileConfiguration Routes, List<Received> Received,
+    protected sealed record Host(WebApplication App, FileConfiguration Routes, List<Received> Received,
         Certificates Certificates, HttpClient Http, HttpClient Https) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
@@ -619,7 +625,7 @@ public sealed class GatewayLocalStackHealthTests
         }
     }
 
-    private sealed class Certificates : IDisposable
+    protected sealed class Certificates : IDisposable
     {
         private readonly RSA rootKey = RSA.Create(2048);
         private readonly RSA serverKey = RSA.Create(2048);
