@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:17
+    pull_policy: never
+    restart: "no"
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin
+    secrets: [postgres_admin]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, postgres, -d, postgres]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    logging:
+      driver: none
+  rabbitmq:
+    image: rabbitmq:3.13.7-management
+    pull_policy: never
+    restart: "no"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    configs:
+      - source: broker_configuration
+        target: /etc/rabbitmq/conf.d/90-mvp02.conf
+    networks: [internal]
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 3s
+      timeout: 5s
+      retries: 25
+    logging:
+      driver: none
+
+networks:
+  internal:
+    external: true
+    name: ${ZEKA_MVP02_INTERNAL_NETWORK:?Task-only internal bridge required}
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+
+secrets:
+  postgres_admin:
+    file: ${ZEKA_MVP02_POSTGRES_FILE:?Protected administrator file required}
+
+configs:
+  broker_configuration:
+    file: ${ZEKA_MVP02_BROKER_FILE:?Protected broker configuration required}

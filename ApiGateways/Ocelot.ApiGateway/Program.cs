@@ -1,5 +1,8 @@
+using System.Globalization;
+using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Ocelot.Configuration.File;
 using Ocelot.DependencyInjection;
 using Ocelot.Middleware;
 using Zeka.Extensions.Authentication;
@@ -58,6 +61,14 @@ namespace Zeka.Gateway
     {
         public const string DiagnosticCategory = "Zeka.Gateway.Safe";
         private const string Prefix = "GatewayBrowserTransport";
+        private const string BeneficiariesPath = "/api/v1/beneficiaries/";
+        private const string IdentitySuffix = "/identity";
+        private const string OrganisationHeader = "X-Organisation-Id";
+        private static readonly (string Method, string Path)[] ClientRoutes =
+        [
+            ("POST", BeneficiariesPath + "lookup"),
+            ("GET", BeneficiariesPath + "{beneficiaryId}" + IdentitySuffix)
+        ];
         private static readonly (string Method, string Path)[] Routes =
         [
             ("GET", "/api/v1/browser-session/csrf"),
@@ -95,7 +106,7 @@ namespace Zeka.Gateway
                     (_, category, _) => category == DiagnosticCategory));
             });
             builder.Services.AddOcelot(builder.Configuration);
-            builder.Services.PostConfigure<Ocelot.Configuration.File.FileConfiguration>(file =>
+            builder.Services.PostConfigure<FileConfiguration>(file =>
             {
                 var browser = file.Routes.Where(route => route.Key?.StartsWith(Prefix + ":", StringComparison.Ordinal) == true).ToArray();
                 var valid = policy.Valid && browser.Length == Routes.Length && Routes.All(expected => browser.Count(route =>
@@ -112,7 +123,43 @@ namespace Zeka.Gateway
                     route.DownstreamScheme = policy.Target!.Scheme;
                     route.DownstreamHostAndPorts = [new() { Host = policy.Target.Host, Port = policy.Target.Port }];
                 }
+                ConfigureClientRoutes(file, policy);
             });
+        }
+
+        private static void ConfigureClientRoutes(FileConfiguration file, Policy policy)
+        {
+            policy.ClientValid = false;
+            if (!policy.Valid || policy.ClientTarget is not { } target
+                || file.Routes.Any(route => route.Priority == int.MaxValue
+                    || route.UpstreamPathTemplate?.StartsWith(BeneficiariesPath, StringComparison.OrdinalIgnoreCase) == true))
+                return;
+
+            // Only the two reviewed Client routes can use this authority. JSON routes cannot retarget them.
+            foreach (var route in ClientRoutes)
+            {
+                file.Routes.Add(new FileRoute
+                {
+                    Key = "GatewayClientTransport:" + route.Method,
+                    UpstreamPathTemplate = route.Path,
+                    DownstreamPathTemplate = route.Path,
+                    UpstreamHttpMethod = [route.Method],
+                    RouteIsCaseSensitive = true,
+                    Priority = int.MaxValue,
+                    DownstreamScheme = target.Scheme,
+                    DownstreamHostAndPorts = [new() { Host = target.Host, Port = target.Port }],
+                    DangerousAcceptAnyServerCertificateValidator = false,
+                    FileCacheOptions = new() { TtlSeconds = 0 },
+                    HttpHandlerOptions = new()
+                    {
+                        AllowAutoRedirect = false,
+                        UseCookieContainer = false,
+                        UseTracing = false,
+                        UseProxy = false
+                    }
+                });
+            }
+            policy.ClientValid = true;
         }
 
         public static void UseLocalStackHealthChecks(this WebApplication app)
@@ -134,7 +181,7 @@ namespace Zeka.Gateway
         private sealed class LocalStackReadiness(Policy policy) : IHealthCheck
         {
             public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context,
-                CancellationToken cancellationToken = default) => Task.FromResult(policy.Valid
+                CancellationToken cancellationToken = default) => Task.FromResult(policy.Valid && (!policy.ClientConfigured || policy.ClientValid)
                     ? HealthCheckResult.Healthy()
                     : HealthCheckResult.Unhealthy("Gateway transport unavailable."));
         }
@@ -175,11 +222,15 @@ namespace Zeka.Gateway
                             return Task.CompletedTask;
                         });
                         var path = http.Request.Path.Value!;
-                        var exact = Routes.Any(route => route.Method == http.Request.Method &&
+                        var clientRoute = policy.ClientConfigured && ClientRoutes.Any(route =>
+                            route.Method == http.Request.Method && MatchesRoute(route.Path, path));
+                        var browserRoute = Routes.Any(route => route.Method == http.Request.Method &&
                             MatchesRoute(route.Path, path));
-                        if (!exact || http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>()?.RawTarget?.Contains('%') == true)
+                        if (!(browserRoute || clientRoute)
+                            || http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>()?.RawTarget?.Contains('%') == true)
                         { http.Response.StatusCode = 404; return; }
-                        if (!policy.Valid || !http.Request.IsHttps || http.Request.Scheme + "://" + http.Request.Host != policy.Origin)
+                        if (!(clientRoute ? policy.ClientValid : policy.Valid) || !http.Request.IsHttps
+                            || http.Request.Scheme + "://" + http.Request.Host != policy.Origin)
                         { http.Response.StatusCode = 503; return; }
                         var forwarding = http.Request.Headers.Keys.Where(name => name.Equals("Forwarded", StringComparison.OrdinalIgnoreCase)
                             || name.StartsWith("X-Forwarded-", StringComparison.OrdinalIgnoreCase)
@@ -192,7 +243,16 @@ namespace Zeka.Gateway
                         if (http.Request.Headers.Origin.Count > 0 && (http.Request.Headers.Origin.Count != 1
                             || http.Request.Headers.Origin[0] != policy.Origin))
                         { http.Response.StatusCode = 403; return; }
-                        http.Request.Headers["X-Forwarded-For"] = peer;
+                        if (clientRoute)
+                        {
+                            if (ClientHeaderFailure(http.Request) is { } status)
+                            { http.Response.StatusCode = status; return; }
+                            http.Request.Headers.Remove("Cookie");
+                        }
+                        else
+                        {
+                            http.Request.Headers["X-Forwarded-For"] = peer;
+                        }
                         try { await next(http); }
                         catch (Exception) when (!http.Response.HasStarted)
                         { http.Response.Clear(); http.Response.StatusCode = 503; http.Response.Headers.CacheControl = "no-store"; }
@@ -201,10 +261,24 @@ namespace Zeka.Gateway
                 });
         }
 
+        private static int? ClientHeaderFailure(HttpRequest request)
+        {
+            var authorization = request.Headers.Authorization;
+            if (authorization.Count != 1 || !AuthenticationHeaderValue.TryParse(authorization[0], out var bearer)
+                || !bearer.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(bearer.Parameter))
+                return StatusCodes.Status401Unauthorized;
+
+            var organisation = request.Headers[OrganisationHeader];
+            return organisation.Count == 1 && Guid.TryParseExact(organisation[0], "D", out var id) && id != Guid.Empty
+                ? null : StatusCodes.Status403Forbidden;
+        }
+
         private static bool MatchesRoute(string template, string path) => template switch
         {
             "/api/v1/tenant-access/{organisationId}" => GuidSegment(path, "/api/v1/tenant-access/", ""),
             "/api/v1/browser-organisations/{organisationId}/access" => GuidSegment(path, "/api/v1/browser-organisations/", "/access"),
+            BeneficiariesPath + "{beneficiaryId}" + IdentitySuffix => BeneficiaryIdentityPath(path),
             _ => template == path
         };
 
@@ -213,6 +287,16 @@ namespace Zeka.Gateway
                 && path.StartsWith(prefix, StringComparison.Ordinal) && path.EndsWith(suffix, StringComparison.Ordinal)
                 && Guid.TryParseExact(path.Substring(prefix.Length, 36), "D", out var id) && id != Guid.Empty;
 
+        private static bool BeneficiaryIdentityPath(string path)
+        {
+            if (path.Length <= BeneficiariesPath.Length + IdentitySuffix.Length
+                || !path.StartsWith(BeneficiariesPath, StringComparison.Ordinal)
+                || !path.EndsWith(IdentitySuffix, StringComparison.Ordinal)) return false;
+            var segment = path.AsSpan(BeneficiariesPath.Length, path.Length - BeneficiariesPath.Length - IdentitySuffix.Length);
+            return segment[0] != '0'
+                && int.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0;
+        }
+
         private static string? Canonical(System.Net.IPAddress? address) => address?.AddressFamily is
             System.Net.Sockets.AddressFamily.InterNetwork or System.Net.Sockets.AddressFamily.InterNetworkV6
             ? (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString() : null;
@@ -220,18 +304,27 @@ namespace Zeka.Gateway
         private sealed class Policy
         {
             internal bool Valid { get; set; }
+            internal bool ClientConfigured { get; }
+            internal bool ClientValid { get; set; }
+            internal Uri? ClientTarget { get; }
             internal string? Origin { get; }
             internal Uri? Target { get; }
             internal HashSet<string> Peers { get; } = new(StringComparer.Ordinal);
             internal Policy(IConfiguration configuration)
             {
                 Origin = configuration[Prefix + ":Origin"];
+                var clientOrigin = configuration[Prefix + ":ClientDownstreamOrigin"];
+                ClientConfigured = clientOrigin is not null;
                 if (!Uri.TryCreate(Origin, UriKind.Absolute, out var origin) || origin.Scheme != "https"
                     || Origin != origin.GetLeftPart(UriPartial.Authority) || origin.UserInfo.Length != 0
                     || !Uri.TryCreate(configuration[Prefix + ":DownstreamOrigin"], UriKind.Absolute, out var target)
                     || target.Scheme != "https" || target.AbsolutePath != "/" || target.UserInfo.Length != 0
                     || target.Query.Length != 0 || target.Fragment.Length != 0) return;
                 Target = target;
+                if (Uri.TryCreate(clientOrigin, UriKind.Absolute, out var client) && client.Scheme == "https"
+                    && client.AbsolutePath == "/" && client.UserInfo.Length == 0 && client.Query.Length == 0
+                    && client.Fragment.Length == 0 && client != target && client != origin)
+                    ClientTarget = client;
                 foreach (var raw in configuration.GetSection(Prefix + ":ClientPeers").Get<string[]>() ?? [])
                 {
                     if (raw.Contains('%') || !System.Net.IPAddress.TryParse(raw, out var address)

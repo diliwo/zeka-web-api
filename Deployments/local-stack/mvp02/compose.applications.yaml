@@ -1,0 +1,169 @@
+x-api: &api
+  restart: "no"
+  pull_policy: never
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs: ["/tmp:mode=1777"]
+  environment:
+    ASPNETCORE_ENVIRONMENT: LocalStack
+  logging:
+    driver: local
+    options:
+      max-size: "1m"
+      max-file: "1"
+      compress: "false"
+
+services:
+  auth:
+    <<: *api
+    image: ${ZEKA_MVP02_AUTH_IMAGE:?Immutable local auth image required}
+    command: [dotnet, AuthManager.API.dll]
+    networks:
+      internal:
+        ipv4_address: 10.248.52.5
+        aliases: [auth.mvp02.zeka-m1.test]
+      mailpit: {}
+    volumes:
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/settings/auth.json
+        target: /app/appsettings.LocalStack.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/auth.pem
+        target: /run/secrets/service.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/auth.key
+        target: /run/secrets/service.key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/auth_signing_key.pem
+        target: /run/secrets/auth_signing_key.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/settings/session-hash.key
+        target: /run/secrets/session-hash.key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/settings/registration-hmac.key
+        target: /run/secrets/registration-hmac.key
+        read_only: true
+        bind:
+          create_host_path: false
+  client:
+    <<: *api
+    image: ${ZEKA_MVP02_CLIENT_IMAGE:?Immutable local client image required}
+    command: [dotnet, ClientManagement.API.dll]
+    networks:
+      internal:
+        ipv4_address: 10.248.52.7
+        aliases: [client.mvp02.zeka-m1.test]
+    volumes:
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/settings/client.json
+        target: /app/appsettings.LocalStack.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/client.pem
+        target: /run/secrets/service.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/client.key
+        target: /run/secrets/service.key
+        read_only: true
+        bind:
+          create_host_path: false
+  gateway:
+    <<: *api
+    image: ${ZEKA_MVP02_GATEWAY_IMAGE:?Immutable local gateway image required}
+    command: [dotnet, Ocelot.ApiGateway.dll]
+    networks:
+      internal:
+        ipv4_address: 10.248.52.6
+        aliases: [gateway.mvp02.zeka-m1.test]
+    volumes:
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/settings/gateway.json
+        target: /app/appsettings.LocalStack.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/gateway.pem
+        target: /run/secrets/service.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/gateway.key
+        target: /run/secrets/service.key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/settings/ocelot.json
+        target: /app/ocelot.json
+        read_only: true
+        bind:
+          create_host_path: false
+  frontend:
+    <<: *api
+    image: ${ZEKA_MVP02_FRONTEND_IMAGE:?Immutable local frontend image required}
+    ports: ["127.0.0.1:24446:24446"]
+    networks:
+      internal:
+        ipv4_address: 10.248.52.10
+      edge:
+        ipv4_address: 10.248.53.10
+        aliases: [app.mvp02.zeka-m1.test]
+    volumes:
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/app.pem
+        target: /run/secrets/service.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/app.key
+        target: /run/secrets/service.key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/tls/ca.pem
+        target: /run/secrets/fixture-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ZEKA_MVP02_RUNTIME_ROOT:?Owned fixture settings root required}/settings/frontend.json
+        target: /usr/share/nginx/html/assets/config/config.json
+        read_only: true
+        bind:
+          create_host_path: false
+
+networks:
+  internal:
+    external: true
+    name: ${ZEKA_MVP02_INTERNAL_NETWORK:?Owned internal bridge required}
+  edge:
+    external: true
+    name: ${ZEKA_MVP02_EDGE_NETWORK:?Owned browser bridge required}
+  mailpit:
+    external: true
+    name: zek27-validation-mail-20261117
