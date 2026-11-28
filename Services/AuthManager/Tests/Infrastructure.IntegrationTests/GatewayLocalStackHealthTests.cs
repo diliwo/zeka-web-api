@@ -338,6 +338,122 @@ public sealed class GatewayLocalStackHealthTests
         Assert.Empty(await response.Content.ReadAsStringAsync());
     }
 
+
+    [Fact]
+    public async Task Client_routes_use_separate_strict_https_and_forward_only_the_selected_authority()
+    {
+        await using var host = await StartAsync(configure: ConfigureClientTarget);
+        var routes = host.Routes.Routes.Where(route => route.Key?.StartsWith("GatewayClientTransport:") == true).ToArray();
+        Assert.Equal(2, routes.Length);
+        Assert.All(routes, route =>
+        {
+            Assert.Equal("https", route.DownstreamScheme);
+            Assert.Equal("client.example.invalid", Assert.Single(route.DownstreamHostAndPorts).Host);
+            Assert.Equal(9443, route.DownstreamHostAndPorts[0].Port);
+            Assert.Equal(route.UpstreamPathTemplate, route.DownstreamPathTemplate);
+            Assert.True(route.RouteIsCaseSensitive);
+            Assert.False(route.DangerousAcceptAnyServerCertificateValidator);
+            Assert.Equal(0, route.FileCacheOptions.TtlSeconds);
+            Assert.False(route.HttpHandlerOptions.AllowAutoRedirect);
+            Assert.False(route.HttpHandlerOptions.UseCookieContainer);
+            Assert.False(route.HttpHandlerOptions.UseTracing);
+            Assert.False(route.HttpHandlerOptions.UseProxy);
+        });
+        Assert.Equal("POST", Assert.Single(Assert.Single(routes, route =>
+            route.UpstreamPathTemplate == "/api/v1/beneficiaries/lookup").UpstreamHttpMethod));
+        Assert.Equal("GET", Assert.Single(Assert.Single(routes, route =>
+            route.UpstreamPathTemplate == "/api/v1/beneficiaries/{beneficiaryId}/identity").UpstreamHttpMethod));
+        Assert.All(host.Routes.Routes.Where(route => route.Key?.StartsWith("GatewayBrowserTransport:") == true),
+            route => Assert.Equal("auth.example.invalid", Assert.Single(route.DownstreamHostAndPorts).Host));
+        await AssertHealthAsync(host.Http, "/health/ready", HttpStatusCode.OK);
+
+        foreach (var (method, path) in new[]
+        {
+            (HttpMethod.Post, "/api/v1/beneficiaries/lookup"),
+            (HttpMethod.Get, "/api/v1/beneficiaries/42/identity")
+        })
+        {
+            var organisation = Guid.NewGuid().ToString("D");
+            using var request = ClientRequest(method, path, organisation);
+            Assert.True(request.Headers.TryAddWithoutValidation("Cookie", "fixture=" + Guid.NewGuid().ToString("N")));
+            using var response = await host.Https.SendAsync(request);
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            Assert.True(response.Headers.CacheControl?.NoStore);
+            var received = host.Received[^1];
+            Assert.Equal(path, received.Path);
+            Assert.Equal(request.Headers.Authorization!.ToString(), received.Authorization);
+            Assert.Equal(organisation, received.Organisation);
+            Assert.Empty(received.Cookie);
+            Assert.Empty(received.ForwardedFor);
+        }
+    }
+
+    [Theory]
+    [InlineData("http://client.example.invalid")]
+    [InlineData("https://auth.example.invalid")]
+    [InlineData(Origin)]
+    [InlineData("https://client.example.invalid/another-path")]
+    public async Task Invalid_client_target_disables_only_client_routes(string target)
+    {
+        await using var host = await StartAsync(configure: values =>
+            values["GatewayBrowserTransport:ClientDownstreamOrigin"] = target);
+        Assert.DoesNotContain(host.Routes.Routes, route => route.Key?.StartsWith("GatewayClientTransport:") == true);
+        await AssertHealthAsync(host.Http, "/health/ready", HttpStatusCode.ServiceUnavailable);
+        using var request = ClientRequest(HttpMethod.Get, "/api/v1/beneficiaries/42/identity", Guid.NewGuid().ToString("D"));
+        using var unavailable = await host.Https.SendAsync(request);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, unavailable.StatusCode);
+        Assert.True(unavailable.Headers.CacheControl?.NoStore);
+        Assert.Empty(host.Received);
+        using var auth = await host.Https.GetAsync(CsrfPath);
+        Assert.Equal(HttpStatusCode.NoContent, auth.StatusCode);
+        Assert.Equal(CsrfPath, Assert.Single(host.Received).Path);
+    }
+
+    [Theory]
+    [InlineData("method", HttpStatusCode.NotFound)]
+    [InlineData("alias", HttpStatusCode.NotFound)]
+    [InlineData("query", HttpStatusCode.BadRequest)]
+    [InlineData("forwarding", HttpStatusCode.ServiceUnavailable)]
+    [InlineData("origin", HttpStatusCode.Forbidden)]
+    [InlineData("no-bearer", HttpStatusCode.Unauthorized)]
+    [InlineData("no-organisation", HttpStatusCode.Forbidden)]
+    [InlineData("duplicate-organisation", HttpStatusCode.Forbidden)]
+    public async Task Client_routes_refuse_invalid_method_path_or_authority_before_forwarding(string input, HttpStatusCode status)
+    {
+        await using var host = await StartAsync(configure: ConfigureClientTarget);
+        var path = input switch
+        {
+            "alias" => "/api/v1/beneficiaries/042/identity",
+            "query" => "/api/v1/beneficiaries/42/identity?filter=fixture",
+            _ => "/api/v1/beneficiaries/42/identity"
+        };
+        using var request = ClientRequest(input == "method" ? HttpMethod.Post : HttpMethod.Get, path, Guid.NewGuid().ToString("D"));
+        switch (input)
+        {
+            case "origin": request.Headers.TryAddWithoutValidation("Origin", "https://unapproved.example.invalid"); break;
+            case "forwarding": request.Headers.TryAddWithoutValidation("X-Original-For", "127.0.0.2"); break;
+            case "no-bearer": request.Headers.Authorization = null; break;
+            case "no-organisation": request.Headers.Remove("X-Organisation-Id"); break;
+            case "duplicate-organisation": request.Headers.TryAddWithoutValidation("X-Organisation-Id", Guid.NewGuid().ToString("D")); break;
+        }
+        using var response = await host.Https.SendAsync(request);
+        Assert.Equal(status, response.StatusCode);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        Assert.Empty(await response.Content.ReadAsStringAsync());
+        Assert.Empty(host.Received);
+    }
+
+    private static void ConfigureClientTarget(Dictionary<string, string?> values) =>
+        values["GatewayBrowserTransport:ClientDownstreamOrigin"] = "https://client.example.invalid:9443";
+
+    private static HttpRequestMessage ClientRequest(HttpMethod method, string path, string organisation)
+    {
+        var request = new HttpRequestMessage(method, path);
+        request.Headers.Authorization = new("Bearer", Guid.NewGuid().ToString("N"));
+        request.Headers.Add("X-Organisation-Id", organisation);
+        return request;
+    }
+
     private static async Task AssertHealthAsync(HttpClient client, string path, HttpStatusCode expected)
     {
         using var response = await client.GetAsync(path);
@@ -386,7 +502,8 @@ public sealed class GatewayLocalStackHealthTests
             }
             if (throwAtDestination) throw new InvalidOperationException("private destination details");
             received.Add(new Received(context.Request.Path.Value!, context.Request.Headers["X-Forwarded-For"].ToString(),
-                context.Request.Headers.Authorization.ToString()));
+                context.Request.Headers.Authorization.ToString(), context.Request.Headers["X-Organisation-Id"].ToString(),
+                context.Request.Headers.Cookie.ToString()));
             context.Response.StatusCode = StatusCodes.Status204NoContent;
             return Task.CompletedTask;
         });
@@ -480,7 +597,7 @@ public sealed class GatewayLocalStackHealthTests
         return values;
     }
 
-    private sealed record Received(string Path, string ForwardedFor, string Authorization);
+    private sealed record Received(string Path, string ForwardedFor, string Authorization, string Organisation, string Cookie);
 
     private sealed record Host(WebApplication App, FileConfiguration Routes, List<Received> Received,
         Certificates Certificates, HttpClient Http, HttpClient Https) : IAsyncDisposable
