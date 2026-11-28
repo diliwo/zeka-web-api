@@ -1,43 +1,64 @@
-# Zeka™ Web Api
+# Zeka Web API
 
-Zeka is an open source micro SaaS application.
-
-The API for Zeka is designed to handle client and case management via a scalable microservices architecture.
-
-## Tech stack
-
-- <strong>.NET Core</strong> - .NET Framework and .NET Core, including ASP.NET and ASP.NET Core
-- <strong>IdentityModel.Tokens</strong>  - Responsible for handling token-related operations for .NET Core
-- <strong>Authentication.JwtBearer</strong> - Integrates JWT authentication directly into the ASP.NET Core middleware pipeline
-- <strong>Ocelot</strong> - A toolkit for developing high-performance HTTP reverse proxy applications
-- <strong>FluentValidation</strong> - Popular .NET validation library for building strongly-typed validation rules
-- <strong>MediatR</strong> - Simple, unambitious mediator implementation in .NET
-- <strong>EF Core</strong> - Modern object-database mapper for .NET. It supports LINQ queries, change tracking, updates, and schema migrations
-- <strong>Serilog</strong> - Simple .NET logging with fully-structured events
-- <strong>helm</strong> - Best package manager to find, share, and use software built for Kubernetes
-- <strong>Kubernetes / AKS</strong> - The app is designed to run on Kubernetes (both locally on "Rancher Desktop" as well as on the cloud with AKS)
-- <strong>Istio</strong> - An open-source service mesh that provides traffic management, security, and observability for microservices in a Kubernetes environment.
-- <strong>RabbitMQ</strong> - An open-source message broker that enables applications to communicate asynchronously by sending and receiving messages through queues.
-- <strong>PostgreSQL</strong> - A powerful open-source relational database system known for its reliability, feature richness, and support for complex queries and data types.
-- <strong>Ocelot</strong> - An open-source API gateway for .NET that routes requests, handles authentication, and manages cross-cutting concerns in microservice architectures.  
+Zeka’s .NET 8 backend provides identity and organisation access, administrative records, and beneficiary support. The Ocelot gateway routes HTTP requests to three service APIs. The solution also includes shared libraries, tests, database tools and deployment files.
 
 ## Architecture
 
-![Zeka_archi](https://github.com/user-attachments/assets/30ff9b7a-72d5-4766-a4fe-3d37f1f94fff)
+```mermaid
+flowchart TB
+    Users["Browser and API clients"] --> Gateway["Ocelot API Gateway"]
+    Gateway --> Auth
+    Gateway --> Admin
+    Gateway --> Client
 
-## Private package restore
+    Auth["AuthManager<br/>Identity and organisation access"]
+    Admin["AdminAreaManagement<br/>Administrative records and staff"]
+    Client["ClientManagement<br/>Beneficiary dossiers and support cases"]
 
-`Zeka.Extensions.*` packages are restored from GitHub Packages. The tracked
-`nuget.config` contains package sources only; credentials must be injected at
-runtime through 1Password.
+    Admin -. Tenant access checks .-> Auth
+    Client -. Tenant access checks .-> Auth
+    Admin -->|Publishes staff changes| Broker["RabbitMQ"]
+    Broker -->|Delivers staff projection events| Client
 
-See [Private package restore](Docs/security/private-package-restore.md) for the
-one-time setup and restore command. Before committing package configuration,
-run `./scripts/security/check-nuget-credentials.sh`.
+    subgraph Storage["Service-owned PostgreSQL databases"]
+        AuthDb[(Auth database)]
+        AdminDb[(AdminArea database)]
+        ClientDb[(Client database)]
+    end
+    Auth --> AuthDb
+    Admin --> AdminDb
+    Client --> ClientDb
+```
 
-## Pull-request validation
+## Repository guides
 
-Pull requests targeting `develop` run the issue-scoped MVP validation workflow.
-See [MVP pull-request validation](Docs/ci/mvp-pr-validation.md) for the exact
-test projects, four-image Docker scope, fork policy, credential handling,
-reproducibility limits, Sonar prerequisites, and aggregate check behavior.
+| Area | What it covers |
+| --- | --- |
+| [Ocelot API Gateway](ApiGateways/Ocelot.ApiGateway/README.md) | HTTP routing, browser transport and gateway configuration. |
+| [AuthManager](Services/AuthManager/README.md) | Registration, browser sessions, token issuance, and organisation membership and permissions. |
+| [AdminAreaManagement](Services/AdminAreaManagement/README.md) | Teams, staff, partners and documents, schools, training, and administrative reference data. |
+| [ClientManagement](Services/ClientManagement/README.md) | Beneficiary lookup, dossiers, assessments, case assignments, interactions and follow-up actions. |
+| [Deployments](Deployments/README.md) | Local build helpers, Kubernetes manifests and the [standalone M1 Compose stack](Deployments/local-stack/README.md). |
+| [Database setup](Deployments/database/README.md) | PostgreSQL roles and conformance checks, with a separate [Auth migration guide](Services/AuthManager/AuthManager.Infrastructure/Migrations/README.md). |
+| [Owner provisioning](Tools/Zeka.AuthOwnerProvision/README.md) | The private Windows tool for first-administrator provisioning on the approved isolated stack. |
+| [C1 failure ratchet](scripts/ci/c1-ratchet/README.md) | CI comparison of named test results against the trusted baseline. |
+
+For local package restore and CI details, see [Private package restore](Docs/security/private-package-restore.md) and [MVP pull-request validation](Docs/ci/mvp-pr-validation.md).
+
+## Root files
+
+| File | Purpose |
+| --- | --- |
+| [`.dockerignore`](.dockerignore) | Excludes generated outputs, local environment files and other inputs from Docker build contexts. |
+| [`.gitignore`](.gitignore) | Keeps generated build outputs, editor files and selected local configuration out of Git. |
+| [`AGENTS.md`](AGENTS.md) | Sets repository engineering, architecture, security and verification rules. |
+| [`Directory.Build.props`](Directory.Build.props) | Selects the Linux x64 NuGet lockfile for restores using that runtime contract. |
+| [`LICENSE`](LICENSE) | Contains the GNU Affero General Public License, version 3. |
+| [`README.md`](README.md) | Explains the repository layout, architecture and root files. |
+| [`docker-compose.dcproj`](docker-compose.dcproj) | Defines the Visual Studio Linux Docker Compose project and its launch settings. |
+| [`docker-compose.override.yml`](docker-compose.override.yml) | Applies local environment and port overrides to the gateway in the root Compose stack. |
+| [`docker-compose.yml`](docker-compose.yml) | Defines the legacy root Compose stack with the gateway, RabbitMQ and PostgreSQL. |
+| [`global.json`](global.json) | Pins the .NET SDK version and roll-forward policy. |
+| [`launchSettings.json`](launchSettings.json) | Defines the solution-level Visual Studio Docker Compose launch profile. |
+| [`nuget.config`](nuget.config) | Declares NuGet.org and GitHub Packages as package sources. |
+| [`zeka-web-api.sln`](zeka-web-api.sln) | Groups the gateway, service, shared library, tooling and test projects, and the Compose project. |
